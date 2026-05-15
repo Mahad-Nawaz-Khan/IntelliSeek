@@ -27,7 +27,7 @@ export async function retrieveContext(
   const candidates = await loadStoredChunkVectors(userId);
   if (!candidates.length) return [];
 
-  const queryEmbedding = embedText(question);
+  const queryEmbedding = await embedText(question);
   return topKBySimilarity(queryEmbedding, candidates, limit);
 }
 

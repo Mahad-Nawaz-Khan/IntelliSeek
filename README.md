@@ -59,11 +59,14 @@ Create local environment files before starting the app. Use committed `.env.exam
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-supabase-publishable-key
-GROQ_API_KEY=your-groq-api-key
+SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_KEY=your-supabase-service-role-or-secret-key
+GROQ_API_KEY=your-groq-api-key
+OPENROUTER_API_KEY=your-openrouter-api-key
+OPENROUTER_EMBEDDING_MODEL=perplexity/pplx-embed-v1-0.6b
 ```
 
-Only `NEXT_PUBLIC_*` values are browser-readable. `GROQ_API_KEY` and `SUPABASE_SERVICE_KEY` are server-only and must only be read from API routes or server-side code.
+Only `NEXT_PUBLIC_*` values are browser-readable. `GROQ_API_KEY`, `OPENROUTER_API_KEY`, and `SUPABASE_SERVICE_KEY` are server-only and must only be read from API routes or server-side code.
 
 ## Start the app locally
 
@@ -81,7 +84,7 @@ The app runs at `http://localhost:3000`. Core chat and parsing calls use same-or
 Open `http://localhost:3000` and validate the user-facing flow for the feature you are working on. For retrieval features, confirm:
 
 - PDF, DOCX, PPTX, and TXT notes are parsed by the Vercel API route
-- JavaScript embeddings are generated and stored with chunks
+- OpenRouter embeddings are generated and stored with chunks
 - cosine similarity ranks relevant chunks
 - Top-K chunks are sent to Groq
 - answers include source citations when context exists
@@ -106,9 +109,11 @@ NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-supabase-publishable-key
 GROQ_API_KEY=your-groq-api-key
 SUPABASE_SERVICE_KEY=your-supabase-service-role-or-secret-key
+OPENROUTER_API_KEY=your-openrouter-api-key
+OPENROUTER_EMBEDDING_MODEL=perplexity/pplx-embed-v1-0.6b
 ```
 
-Never expose `GROQ_API_KEY` or `SUPABASE_SERVICE_KEY` as `NEXT_PUBLIC_` variables.
+Never expose `GROQ_API_KEY`, `OPENROUTER_API_KEY`, or `SUPABASE_SERVICE_KEY` as `NEXT_PUBLIC_` variables.
 
 ## Academic AI + DSA explanation
 

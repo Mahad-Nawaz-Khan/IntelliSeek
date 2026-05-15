@@ -108,7 +108,12 @@ export async function POST(request: Request) {
 
   if (documentError || !documentRows?.id) return failure(500, "Document metadata persistence failed");
 
-  const embeddings = embedTexts(chunks);
+  let embeddings: number[][];
+  try {
+    embeddings = await embedTexts(chunks);
+  } catch {
+    return failure(500, "Embedding generation failed");
+  }
   const chunkRows = chunks.map((chunk, index) => ({
     document_id: documentRows.id,
     text_content: chunk,

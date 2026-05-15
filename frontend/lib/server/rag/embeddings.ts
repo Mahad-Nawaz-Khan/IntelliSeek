@@ -1,39 +1,72 @@
-const EMBEDDING_DIMENSION = 384;
+import { getServerEnv } from "../env";
 
-function tokenize(text: string): string[] {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .split(/\s+/)
-    .filter(Boolean);
+const OPENROUTER_EMBEDDINGS_URL = "https://openrouter.ai/api/v1/embeddings";
+const DEFAULT_EMBEDDING_MODEL = "perplexity/pplx-embed-v1-0.6b";
+
+type OpenRouterEmbeddingResponse = {
+  data?: Array<{
+    embedding?: number[];
+    index?: number;
+  }>;
+};
+
+function getEmbeddingModel() {
+  return getServerEnv("OPENROUTER_EMBEDDING_MODEL") ?? DEFAULT_EMBEDDING_MODEL;
 }
 
-function hashToken(token: string): number {
-  let hash = 2166136261;
-  for (let index = 0; index < token.length; index += 1) {
-    hash ^= token.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
+function getOpenRouterApiKey() {
+  return getServerEnv("OPENROUTER_API_KEY");
+}
+
+function normalizeEmbeddingResponse(
+  data: OpenRouterEmbeddingResponse,
+  expectedCount: number,
+): number[][] {
+  const embeddings = data.data
+    ?.slice()
+    .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+    .map((item) => item.embedding)
+    .filter((embedding): embedding is number[] => Array.isArray(embedding));
+
+  if (!embeddings || embeddings.length !== expectedCount) {
+    throw new Error("Embedding provider returned an invalid response");
   }
-  return hash >>> 0;
+
+  return embeddings;
 }
 
-export function embedText(text: string): number[] {
-  const vector = Array.from({ length: EMBEDDING_DIMENSION }, () => 0);
-  const tokens = tokenize(text);
+export async function embedTexts(texts: string[]): Promise<number[][]> {
+  const inputs = texts.map((text) => text.trim()).filter(Boolean);
+  if (!inputs.length) return [];
 
-  for (const token of tokens) {
-    const hash = hashToken(token);
-    const position = hash % EMBEDDING_DIMENSION;
-    const sign = hash & 1 ? 1 : -1;
-    vector[position] += sign;
+  const apiKey = getOpenRouterApiKey();
+  if (!apiKey) {
+    throw new Error("OPENROUTER_API_KEY is not configured");
   }
 
-  const magnitude = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
-  if (!magnitude) return vector;
+  const response = await fetch(OPENROUTER_EMBEDDINGS_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: getEmbeddingModel(),
+      input: inputs,
+    }),
+  });
 
-  return vector.map((value) => value / magnitude);
+  if (!response.ok) {
+    throw new Error("Embedding generation failed");
+  }
+
+  return normalizeEmbeddingResponse(
+    (await response.json()) as OpenRouterEmbeddingResponse,
+    inputs.length,
+  );
 }
 
-export function embedTexts(texts: string[]): number[][] {
-  return texts.map(embedText);
+export async function embedText(text: string): Promise<number[]> {
+  const [embedding] = await embedTexts([text]);
+  return embedding;
 }
