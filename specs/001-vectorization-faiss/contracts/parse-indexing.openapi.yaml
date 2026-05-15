@@ -1,0 +1,135 @@
+openapi: 3.0.3
+info:
+  title: IntelliSeek Parse and Index Contract
+  version: 0.4.0
+  description: Contract for extending document parsing so uploaded documents are chunked, embedded, indexed, and mapped for later retrieval.
+paths:
+  /api/parse:
+    post:
+      summary: Parse an uploaded document and index its extracted text
+      operationId: parseAndIndexDocument
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ParseRequest'
+      responses:
+        '200':
+          description: Document parsed and indexed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParseIndexSuccess'
+        '400':
+          description: Invalid request, unsupported file, empty extracted text, or no indexable content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing user identity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Storage path does not belong to requesting user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Stored file not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Parsing, storage, embedding, or indexing failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  schemas:
+    ParseRequest:
+      type: object
+      required:
+        - storage_path
+        - filename
+        - file_type
+        - file_size
+        - user_id
+      properties:
+        storage_path:
+          type: string
+          minLength: 1
+          example: user-uuid/lecture.pdf
+        filename:
+          type: string
+          minLength: 1
+          example: lecture.pdf
+        file_type:
+          type: string
+          minLength: 1
+          example: application/pdf
+        file_size:
+          type: integer
+          minimum: 1
+          example: 524288
+        user_id:
+          type: string
+          format: uuid
+    ParseIndexSuccess:
+      type: object
+      required:
+        - ok
+        - status
+        - document_id
+        - filename
+        - text_preview
+        - chunks_created
+        - vectors_indexed
+        - index_total
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        status:
+          type: string
+          example: Document parsed and indexed successfully
+        document_id:
+          type: string
+          format: uuid
+        filename:
+          type: string
+        text_preview:
+          type: string
+        chunks_created:
+          type: integer
+          minimum: 0
+          description: Number of chunk rows inserted for this document.
+        vectors_indexed:
+          type: integer
+          minimum: 0
+          description: Number of vectors added to the local index for this document.
+        index_total:
+          type: integer
+          minimum: 0
+          description: Total vectors present after saving the local index.
+    ErrorResponse:
+      type: object
+      required:
+        - ok
+        - status
+        - error
+      properties:
+        ok:
+          type: boolean
+          enum: [false]
+        status:
+          type: string
+          example: Document parsing failed
+        error:
+          type: string

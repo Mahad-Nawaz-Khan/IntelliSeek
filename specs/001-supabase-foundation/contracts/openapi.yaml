@@ -1,0 +1,131 @@
+openapi: 3.1.0
+info:
+  title: IntelliSeek Supabase Foundation Contracts
+  version: 0.1.0
+  description: Diagnostic contracts for Phase 2 database connectivity.
+servers:
+  - url: http://localhost:8000
+    description: Local FastAPI backend
+paths:
+  /api/db-test:
+    get:
+      summary: Verify backend Supabase read/write connectivity
+      operationId: getDatabaseTest
+      tags:
+        - diagnostics
+      responses:
+        "200":
+          description: Supabase write and read-back succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatabaseTestSuccess"
+              example:
+                ok: true
+                status: Supabase database connection verified
+                record_id: 11111111-1111-1111-1111-111111111111
+                source: backend
+        "500":
+          description: Supabase connection or diagnostic operation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatabaseTestFailure"
+              example:
+                ok: false
+                status: Supabase database connection failed
+                source: backend
+                error: Missing Supabase configuration
+  /api/supabase-test:
+    get:
+      summary: Optional frontend-owned diagnostic route for Supabase public-client connectivity
+      operationId: getFrontendSupabaseTest
+      tags:
+        - diagnostics
+      servers:
+        - url: http://localhost:3000
+          description: Local Next.js frontend
+      responses:
+        "200":
+          description: Frontend Supabase client initialized and returned a success or permission-aware diagnostic result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FrontendSupabaseTestResult"
+              examples:
+                success:
+                  value:
+                    ok: true
+                    status: Supabase public client initialized
+                    source: frontend
+                permissionAwareFailure:
+                  value:
+                    ok: false
+                    status: Supabase public client initialized but access is restricted by policy
+                    source: frontend
+        "500":
+          description: Frontend Supabase public configuration is missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatabaseTestFailure"
+components:
+  schemas:
+    DatabaseTestSuccess:
+      type: object
+      required:
+        - ok
+        - status
+        - source
+        - record_id
+      properties:
+        ok:
+          type: boolean
+          const: true
+        status:
+          type: string
+        source:
+          type: string
+          enum:
+            - backend
+        record_id:
+          type: string
+          description: Identifier of the inserted and read-back diagnostic chat_history row.
+    DatabaseTestFailure:
+      type: object
+      required:
+        - ok
+        - status
+        - source
+      properties:
+        ok:
+          type: boolean
+          const: false
+        status:
+          type: string
+        source:
+          type: string
+          enum:
+            - backend
+            - frontend
+        error:
+          type: string
+          description: Sanitized error summary with no secret values.
+    FrontendSupabaseTestResult:
+      type: object
+      required:
+        - ok
+        - status
+        - source
+      properties:
+        ok:
+          type: boolean
+        status:
+          type: string
+        source:
+          type: string
+          enum:
+            - frontend
+        error:
+          type: string
+          description: Optional sanitized permission or configuration summary.

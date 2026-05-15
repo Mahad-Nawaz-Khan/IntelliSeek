@@ -1,0 +1,125 @@
+openapi: 3.0.3
+info:
+  title: IntelliSeek RAG Chat API
+  version: 0.1.0
+paths:
+  /api/chat:
+    post:
+      summary: Generate a cited answer from indexed academic documents
+      operationId: chatWithRagEngine
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+            examples:
+              basic:
+                value:
+                  question: Explain recursion
+                  user_id: user-123
+      responses:
+        '200':
+          description: Cited answer generated and logged successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+              examples:
+                success:
+                  value:
+                    ok: true
+                    answer: Recursion is a technique where a function calls itself to solve smaller versions of a problem. [Source: notes.pdf]
+                    sources:
+                      - document_id: doc-1
+                        filename: notes.pdf
+                        chunk_id: chunk-1
+                        chunk_index: 2
+        '400':
+          description: Invalid question or insufficient context
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                emptyQuestion:
+                  value:
+                    ok: false
+                    status: Chat request failed
+                    error: Question must not be empty
+                insufficientContext:
+                  value:
+                    ok: false
+                    status: Chat request failed
+                    error: No sufficient context found for this question
+        '500':
+          description: Retrieval, generation, or persistence failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                generationFailure:
+                  value:
+                    ok: false
+                    status: Chat request failed
+                    error: Answer generation failed
+components:
+  schemas:
+    ChatRequest:
+      type: object
+      required:
+        - question
+        - user_id
+      properties:
+        question:
+          type: string
+          minLength: 1
+        user_id:
+          type: string
+          minLength: 1
+    ChatResponse:
+      type: object
+      required:
+        - ok
+        - answer
+        - sources
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        answer:
+          type: string
+        sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceCitation'
+    SourceCitation:
+      type: object
+      required:
+        - document_id
+        - filename
+        - chunk_id
+      properties:
+        document_id:
+          type: string
+        filename:
+          type: string
+        chunk_id:
+          type: string
+        chunk_index:
+          type: integer
+    ErrorResponse:
+      type: object
+      required:
+        - ok
+        - status
+        - error
+      properties:
+        ok:
+          type: boolean
+          enum: [false]
+        status:
+          type: string
+        error:
+          type: string

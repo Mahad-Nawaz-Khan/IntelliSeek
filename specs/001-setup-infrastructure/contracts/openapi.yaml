@@ -1,0 +1,75 @@
+openapi: 3.1.0
+info:
+  title: IntelliSeek Phase 1 Local Service Contract
+  version: 0.1.0
+  description: Contracts for validating local frontend-to-backend communication during Phase 1.
+servers:
+  - url: http://localhost:8000
+    description: Local FastAPI backend
+  - url: http://localhost:3000
+    description: Local Next.js frontend
+paths:
+  /api/health:
+    get:
+      summary: Backend health check
+      description: Confirms the local IntelliSeek backend is running without requiring external credentials.
+      operationId: getBackendHealth
+      responses:
+        '200':
+          description: Backend is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+              examples:
+                healthy:
+                  value:
+                    status: IntelliSeek Backend is healthy
+  /api/test-backend:
+    get:
+      summary: Frontend backend connectivity check
+      description: Frontend-owned route that checks the local backend health endpoint and returns a displayable result.
+      operationId: testBackendFromFrontend
+      responses:
+        '200':
+          description: Backend health was checked successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackendTestResult'
+              examples:
+                healthy:
+                  value:
+                    status: IntelliSeek Backend is healthy
+                    ok: true
+        '503':
+          description: Backend is unavailable or returned an unexpected response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackendTestResult'
+              examples:
+                unavailable:
+                  value:
+                    status: Backend connection unavailable
+                    ok: false
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          const: IntelliSeek Backend is healthy
+    BackendTestResult:
+      type: object
+      required:
+        - status
+        - ok
+      properties:
+        status:
+          type: string
+        ok:
+          type: boolean

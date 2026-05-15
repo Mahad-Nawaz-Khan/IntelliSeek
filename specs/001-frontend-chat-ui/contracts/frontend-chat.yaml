@@ -1,0 +1,98 @@
+openapi: 3.1.0
+info:
+  title: Frontend Chat UI Consumed Contracts
+  version: 0.1.0
+  description: Contract consumed by the Phase 6 frontend chat UI. The backend endpoint already exists from Phase 5 and is not modified by this feature.
+paths:
+  /api/chat:
+    post:
+      summary: Submit one stateless academic chat question
+      operationId: submitChatQuestion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: Answer generated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatSuccessResponse'
+        '400':
+          description: Validation or no-context failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatErrorResponse'
+        '500':
+          description: Retrieval, generation, or persistence failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatErrorResponse'
+components:
+  schemas:
+    ChatRequest:
+      type: object
+      required:
+        - question
+        - user_id
+      properties:
+        question:
+          type: string
+          minLength: 1
+          description: One student question. Previous chat history must not be included.
+        user_id:
+          type: string
+          minLength: 1
+          description: Demo user identifier used for this frontend phase.
+    ChatSuccessResponse:
+      type: object
+      required:
+        - ok
+        - answer
+        - sources
+      properties:
+        ok:
+          type: boolean
+          const: true
+        answer:
+          type: string
+          minLength: 1
+        sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceCitation'
+    ChatErrorResponse:
+      type: object
+      required:
+        - ok
+        - status
+        - error
+      properties:
+        ok:
+          type: boolean
+          const: false
+        status:
+          type: string
+        error:
+          type: string
+    SourceCitation:
+      type: object
+      required:
+        - document_id
+        - filename
+        - chunk_id
+        - chunk_index
+      properties:
+        document_id:
+          type: string
+        filename:
+          type: string
+        chunk_id:
+          type: string
+        chunk_index:
+          type: integer

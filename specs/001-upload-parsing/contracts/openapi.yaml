@@ -1,0 +1,144 @@
+openapi: 3.0.3
+info:
+  title: IntelliSeek Upload Parsing API
+  version: 0.1.0
+  description: Contract for handing an uploaded Supabase Storage object to FastAPI for parsing and metadata persistence.
+paths:
+  /api/parse:
+    post:
+      summary: Parse an uploaded academic document
+      operationId: parseUploadedDocument
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ParseRequest'
+            examples:
+              pdf:
+                value:
+                  storage_path: users/11111111-1111-1111-1111-111111111111/1715600000000-notes.pdf
+                  filename: notes.pdf
+                  file_type: application/pdf
+                  file_size: 240000
+                  user_id: 11111111-1111-1111-1111-111111111111
+      responses:
+        '200':
+          description: Document parsed and metadata saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParseSuccess'
+              examples:
+                success:
+                  value:
+                    ok: true
+                    status: Document parsed successfully
+                    document_id: 22222222-2222-2222-2222-222222222222
+                    filename: notes.pdf
+                    text_preview: These are the first characters of the extracted notes...
+        '400':
+          description: Invalid parse request, unsupported file, oversized file, or unusable extracted text
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParseFailure'
+              examples:
+                unsupported:
+                  value:
+                    ok: false
+                    status: Document parsing failed
+                    error: Unsupported file type
+        '401':
+          description: Missing authenticated user identity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParseFailure'
+        '403':
+          description: Storage path does not belong to the supplied user identity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParseFailure'
+        '404':
+          description: Storage object was not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParseFailure'
+        '500':
+          description: Storage download, parser, cleanup, or database operation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParseFailure'
+components:
+  schemas:
+    ParseRequest:
+      type: object
+      required:
+        - storage_path
+        - filename
+        - file_type
+        - file_size
+        - user_id
+      properties:
+        storage_path:
+          type: string
+          minLength: 1
+        filename:
+          type: string
+          minLength: 1
+        file_type:
+          type: string
+          enum:
+            - application/pdf
+            - application/vnd.openxmlformats-officedocument.wordprocessingml.document
+            - application/vnd.openxmlformats-officedocument.presentationml.presentation
+            - text/plain
+            - pdf
+            - docx
+            - pptx
+            - txt
+        file_size:
+          type: integer
+          minimum: 1
+          maximum: 10485760
+        user_id:
+          type: string
+          minLength: 1
+    ParseSuccess:
+      type: object
+      required:
+        - ok
+        - status
+        - document_id
+        - filename
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        status:
+          type: string
+        document_id:
+          type: string
+        filename:
+          type: string
+        text_preview:
+          type: string
+          nullable: true
+    ParseFailure:
+      type: object
+      required:
+        - ok
+        - status
+        - error
+      properties:
+        ok:
+          type: boolean
+          enum: [false]
+        status:
+          type: string
+        error:
+          type: string
