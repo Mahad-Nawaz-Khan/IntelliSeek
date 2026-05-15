@@ -2,7 +2,7 @@ create extension if not exists "pgcrypto";
 
 create table if not exists public.documents (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid not null,
   filename text not null check (length(trim(filename)) > 0),
   file_type text not null check (file_type in ('application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'pdf', 'docx', 'txt', 'pptx')),
   file_size bigint not null check (file_size >= 0),
@@ -15,6 +15,7 @@ create table if not exists public.chunks (
   document_id uuid not null references public.documents(id) on delete cascade,
   text_content text not null check (length(trim(text_content)) > 0),
   chunk_index integer not null check (chunk_index >= 0),
+  embedding jsonb,
   created_at timestamptz not null default now(),
   unique (document_id, chunk_index)
 );
@@ -27,6 +28,9 @@ create table if not exists public.chat_history (
   sources_cited jsonb not null default '[]'::jsonb check (jsonb_typeof(sources_cited) = 'array'),
   created_at timestamptz not null default now()
 );
+
+alter table public.documents drop constraint if exists documents_user_id_fkey;
+alter table public.chunks add column if not exists embedding jsonb;
 
 create index if not exists documents_user_id_idx on public.documents(user_id);
 create index if not exists chunks_document_id_idx on public.chunks(document_id);
@@ -41,6 +45,13 @@ create policy "documents_select_own"
   on public.documents for select
   to authenticated
   using (auth.uid() = user_id);
+
+drop policy if exists "documents_service_manage_all" on public.documents;
+create policy "documents_service_manage_all"
+  on public.documents for all
+  to service_role
+  using (true)
+  with check (true);
 
 drop policy if exists "documents_insert_own" on public.documents;
 create policy "documents_insert_own"
@@ -73,6 +84,13 @@ create policy "chunks_select_own_document"
         and documents.user_id = auth.uid()
     )
   );
+
+drop policy if exists "chunks_service_manage_all" on public.chunks;
+create policy "chunks_service_manage_all"
+  on public.chunks for all
+  to service_role
+  using (true)
+  with check (true);
 
 drop policy if exists "chunks_insert_own_document" on public.chunks;
 create policy "chunks_insert_own_document"
@@ -174,6 +192,15 @@ create policy "academic_documents_authenticated_upload"
     and owner = auth.uid()
   );
 
+drop policy if exists "academic_documents_demo_upload" on storage.objects;
+create policy "academic_documents_demo_upload"
+  on storage.objects for insert
+  to anon
+  with check (
+    bucket_id = 'academic-documents'
+    and (storage.foldername(name))[1] = '00000000-0000-4000-8000-000000000001'
+  );
+
 drop policy if exists "academic_documents_authenticated_read" on storage.objects;
 create policy "academic_documents_authenticated_read"
   on storage.objects for select
@@ -186,4 +213,5 @@ create policy "academic_documents_authenticated_read"
 -- If public PDF rendering is required later, make that decision explicit before changing bucket.public or adding public read policies.
 -- Verification: confirm public.documents, public.chunks, public.chat_history exist and have RLS enabled.
 -- Verification: confirm public.chunks.document_id cascades to public.documents.id.
+-- Verification: confirm public.chunks.embedding exists for JavaScript vector storage.
 -- Verification: confirm storage bucket academic-documents exists with PDF, DOCX, TXT, and PPTX MIME types only.

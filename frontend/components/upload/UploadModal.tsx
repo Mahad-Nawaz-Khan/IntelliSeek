@@ -3,7 +3,6 @@
 import { X } from "lucide-react";
 import { useCallback, useState } from "react";
 
-import { getBackendUrl } from "../../lib/config";
 import { supabase } from "../../lib/supabase";
 import {
   ALLOWED_MIME_TYPES,
@@ -65,12 +64,7 @@ export function UploadModal({ isOpen, onClose }: UploadModalProps) {
       return;
     }
 
-    const { data: userData, error: userError } = await supabase.auth.getUser();
-    const userId = userData.user?.id;
-    if (userError || !userId) {
-      setItem({ ...baseItem, status: "failed", errorMessage: "You must be signed in before uploading documents" });
-      return;
-    }
+    const userId = "00000000-0000-4000-8000-000000000001";
 
     const timestamp = Date.now();
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -89,7 +83,7 @@ export function UploadModal({ isOpen, onClose }: UploadModalProps) {
     setItem({ ...baseItem, progress: 78, status: "indexing" });
     try {
       const ext = getExtension(file.name) as AllowedExtension;
-      const response = await fetch(getBackendUrl("/api/parse"), {
+      const response = await fetch("/api/parse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

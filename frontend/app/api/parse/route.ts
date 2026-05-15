@@ -1,0 +1,136 @@
+import { ALLOWED_MIME_TYPES, BUCKET_NAME, getExtension, MAX_FILE_SIZE, type AllowedExtension } from "../../../lib/upload-config";
+import { DEMO_USER_ID } from "../../../lib/server/env";
+import { chunkText } from "../../../lib/server/rag/chunker";
+import { embedTexts } from "../../../lib/server/rag/embeddings";
+import { extractTextFromBuffer } from "../../../lib/server/rag/parser";
+import { getSupabaseServiceClient } from "../../../lib/server/supabase";
+
+export const runtime = "nodejs";
+
+type ParseRequestBody = {
+  storage_path?: unknown;
+  filename?: unknown;
+  file_type?: unknown;
+  file_size?: unknown;
+  user_id?: unknown;
+};
+
+function failure(status: number, error: string) {
+  return Response.json(
+    { ok: false, status: "Document parsing failed", error },
+    { status },
+  );
+}
+
+function validateBody(body: ParseRequestBody) {
+  if (typeof body.storage_path !== "string" || !body.storage_path.trim()) {
+    return "Missing storage path";
+  }
+  if (typeof body.filename !== "string" || !body.filename.trim()) {
+    return "Missing filename";
+  }
+  if (typeof body.file_type !== "string" || !body.file_type.trim()) {
+    return "Missing MIME type";
+  }
+  if (typeof body.file_size !== "number" || body.file_size <= 0 || body.file_size > MAX_FILE_SIZE) {
+    return `Invalid file size: ${String(body.file_size)}`;
+  }
+
+  const normalizedPath = body.storage_path.replace(/\\/g, "/");
+  if (normalizedPath.startsWith("/") || normalizedPath.split("/").includes("..")) {
+    return "Malformed storage path";
+  }
+
+  const extension = getExtension(body.filename) as AllowedExtension;
+  if (!(extension in ALLOWED_MIME_TYPES)) {
+    return `Unsupported file type: ${extension || "none"}`;
+  }
+  if (body.file_type !== ALLOWED_MIME_TYPES[extension]) {
+    return "File extension and MIME type do not match";
+  }
+  if (!normalizedPath.endsWith(body.filename.replace(/[^a-zA-Z0-9._-]/g, "_"))) {
+    return "Filename does not match storage path";
+  }
+
+  return null;
+}
+
+export async function POST(request: Request) {
+  let body: ParseRequestBody;
+
+  try {
+    body = (await request.json()) as ParseRequestBody;
+  } catch {
+    return failure(400, "Invalid JSON request body");
+  }
+
+  const validationError = validateBody(body);
+  if (validationError) return failure(400, validationError);
+
+  const supabase = getSupabaseServiceClient();
+  if (!supabase) return failure(500, "Supabase service client is not configured");
+
+  const storagePath = (body.storage_path as string).replace(/\\/g, "/");
+  const filename = body.filename as string;
+  const fileType = body.file_type as string;
+  const fileSize = body.file_size as number;
+  const userId = typeof body.user_id === "string" && body.user_id.trim()
+    ? body.user_id.trim()
+    : DEMO_USER_ID;
+
+  const { data: fileData, error: downloadError } = await supabase.storage
+    .from(BUCKET_NAME)
+    .download(storagePath);
+
+  if (downloadError || !fileData) return failure(404, "Stored file not found");
+
+  let extracted: string;
+  try {
+    extracted = await extractTextFromBuffer(await fileData.arrayBuffer(), filename, fileType);
+  } catch (error) {
+    return failure(400, error instanceof Error ? error.message : "Could not parse file");
+  }
+
+  const chunks = chunkText(extracted);
+  if (!chunks.length) return failure(400, "Extracted text has no indexable content");
+
+  const { data: documentRows, error: documentError } = await supabase
+    .from("documents")
+    .insert({
+      user_id: userId,
+      filename,
+      file_type: fileType,
+      file_size: fileSize,
+      storage_path: storagePath,
+    })
+    .select("id")
+    .single();
+
+  if (documentError || !documentRows?.id) return failure(500, "Document metadata persistence failed");
+
+  const embeddings = embedTexts(chunks);
+  const chunkRows = chunks.map((chunk, index) => ({
+    document_id: documentRows.id,
+    text_content: chunk,
+    chunk_index: index,
+    embedding: embeddings[index],
+  }));
+
+  const { data: insertedChunks, error: chunkError } = await supabase
+    .from("chunks")
+    .insert(chunkRows)
+    .select("id");
+
+  if (chunkError) return failure(500, "Chunk persistence failed");
+
+  return Response.json({
+    ok: true,
+    status: "Document parsed and indexed successfully",
+    document_id: documentRows.id,
+    filename,
+    text_preview: extracted.slice(0, 100),
+    chunks_created: chunks.length,
+    vectors_indexed: insertedChunks?.length ?? chunks.length,
+    index_total: insertedChunks?.length ?? chunks.length,
+  });
+}

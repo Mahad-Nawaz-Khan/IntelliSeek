@@ -1,5 +1,3 @@
-import { getBackendUrl } from "./config";
-
 export type SourceCitation = {
   document_id: string;
   filename: string;
@@ -34,7 +32,7 @@ type ChatErrorResponse = {
   error?: string;
 };
 
-const CHAT_ENDPOINT = getBackendUrl("/api/chat");
+const CHAT_ENDPOINT = "/api/chat";
 
 export async function submitChatQuestion(
   question: string,

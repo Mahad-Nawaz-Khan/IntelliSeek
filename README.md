@@ -74,14 +74,14 @@ npm --prefix frontend install
 npm --prefix frontend run dev
 ```
 
-The app runs at `http://localhost:3000`.
+The app runs at `http://localhost:3000`. Core chat and parsing calls use same-origin Next.js API routes under `/api/*`; `NEXT_PUBLIC_BACKEND_URL`, Railway, Python, and FAISS are not required for the governed runtime.
 
 ## Verify locally
 
 Open `http://localhost:3000` and validate the user-facing flow for the feature you are working on. For retrieval features, confirm:
 
-- documents or built-in notes are chunked
-- embeddings are generated
+- PDF, DOCX, PPTX, and TXT notes are parsed by the Vercel API route
+- JavaScript embeddings are generated and stored with chunks
 - cosine similarity ranks relevant chunks
 - Top-K chunks are sent to Groq
 - answers include source citations when context exists
