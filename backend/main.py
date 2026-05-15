@@ -27,8 +27,17 @@ load_dotenv()
 
 
 def get_cors_origins() -> list[str]:
-    origins = os.getenv("CORS_ORIGINS", "http://localhost:3000")
-    return [origin.strip() for origin in origins.split(",") if origin.strip()]
+    configured_origins = os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:3000,https://intelliseek-ai.vercel.app",
+    )
+    origins = {
+        origin.strip().rstrip("/")
+        for origin in configured_origins.split(",")
+        if origin.strip()
+    }
+    origins.add("https://intelliseek-ai.vercel.app")
+    return sorted(origins)
 
 
 app = FastAPI(title="IntelliSeek Backend")
