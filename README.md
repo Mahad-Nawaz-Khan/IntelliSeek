@@ -19,24 +19,26 @@ Keep frontend and backend code inside their own folders. Do not place backend-on
 
 ## Environment placeholders
 
-Create local placeholder files before starting the services.
+Create local environment files before starting the services. Use the committed `.env.example` files as templates and do not commit real secrets.
 
 `frontend/.env.local`:
 
 ```env
-NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
+NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-supabase-publishable-key
 ```
 
 `backend/.env`:
 
 ```env
-SUPABASE_URL=your-supabase-url
-SUPABASE_SERVICE_KEY=your-supabase-service-key
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_KEY=your-supabase-service-role-or-secret-key
 GROQ_API_KEY=your-groq-api-key
+CORS_ORIGINS=http://localhost:3000
 ```
 
-Use placeholders only for Phase 1. Do not commit real secrets.
+`SUPABASE_SERVICE_KEY` is server-only. Never add it to `frontend/.env.local` or Vercel public environment variables.
 
 ## Start the backend
 
@@ -91,3 +93,63 @@ Expected healthy response:
 ```
 
 If the backend is stopped, the frontend should show a clear unavailable state.
+
+## Deployment: Railway backend + Vercel frontend
+
+Deploy the backend first so the frontend has a public API URL to call.
+
+### Railway backend
+
+Create a Railway service from this repository and configure it as a Python service.
+
+Recommended Railway settings:
+
+```text
+Root directory: backend
+Start command: uvicorn main:app --host 0.0.0.0 --port $PORT
+```
+
+Set these Railway environment variables:
+
+```env
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_KEY=your-supabase-service-role-or-secret-key
+GROQ_API_KEY=your-groq-api-key
+CORS_ORIGINS=http://localhost:3000,https://your-vercel-app.vercel.app
+```
+
+After deployment, verify the backend health endpoint:
+
+```bash
+curl https://your-railway-backend.up.railway.app/api/health
+```
+
+Expected response:
+
+```json
+{"status":"IntelliSeek Backend is healthy"}
+```
+
+### Vercel frontend
+
+Create a Vercel project from this repository.
+
+Recommended Vercel settings:
+
+```text
+Root directory: frontend
+Build command: npm run build
+Install command: npm install
+```
+
+Set these Vercel environment variables:
+
+```env
+NEXT_PUBLIC_BACKEND_URL=https://your-railway-backend.up.railway.app
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-supabase-publishable-key
+```
+
+After Vercel gives you the production URL, add that URL to Railway `CORS_ORIGINS`, redeploy/restart the backend if needed, and test chat plus upload from the Vercel site.
+
+Do not deploy the FastAPI backend to Vercel serverless as-is. It uses FAISS local files, document parsing, and Python ML dependencies that need a persistent backend runtime.

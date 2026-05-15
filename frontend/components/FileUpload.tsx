@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 
+import { getBackendUrl } from "../lib/config";
 import { supabase } from "../lib/supabase";
 import {
   ALLOWED_MIME_TYPES,
@@ -93,7 +94,7 @@ export function FileUpload() {
       setStatus("parsing");
       try {
         const ext = getExtension(file.name) as AllowedExtension;
-        const response = await fetch("http://localhost:8000/api/parse", {
+        const response = await fetch(getBackendUrl("/api/parse"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

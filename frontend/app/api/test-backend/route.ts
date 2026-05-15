@@ -1,4 +1,6 @@
-const BACKEND_HEALTH_URL = "http://localhost:8000/api/health";
+import { getBackendUrl } from "../../../lib/config";
+
+const BACKEND_HEALTH_URL = getBackendUrl("/api/health");
 const HEALTHY_STATUS = "IntelliSeek Backend is healthy";
 
 export async function GET() {
