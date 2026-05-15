@@ -1,17 +1,17 @@
 import { createClient } from "@supabase/supabase-js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabasePublishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
 export function hasSupabasePublicConfig() {
   return Boolean(
     supabaseUrl &&
-      supabasePublishableKey &&
+      supabaseAnonKey &&
       supabaseUrl !== "your-supabase-url" &&
-      supabasePublishableKey !== "your-supabase-publishable-key",
+      supabaseAnonKey !== "your-supabase-anon-key",
   );
 }
 
 export const supabase = hasSupabasePublicConfig()
-  ? createClient(supabaseUrl!, supabasePublishableKey!)
+  ? createClient(supabaseUrl!, supabaseAnonKey!)
   : null;

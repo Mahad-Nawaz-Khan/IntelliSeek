@@ -1,136 +1,93 @@
 # IntelliSeek
 
-IntelliSeek is a two-service academic assistant foundation with a Next.js frontend and a FastAPI backend.
+IntelliSeek is a Vercel-deployable academic assistant foundation built with Next.js, Tailwind CSS, JavaScript-compatible retrieval, and Groq-powered answer generation.
+
+## Governed architecture
+
+The current project constitution targets a Vercel-only architecture:
+
+```text
+Next.js app
+  → API route
+  → document parsing
+  → chunking
+  → embedding generation
+  → JSON or Supabase vector store
+  → cosine similarity search
+  → Top-K context selection
+  → Groq LLM
+  → cited AI response
+```
+
+Core technology choices:
+
+| Layer | Technology |
+|---|---|
+| Frontend | Next.js App Router |
+| Backend | Next.js API routes |
+| Styling | Tailwind CSS |
+| AI generation | Groq API |
+| Embeddings | JavaScript-compatible local/API embeddings |
+| Search | Cosine similarity and Top-K retrieval |
+| Storage | JSON artifacts and/or Supabase |
+| Deployment | Vercel |
+
+Python, FastAPI, FAISS, Railway, Docker, and separate backend services are no longer part of the governed target architecture. Legacy files may remain during migration, but new core work should move backend behavior into Next.js API routes.
 
 ## Project structure
 
 ```text
-frontend/  # Next.js App Router application
-backend/   # FastAPI service
+frontend/  # Vercel-hosted Next.js application, API routes, UI, retrieval helpers
+backend/   # Legacy FastAPI implementation retained only until migration is complete
 ```
 
-Keep frontend and backend code inside their own folders. Do not place backend-only secrets or Python service code in `frontend/`, and do not place frontend UI code in `backend/`.
+Keep server-only secrets out of client components and public environment variables.
 
 ## Prerequisites
 
-- Node.js for the frontend service
-- Python 3.10+ for the backend service
-- `pip` or `uv` for Python dependency installation
+- Node.js for the Next.js app
+- npm for dependency installation
+- A Groq API key for answer generation
+- Supabase project values if using Supabase for storage or metadata
 
 ## Environment placeholders
 
-Create local environment files before starting the services. Use the committed `.env.example` files as templates and do not commit real secrets.
+Create local environment files before starting the app. Use committed `.env.example` files as templates when present and do not commit real secrets.
 
 `frontend/.env.local`:
 
 ```env
-NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-supabase-publishable-key
-```
-
-`backend/.env`:
-
-```env
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_SERVICE_KEY=your-supabase-service-role-or-secret-key
 GROQ_API_KEY=your-groq-api-key
-CORS_ORIGINS=http://localhost:3000
-```
-
-`SUPABASE_SERVICE_KEY` is server-only. Never add it to `frontend/.env.local` or Vercel public environment variables.
-
-## Start the backend
-
-From `backend/`:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn main:app --reload
-```
-
-The backend runs at `http://localhost:8000`.
-
-Health check:
-
-```bash
-curl http://localhost:8000/api/health
-```
-
-Expected response:
-
-```json
-{"status":"IntelliSeek Backend is healthy"}
-```
-
-## Start the frontend
-
-From `frontend/`:
-
-```bash
-npm install
-npm run dev
-```
-
-The frontend runs at `http://localhost:3000`.
-
-## Verify service communication
-
-With both services running, open `http://localhost:3000`. The landing page should show that the frontend is running and display the backend health result.
-
-You can also verify the frontend-owned backend test route:
-
-```bash
-curl http://localhost:3000/api/test-backend
-```
-
-Expected healthy response:
-
-```json
-{"status":"IntelliSeek Backend is healthy","ok":true}
-```
-
-If the backend is stopped, the frontend should show a clear unavailable state.
-
-## Deployment: Railway backend + Vercel frontend
-
-Deploy the backend first so the frontend has a public API URL to call.
-
-### Railway backend
-
-Create a Railway service from this repository and configure it as a Python service.
-
-Recommended Railway settings:
-
-```text
-Root directory: backend
-Start command: uvicorn main:app --host 0.0.0.0 --port $PORT
-```
-
-Set these Railway environment variables:
-
-```env
-SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_KEY=your-supabase-service-role-or-secret-key
-GROQ_API_KEY=your-groq-api-key
-CORS_ORIGINS=http://localhost:3000,https://your-vercel-app.vercel.app
 ```
 
-After deployment, verify the backend health endpoint:
+Only `NEXT_PUBLIC_*` values are browser-readable. `GROQ_API_KEY` and `SUPABASE_SERVICE_KEY` are server-only and must only be read from API routes or server-side code.
+
+## Start the app locally
+
+From the repository root:
 
 ```bash
-curl https://your-railway-backend.up.railway.app/api/health
+npm --prefix frontend install
+npm --prefix frontend run dev
 ```
 
-Expected response:
+The app runs at `http://localhost:3000`.
 
-```json
-{"status":"IntelliSeek Backend is healthy"}
-```
+## Verify locally
 
-### Vercel frontend
+Open `http://localhost:3000` and validate the user-facing flow for the feature you are working on. For retrieval features, confirm:
+
+- documents or built-in notes are chunked
+- embeddings are generated
+- cosine similarity ranks relevant chunks
+- Top-K chunks are sent to Groq
+- answers include source citations when context exists
+- missing-context and provider-error paths are clear
+
+## Deployment: Vercel
 
 Create a Vercel project from this repository.
 
@@ -142,14 +99,26 @@ Build command: npm run build
 Install command: npm install
 ```
 
-Set these Vercel environment variables:
+Set Vercel environment variables according to the features currently enabled:
 
 ```env
-NEXT_PUBLIC_BACKEND_URL=https://your-railway-backend.up.railway.app
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-supabase-publishable-key
+GROQ_API_KEY=your-groq-api-key
+SUPABASE_SERVICE_KEY=your-supabase-service-role-or-secret-key
 ```
 
-After Vercel gives you the production URL, add that URL to Railway `CORS_ORIGINS`, redeploy/restart the backend if needed, and test chat plus upload from the Vercel site.
+Never expose `GROQ_API_KEY` or `SUPABASE_SERVICE_KEY` as `NEXT_PUBLIC_` variables.
 
-Do not deploy the FastAPI backend to Vercel serverless as-is. It uses FAISS local files, document parsing, and Python ML dependencies that need a persistent backend runtime.
+## Academic AI + DSA explanation
+
+IntelliSeek combines DSA and AI in one RAG pipeline:
+
+- DSA handles chunk organization, metadata lookup, vector comparison, similarity ranking, and Top-K retrieval.
+- AI handles embeddings, semantic understanding, and Groq LLM answer generation.
+
+Viva-safe summary:
+
+> DSA concepts are used for indexing, searching, ranking, and retrieval optimization, while AI concepts are used for semantic understanding, embeddings, and contextual answer generation.
+
+Only claim Trie/autocomplete if that feature is actually implemented in the current code.

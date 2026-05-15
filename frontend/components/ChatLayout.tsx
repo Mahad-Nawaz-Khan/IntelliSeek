@@ -1,31 +1,132 @@
 "use client";
 
-import { BookOpen, Database, GraduationCap, PanelLeft } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { ChatInput } from "./ChatInput";
-import { FileUpload } from "./FileUpload";
-import { MessageBubble } from "./MessageBubble";
-import { SuggestedQueries } from "./SuggestedQueries";
+import { AcademicWorkspace } from "./chat/AcademicWorkspace";
+import { ChatComposer } from "./chat/ChatComposer";
+import { ChatHeader } from "./chat/ChatHeader";
+import { ChatMessage } from "./chat/ChatMessage";
+import { ChatWelcome } from "./chat/ChatWelcome";
+import { SUGGESTIONS } from "./SuggestedQueries";
+import { UploadModal } from "./upload/UploadModal";
 import { hasSupabasePublicConfig, supabase } from "../lib/supabase";
-import { type ChatMessage, submitChatQuestion } from "../lib/chat-api";
+import { type ChatMessage as ChatMessageType, submitChatQuestion } from "../lib/chat-api";
+import type { AutocompleteSuggestion } from "../lib/trie-autocomplete";
+import {
+  createRecentChats,
+  createSourceGroups,
+  getFileType,
+  type KnowledgeSource,
+  type RetrievalMatch,
+  type RetrievalStatus,
+} from "../lib/ui-state";
 
 const DEMO_USER_ID = "demo-user";
 
-type KnowledgeSource = {
+type SupabaseKnowledgeSource = {
   id: string;
   filename: string;
   created_at?: string;
 };
 
+function toAutocompleteId(input: string) {
+  return input.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+function toUploadedSource(source: SupabaseKnowledgeSource): KnowledgeSource {
+  return {
+    id: source.id,
+    filename: source.filename,
+    sourceType: "uploaded",
+    fileType: getFileType(source.filename),
+    status: "indexed",
+    createdAt: source.created_at,
+  };
+}
+
+function toRetrievalMatches(messages: ChatMessageType[]): RetrievalMatch[] {
+  const latestAssistant = [...messages]
+    .reverse()
+    .find((message) => message.role === "assistant" && message.sources?.length);
+
+  return (latestAssistant?.sources ?? []).slice(0, 3).map((source) => ({
+    id: `${source.document_id}-${source.chunk_id}`,
+    sourceId: source.document_id,
+    filename: source.filename,
+    locator: `Chunk ${source.chunk_index}`,
+    snippet: source.chunk_id,
+    scoreLabel: "Retrieved match",
+  }));
+}
+
 export function ChatLayout() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [sources, setSources] = useState<KnowledgeSource[]>([]);
   const [sourceStatus, setSourceStatus] = useState<"loading" | "ready" | "empty" | "unavailable">(
     "loading",
   );
+  const [isUploadOpen, setIsUploadOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const revealIntervalsRef = useRef<Map<string, number>>(new Map());
+
+  const sourceGroups = useMemo(() => createSourceGroups(sources), [sources]);
+  const recentChats = useMemo(() => createRecentChats(messages), [messages]);
+  const retrievalMatches = useMemo(() => toRetrievalMatches(messages), [messages]);
+  const retrievalStatus = useMemo<RetrievalStatus>(() => {
+    if (isLoading) {
+      return {
+        state: "retrieving",
+        message: "Retrieving relevant sources...",
+        matches: sources.slice(0, 3).map((source) => ({
+          id: source.id,
+          sourceId: source.id,
+          filename: source.filename,
+          locator: source.fileType?.toUpperCase(),
+          snippet: source.summary,
+        })),
+      };
+    }
+
+    return { state: "complete", message: "Sources ready", matches: retrievalMatches };
+  }, [isLoading, retrievalMatches, sources]);
+
+  const autocompleteSuggestions = useMemo<AutocompleteSuggestion[]>(() => {
+    const promptSuggestions = SUGGESTIONS.map((suggestion) => ({
+      id: `prompt-${toAutocompleteId(suggestion)}`,
+      label: suggestion,
+      value: suggestion,
+      type: "prompt" as const,
+    }));
+
+    const documentSuggestions = sources.flatMap((source) => {
+      const filename = source.filename.trim();
+      if (!filename) return [];
+
+      return [
+        `Summarize ${filename}`,
+        `What topics are covered in ${filename}?`,
+        `Explain key concepts from ${filename}`,
+      ].map((question) => ({
+        id: `document-${source.id}-${toAutocompleteId(question)}`,
+        label: question,
+        value: question,
+        type: "document" as const,
+      }));
+    });
+
+    const historySuggestions = messages
+      .filter((message) => message.role === "user")
+      .slice(-5)
+      .map((message) => ({
+        id: `history-${message.id}`,
+        label: message.content,
+        value: message.content,
+        type: "history" as const,
+      }));
+
+    return [...promptSuggestions, ...documentSuggestions, ...historySuggestions];
+  }, [messages, sources]);
 
   useEffect(() => {
     let active = true;
@@ -50,7 +151,7 @@ export function ChatLayout() {
           return;
         }
 
-        const rows = (data ?? []) as KnowledgeSource[];
+        const rows = ((data ?? []) as SupabaseKnowledgeSource[]).map(toUploadedSource);
         setSources(rows);
         setSourceStatus(rows.length ? "ready" : "empty");
       } catch {
@@ -69,7 +170,18 @@ export function ChatLayout() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  useEffect(() => {
+    const intervals = revealIntervalsRef.current;
+    return () => {
+      intervals.forEach((interval) => window.clearInterval(interval));
+      intervals.clear();
+    };
+  }, []);
+
   const revealAnswer = useCallback((messageId: string, answer: string) => {
+    const existingInterval = revealIntervalsRef.current.get(messageId);
+    if (existingInterval) window.clearInterval(existingInterval);
+
     let index = 0;
     const step = Math.max(2, Math.ceil(answer.length / 90));
 
@@ -85,6 +197,7 @@ export function ChatLayout() {
 
       if (index >= answer.length) {
         window.clearInterval(interval);
+        revealIntervalsRef.current.delete(messageId);
         setMessages((current) =>
           current.map((message) =>
             message.id === messageId
@@ -94,6 +207,8 @@ export function ChatLayout() {
         );
       }
     }, 18);
+
+    revealIntervalsRef.current.set(messageId, interval);
   }, []);
 
   const handleSubmit = useCallback(
@@ -102,7 +217,7 @@ export function ChatLayout() {
       if (!trimmedQuestion || isLoading) return;
 
       const now = Date.now();
-      const userMessage: ChatMessage = {
+      const userMessage: ChatMessageType = {
         id: `user-${now}`,
         role: "user",
         content: trimmedQuestion,
@@ -110,7 +225,7 @@ export function ChatLayout() {
         createdAt: now,
       };
       const assistantId = `assistant-${now}`;
-      const assistantPlaceholder: ChatMessage = {
+      const assistantPlaceholder: ChatMessageType = {
         id: assistantId,
         role: "assistant",
         content: "",
@@ -158,73 +273,34 @@ export function ChatLayout() {
     [isLoading, revealAnswer],
   );
 
+  const handleNewChat = useCallback(() => {
+    revealIntervalsRef.current.forEach((interval) => window.clearInterval(interval));
+    revealIntervalsRef.current.clear();
+    setMessages([]);
+  }, []);
+
   return (
-    <main className="min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,#164e63_0%,transparent_32%),linear-gradient(135deg,#020617_0%,#0f172a_45%,#111827_100%)] text-slate-100">
-      <div className="flex min-h-screen flex-col gap-4 p-4 lg:flex-row lg:p-6">
-        <aside className="flex w-full flex-col gap-4 rounded-[2rem] border border-white/10 bg-slate-950/55 p-4 shadow-2xl shadow-slate-950/40 backdrop-blur-xl lg:max-h-[calc(100vh-3rem)] lg:w-96 lg:overflow-y-auto">
-          <header className="rounded-3xl border border-cyan-300/15 bg-cyan-300/10 p-5">
-            <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-cyan-300 text-slate-950">
-                <GraduationCap className="h-6 w-6" />
-              </div>
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-200">
-                  IntelliSeek
-                </p>
-                <h1 className="text-xl font-semibold text-white">Academic AI Assistant</h1>
-              </div>
-            </div>
-            <p className="mt-4 text-sm leading-6 text-slate-300">
-              Ask grounded questions over your uploaded notes, slides, PDFs, and text files.
-            </p>
-          </header>
-
-          <section className="rounded-3xl border border-white/10 bg-white/5 p-4 backdrop-blur-md">
-            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-200">
-              <PanelLeft className="h-4 w-4 text-cyan-200" />
-              Upload material
-            </div>
-            <FileUpload />
-          </section>
-
-          <section className="rounded-3xl border border-white/10 bg-white/5 p-4 backdrop-blur-md">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-sm font-semibold text-slate-200">
-                <Database className="h-4 w-4 text-cyan-200" />
-                Knowledge sources
-              </div>
-              <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs text-slate-400">
-                {sources.length}
-              </span>
-            </div>
-            <SourceList status={sourceStatus} sources={sources} />
-          </section>
-        </aside>
-
-        <section className="flex min-h-[70vh] flex-1 flex-col rounded-[2rem] border border-white/10 bg-slate-950/45 shadow-2xl shadow-slate-950/40 backdrop-blur-xl lg:max-h-[calc(100vh-3rem)]">
-          <header className="border-b border-white/10 px-6 py-5">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-200">
-                <BookOpen className="h-5 w-5" />
-              </div>
-              <div>
-                <h2 className="text-lg font-semibold text-white">Chat with your sources</h2>
-                <p className="text-sm text-slate-400">
-                  Stateless questions, cited answers, and local session history.
-                </p>
-              </div>
-            </div>
-          </header>
-
-          <div className="flex-1 overflow-y-auto px-4 py-6 sm:px-6">
+    <AcademicWorkspace
+      groups={sourceGroups}
+      recentChats={recentChats}
+      sourceStatus={sourceStatus}
+      onNewChat={handleNewChat}
+    >
+      <ChatHeader onOpenUpload={() => setIsUploadOpen(true)} />
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6">
             {messages.length === 0 ? (
-              <div className="flex min-h-full items-center justify-center py-16">
-                <SuggestedQueries disabled={isLoading} onSelect={handleSubmit} />
-              </div>
+              <ChatWelcome disabled={isLoading} onSelect={handleSubmit} />
             ) : (
-              <div className="space-y-5">
+              <div className="mx-auto max-w-5xl space-y-5">
+                {isLoading && retrievalStatus.matches?.length ? (
+                  <div className="rounded-2xl border border-cyan-300/15 bg-cyan-300/8 p-3 text-sm text-cyan-50">
+                    Retrieving relevant sources...
+                  </div>
+                ) : null}
                 {messages.map((message) => (
-                  <MessageBubble key={message.id} message={message} />
+                  <ChatMessage key={message.id} message={message} />
                 ))}
                 <div ref={bottomRef} />
               </div>
@@ -232,47 +308,16 @@ export function ChatLayout() {
           </div>
 
           <div className="border-t border-white/10 p-4 sm:p-6">
-            <ChatInput disabled={isLoading} onSubmit={handleSubmit} />
+            <ChatComposer
+              autocompleteSuggestions={autocompleteSuggestions}
+              disabled={isLoading}
+              onOpenUpload={() => setIsUploadOpen(true)}
+              onSubmit={handleSubmit}
+            />
           </div>
-        </section>
+        </div>
       </div>
-    </main>
-  );
-}
-
-type SourceListProps = {
-  status: "loading" | "ready" | "empty" | "unavailable";
-  sources: KnowledgeSource[];
-};
-
-function SourceList({ status, sources }: SourceListProps) {
-  if (status === "loading") {
-    return <p className="text-sm text-slate-400">Loading sources...</p>;
-  }
-
-  if (status === "unavailable") {
-    return <p className="text-sm leading-6 text-amber-200/80">Source list unavailable. Chat remains available for indexed documents.</p>;
-  }
-
-  if (status === "empty") {
-    return <p className="text-sm leading-6 text-slate-400">No uploaded sources found yet. Upload a document to build your knowledge base.</p>;
-  }
-
-  return (
-    <ul className="space-y-2">
-      {sources.map((source) => (
-        <li
-          key={source.id}
-          className="rounded-2xl border border-white/10 bg-slate-950/40 px-3 py-2 text-sm text-slate-200"
-        >
-          <p className="truncate font-medium">{source.filename}</p>
-          {source.created_at && (
-            <p className="mt-1 text-xs text-slate-500">
-              {new Date(source.created_at).toLocaleDateString()}
-            </p>
-          )}
-        </li>
-      ))}
-    </ul>
+      <UploadModal isOpen={isUploadOpen} onClose={() => setIsUploadOpen(false)} />
+    </AcademicWorkspace>
   );
 }

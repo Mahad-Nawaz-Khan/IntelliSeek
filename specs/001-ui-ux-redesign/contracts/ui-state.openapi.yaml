@@ -1,0 +1,174 @@
+openapi: 3.1.0
+info:
+  title: IntelliSeek UI State Contract
+  version: 0.1.0
+  description: >
+    Contract for UI-facing state shapes used by the UI/UX redesign. These routes
+    may be backed by local state, Supabase, or existing chat/source APIs during
+    implementation, but the user-facing shapes remain stable.
+paths:
+  /api/ui/sources:
+    get:
+      summary: List sources for sidebar, library, and citation surfaces
+      responses:
+        '200':
+          description: Sources grouped for UI display
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [groups]
+                properties:
+                  groups:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/KnowledgeSourceGroup'
+  /api/ui/recent-chats:
+    get:
+      summary: List recent chat sessions for sidebar display
+      responses:
+        '200':
+          description: Recent chat sessions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessions]
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ChatSession'
+  /api/ui/upload-status:
+    get:
+      summary: List current upload items and their user-facing states
+      responses:
+        '200':
+          description: Upload status list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/UploadItem'
+components:
+  schemas:
+    KnowledgeSourceGroup:
+      type: object
+      required: [id, title, emptyMessage, sources]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        emptyMessage:
+          type: string
+        sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/KnowledgeSource'
+    KnowledgeSource:
+      type: object
+      required: [id, filename, sourceType, status]
+      properties:
+        id:
+          type: string
+        filename:
+          type: string
+        sourceType:
+          type: string
+          enum: [built-in, uploaded]
+        fileType:
+          type: string
+          enum: [pdf, docx, pptx, txt, unknown]
+        status:
+          type: string
+          enum: [available, indexing, indexed, failed]
+        createdAt:
+          type: string
+        summary:
+          type: string
+    ChatSession:
+      type: object
+      required: [id, title, status]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        lastMessageAt:
+          type: string
+        status:
+          type: string
+          enum: [active, inactive]
+    UploadItem:
+      type: object
+      required: [id, filename, fileType, status]
+      properties:
+        id:
+          type: string
+        filename:
+          type: string
+        fileType:
+          type: string
+          enum: [pdf, docx, pptx, txt, unknown]
+        sizeLabel:
+          type: string
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        status:
+          type: string
+          enum: [idle, uploading, indexing, indexed, failed]
+        errorMessage:
+          type: string
+    Citation:
+      type: object
+      required: [id, sourceId, label, filename]
+      properties:
+        id:
+          type: string
+        sourceId:
+          type: string
+        label:
+          type: string
+        filename:
+          type: string
+        locator:
+          type: string
+        preview:
+          type: string
+    RetrievalStatus:
+      type: object
+      required: [state, message]
+      properties:
+        state:
+          type: string
+          enum: [idle, analyzing, retrieving, answering, complete, error]
+        message:
+          type: string
+        matches:
+          type: array
+          items:
+            $ref: '#/components/schemas/RetrievalMatch'
+    RetrievalMatch:
+      type: object
+      required: [id, sourceId, filename]
+      properties:
+        id:
+          type: string
+        sourceId:
+          type: string
+        filename:
+          type: string
+        locator:
+          type: string
+        snippet:
+          type: string
+        scoreLabel:
+          type: string

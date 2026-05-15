@@ -1,6 +1,6 @@
 import { Sparkles } from "lucide-react";
 
-const SUGGESTIONS = [
+export const SUGGESTIONS = [
   "Explain recursion",
   "What is a heap?",
   "Difference between stack and queue",

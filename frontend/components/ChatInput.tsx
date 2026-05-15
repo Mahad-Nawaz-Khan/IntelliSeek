@@ -1,16 +1,38 @@
 "use client";
 
-import { Send } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { CornerDownLeft, GitBranch, Send } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+import { type AutocompleteSuggestion, TrieAutocomplete } from "../lib/trie-autocomplete";
 
 type ChatInputProps = {
+  autocompleteSuggestions?: AutocompleteSuggestion[];
   disabled?: boolean;
   onSubmit: (question: string) => void;
 };
 
-export function ChatInput({ disabled = false, onSubmit }: ChatInputProps) {
+export function ChatInput({
+  autocompleteSuggestions = [],
+  disabled = false,
+  onSubmit,
+}: ChatInputProps) {
   const [value, setValue] = useState("");
+  const [isAutocompleteDismissed, setIsAutocompleteDismissed] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const trie = useMemo(
+    () => TrieAutocomplete.fromSuggestions(autocompleteSuggestions),
+    [autocompleteSuggestions],
+  );
+  const matches = useMemo(() => {
+    const query = value.trim();
+    if (query.length < 2 || disabled) return [];
+    return trie.search(query, 6);
+  }, [disabled, trie, value]);
+  const boundedHighlightedIndex = matches.length
+    ? Math.min(highlightedIndex, matches.length - 1)
+    : 0;
+  const isAutocompleteOpen = !isAutocompleteDismissed && matches.length > 0;
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -20,27 +42,94 @@ export function ChatInput({ disabled = false, onSubmit }: ChatInputProps) {
     textarea.style.height = `${Math.min(textarea.scrollHeight, 160)}px`;
   }, [value]);
 
+
+  function selectSuggestion(suggestion: AutocompleteSuggestion) {
+    setValue(suggestion.value);
+    setIsAutocompleteDismissed(true);
+    setHighlightedIndex(0);
+    textareaRef.current?.focus();
+  }
+
   function submit() {
     const question = value.trim();
     if (!question || disabled) return;
 
     onSubmit(question);
     setValue("");
+    setIsAutocompleteDismissed(false);
+    setHighlightedIndex(0);
   }
 
   return (
-    <div className="rounded-3xl border border-white/10 bg-slate-950/70 p-3 shadow-2xl shadow-cyan-950/20 backdrop-blur-xl transition-colors focus-within:border-cyan-400/50">
+    <div className="relative rounded-3xl border border-white/10 bg-slate-950/70 p-3 shadow-2xl shadow-cyan-950/20 backdrop-blur-xl transition-colors focus-within:border-cyan-400/50">
+      {isAutocompleteOpen && matches.length > 0 && (
+        <div className="absolute inset-x-3 bottom-full z-20 mb-2 overflow-hidden rounded-2xl border border-cyan-300/20 bg-slate-950/95 shadow-2xl shadow-cyan-950/30 backdrop-blur-xl">
+          <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2 text-xs font-medium uppercase tracking-[0.22em] text-cyan-200">
+            <GitBranch className="h-3.5 w-3.5" />
+            Trie autocomplete
+          </div>
+          <div className="max-h-64 overflow-y-auto p-1">
+            {matches.map((match, index) => (
+              <button
+                key={match.id}
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => selectSuggestion(match)}
+                className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm transition ${
+                  index === boundedHighlightedIndex
+                    ? "bg-cyan-300/15 text-cyan-50"
+                    : "text-slate-300 hover:bg-white/5 hover:text-white"
+                }`}
+              >
+                <span className="truncate">{match.label}</span>
+                <span className="shrink-0 rounded-full border border-white/10 px-2 py-0.5 text-[0.65rem] uppercase tracking-[0.16em] text-slate-500">
+                  {match.type}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="flex items-end gap-3">
         <textarea
           ref={textareaRef}
           value={value}
           rows={1}
           disabled={disabled}
+          aria-label="Ask IntelliSeek about your uploaded material"
           placeholder="Ask IntelliSeek about your uploaded material..."
-          onChange={(event) => setValue(event.target.value)}
+          onChange={(event) => {
+            setValue(event.target.value);
+            setIsAutocompleteDismissed(false);
+            setHighlightedIndex(0);
+          }}
           onKeyDown={(event) => {
+            if (event.key === "Escape" && isAutocompleteOpen) {
+              event.preventDefault();
+              setIsAutocompleteDismissed(true);
+              return;
+            }
+
+            if (event.key === "ArrowDown" && isAutocompleteOpen && matches.length > 0) {
+              event.preventDefault();
+              setHighlightedIndex((current) => (current + 1) % matches.length);
+              return;
+            }
+
+            if (event.key === "ArrowUp" && isAutocompleteOpen && matches.length > 0) {
+              event.preventDefault();
+              setHighlightedIndex((current) =>
+                current === 0 ? matches.length - 1 : current - 1,
+              );
+              return;
+            }
+
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
+              if (isAutocompleteOpen && matches[boundedHighlightedIndex]) {
+                selectSuggestion(matches[boundedHighlightedIndex]);
+                return;
+              }
               submit();
             }
           }}
@@ -56,8 +145,9 @@ export function ChatInput({ disabled = false, onSubmit }: ChatInputProps) {
           <Send className="h-5 w-5" />
         </button>
       </div>
-      <p className="px-3 pt-2 text-xs text-slate-500">
-        Press Enter to send, Shift+Enter for a new line.
+      <p className="flex items-center gap-2 px-3 pt-2 text-xs text-slate-500">
+        <CornerDownLeft className="h-3.5 w-3.5" />
+        Press Enter to send, Shift+Enter for a new line. Type 2+ characters for Trie suggestions.
       </p>
     </div>
   );
