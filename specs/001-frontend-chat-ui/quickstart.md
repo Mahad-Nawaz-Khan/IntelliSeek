@@ -98,6 +98,7 @@ npm run build
 
 ## Validation results
 
-- `npm run lint` — Not run yet.
-- `npm run build` — Not run yet.
-- Manual browser chat smoke test — Not run yet.
+- `npm --prefix frontend run lint` — PASS.
+- `npm --prefix frontend run build` — PASS.
+- Manual browser chat smoke test — Not run in this session because no browser automation tool is available; validate layout, keyboard behavior, suggested queries, live chat, citations, and error paths manually in the Next.js dev server.
+- Dependency audit — `npm --prefix frontend install` reported 2 moderate severity vulnerabilities in the dependency tree; no automatic audit fix was applied because it may introduce breaking dependency changes.
