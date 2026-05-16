@@ -3,6 +3,7 @@
 import { X } from "lucide-react";
 import { useCallback, useState } from "react";
 
+import { useAuth } from "../../context/AuthContext";
 import { supabase } from "../../lib/supabase";
 import {
   ALLOWED_MIME_TYPES,
@@ -38,6 +39,7 @@ function toFileType(filename: string): UploadItem["fileType"] {
 }
 
 export function UploadModal({ isOpen, onClose }: UploadModalProps) {
+  const { isLoaded, isSignedIn, user } = useAuth();
   const [isDragging, setIsDragging] = useState(false);
   const [item, setItem] = useState<UploadItem | null>(null);
   const [lastFile, setLastFile] = useState<File | null>(null);
@@ -59,12 +61,22 @@ export function UploadModal({ isOpen, onClose }: UploadModalProps) {
       return;
     }
 
+    if (!isLoaded) {
+      setItem({ ...baseItem, status: "failed", errorMessage: "Authentication is still loading" });
+      return;
+    }
+
+    if (!isSignedIn || !user) {
+      setItem({ ...baseItem, status: "failed", errorMessage: "Sign in before uploading notes" });
+      return;
+    }
+
     if (!supabase) {
       setItem({ ...baseItem, status: "failed", errorMessage: "Supabase client is not configured" });
       return;
     }
 
-    const userId = "00000000-0000-4000-8000-000000000001";
+    const userId = user.id;
 
     const timestamp = Date.now();
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -91,7 +103,6 @@ export function UploadModal({ isOpen, onClose }: UploadModalProps) {
           filename: file.name,
           file_type: ALLOWED_MIME_TYPES[ext],
           file_size: file.size,
-          user_id: userId,
         }),
       });
       const result: ParseResult = await response.json();
@@ -105,7 +116,7 @@ export function UploadModal({ isOpen, onClose }: UploadModalProps) {
     } catch {
       setItem({ ...baseItem, status: "failed", errorMessage: "Could not reach the parsing service" });
     }
-  }, []);
+  }, [isLoaded, isSignedIn, user]);
 
   if (!isOpen) return null;
 
@@ -126,7 +137,7 @@ export function UploadModal({ isOpen, onClose }: UploadModalProps) {
         </div>
 
         <UploadDropzone
-          disabled={isWorking}
+          disabled={isWorking || !isLoaded || !isSignedIn}
           isDragging={isDragging}
           onChange={(event) => {
             const file = event.target.files?.[0];

@@ -68,6 +68,19 @@ OPENROUTER_EMBEDDING_MODEL=perplexity/pplx-embed-v1-0.6b
 
 Only `NEXT_PUBLIC_*` values are browser-readable. `GROQ_API_KEY`, `OPENROUTER_API_KEY`, and `SUPABASE_SERVICE_KEY` are server-only and must only be read from API routes or server-side code.
 
+## Supabase Auth setup
+
+IntelliSeek uses Supabase Auth for email/password, Google, and GitHub login. In Supabase Dashboard → Authentication → Providers, enable the providers you want to use.
+
+For Google and GitHub OAuth, add redirect URLs in Supabase:
+
+```text
+http://localhost:3000/auth/callback
+https://your-vercel-domain.vercel.app/auth/callback
+```
+
+The OAuth client IDs/secrets belong in the Supabase provider settings, not in `NEXT_PUBLIC_*` app variables.
+
 ## Start the app locally
 
 From the repository root:

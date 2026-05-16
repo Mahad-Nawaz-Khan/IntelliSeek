@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 
+import { useAuth } from "../context/AuthContext";
 import { supabase } from "../lib/supabase";
 import {
   ALLOWED_MIME_TYPES,
@@ -30,6 +31,7 @@ type ParseResult = {
 };
 
 export function FileUpload() {
+  const { isLoaded, isSignedIn, user } = useAuth();
   const [status, setStatus] = useState<UploadStatus>("idle");
   const [fileName, setFileName] = useState("");
   const [error, setError] = useState("");
@@ -58,13 +60,25 @@ export function FileUpload() {
       setFileName(file.name);
       setStatus("validated");
 
+      if (!isLoaded) {
+        setError("Authentication is still loading");
+        setStatus("failed");
+        return;
+      }
+
+      if (!isSignedIn || !user) {
+        setError("Sign in before uploading notes");
+        setStatus("failed");
+        return;
+      }
+
       if (!supabase) {
         setError("Supabase client is not configured");
         setStatus("failed");
         return;
       }
 
-      const userId = "00000000-0000-4000-8000-000000000001";
+      const userId = user.id;
 
       const timestamp = Date.now();
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -95,7 +109,6 @@ export function FileUpload() {
             filename: file.name,
             file_type: ALLOWED_MIME_TYPES[ext],
             file_size: file.size,
-            user_id: userId,
           }),
         });
 
@@ -114,7 +127,7 @@ export function FileUpload() {
         setStatus("failed");
       }
     },
-    [reset],
+    [isLoaded, isSignedIn, reset, user],
   );
 
   const handleDrop = useCallback(
@@ -158,7 +171,7 @@ export function FileUpload() {
           isDragging
             ? "border-cyan-400 bg-cyan-500/10"
             : "border-slate-600 bg-slate-800/50 hover:border-slate-500"
-        } ${isWorking ? "pointer-events-none opacity-60" : "cursor-pointer"}`}
+        } ${isWorking || !isLoaded || !isSignedIn ? "pointer-events-none opacity-60" : "cursor-pointer"}`}
       >
         <p className="text-lg font-medium text-slate-200">
           {isWorking
@@ -174,7 +187,7 @@ export function FileUpload() {
           type="file"
           accept=".pdf,.docx,.pptx,.txt"
           onChange={handleChange}
-          disabled={isWorking}
+          disabled={isWorking || !isLoaded || !isSignedIn}
           className="mx-auto mt-4 block text-sm text-slate-400 file:mr-4 file:rounded-lg file:border-0 file:bg-cyan-600 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-cyan-500 disabled:opacity-50"
         />
       </div>

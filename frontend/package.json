@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "latest",
     "jszip": "^3.10.1",
     "lucide-react": "^1.16.0",

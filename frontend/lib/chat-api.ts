@@ -17,7 +17,6 @@ export type ChatMessage = {
 
 export type ChatRequest = {
   question: string;
-  user_id: string;
 };
 
 export type ChatResponse = {
@@ -34,10 +33,7 @@ type ChatErrorResponse = {
 
 const CHAT_ENDPOINT = "/api/chat";
 
-export async function submitChatQuestion(
-  question: string,
-  userId: string,
-): Promise<ChatResponse> {
+export async function submitChatQuestion(question: string): Promise<ChatResponse> {
   const trimmedQuestion = question.trim();
   if (!trimmedQuestion) {
     throw new Error("Enter a question before sending.");
@@ -46,7 +42,6 @@ export async function submitChatQuestion(
   try {
     const payload: ChatRequest = {
       question: trimmedQuestion,
-      user_id: userId,
     };
 
     const response = await fetch(CHAT_ENDPOINT, {

@@ -1,4 +1,4 @@
-import { DEMO_USER_ID } from "../../../lib/server/env";
+import { getAuthenticatedUser } from "../../../lib/server/auth";
 import { generateAnswer } from "../../../lib/server/groq";
 import { retrieveContext, toSourceCitations, validateQuestion } from "../../../lib/server/rag/retriever";
 import { getSupabaseServiceClient } from "../../../lib/server/supabase";
@@ -7,7 +7,6 @@ export const runtime = "nodejs";
 
 type ChatRequestBody = {
   question?: unknown;
-  user_id?: unknown;
 };
 
 function failure(status: number, error: string) {
@@ -30,9 +29,8 @@ export async function POST(request: Request) {
     return failure(400, "Question is required");
   }
 
-  const userId = typeof body.user_id === "string" && body.user_id.trim()
-    ? body.user_id.trim()
-    : DEMO_USER_ID;
+  const user = await getAuthenticatedUser();
+  if (!user) return failure(401, "Sign in is required");
 
   let question: string;
   try {
@@ -43,7 +41,7 @@ export async function POST(request: Request) {
 
   let context;
   try {
-    context = await retrieveContext(question, userId);
+    context = await retrieveContext(question, user.id);
   } catch {
     return failure(500, "Retrieval failed");
   }
@@ -64,7 +62,7 @@ export async function POST(request: Request) {
   const supabase = getSupabaseServiceClient();
   if (supabase) {
     await supabase.from("chat_history").insert({
-      user_id: userId,
+      user_id: user.id,
       question,
       answer,
       sources_cited: sources,

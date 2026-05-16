@@ -1,5 +1,5 @@
 import { ALLOWED_MIME_TYPES, BUCKET_NAME, getExtension, MAX_FILE_SIZE, type AllowedExtension } from "../../../lib/upload-config";
-import { DEMO_USER_ID } from "../../../lib/server/env";
+import { getAuthenticatedUser } from "../../../lib/server/auth";
 import { chunkText } from "../../../lib/server/rag/chunker";
 import { embedTexts } from "../../../lib/server/rag/embeddings";
 import { extractTextFromBuffer } from "../../../lib/server/rag/parser";
@@ -12,7 +12,6 @@ type ParseRequestBody = {
   filename?: unknown;
   file_type?: unknown;
   file_size?: unknown;
-  user_id?: unknown;
 };
 
 function failure(status: number, error: string) {
@@ -70,13 +69,17 @@ export async function POST(request: Request) {
   const supabase = getSupabaseServiceClient();
   if (!supabase) return failure(500, "Supabase service client is not configured");
 
+  const user = await getAuthenticatedUser();
+  if (!user) return failure(401, "Sign in is required");
+
   const storagePath = (body.storage_path as string).replace(/\\/g, "/");
   const filename = body.filename as string;
   const fileType = body.file_type as string;
   const fileSize = body.file_size as number;
-  const userId = typeof body.user_id === "string" && body.user_id.trim()
-    ? body.user_id.trim()
-    : DEMO_USER_ID;
+
+  if (!storagePath.startsWith(`${user.id}/`)) {
+    return failure(403, "Storage path does not belong to the signed-in user");
+  }
 
   const { data: fileData, error: downloadError } = await supabase.storage
     .from(BUCKET_NAME)
@@ -97,7 +100,7 @@ export async function POST(request: Request) {
   const { data: documentRows, error: documentError } = await supabase
     .from("documents")
     .insert({
-      user_id: userId,
+      user_id: user.id,
       filename,
       file_type: fileType,
       file_size: fileSize,

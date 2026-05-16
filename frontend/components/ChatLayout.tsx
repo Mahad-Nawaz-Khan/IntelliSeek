@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { AcademicWorkspace } from "./chat/AcademicWorkspace";
 import { ChatComposer } from "./chat/ChatComposer";
@@ -9,6 +10,7 @@ import { ChatMessage } from "./chat/ChatMessage";
 import { ChatWelcome } from "./chat/ChatWelcome";
 import { SUGGESTIONS } from "./SuggestedQueries";
 import { UploadModal } from "./upload/UploadModal";
+import { useAuth } from "../context/AuthContext";
 import { hasSupabasePublicConfig, supabase } from "../lib/supabase";
 import { type ChatMessage as ChatMessageType, submitChatQuestion } from "../lib/chat-api";
 import type { AutocompleteSuggestion } from "../lib/trie-autocomplete";
@@ -20,8 +22,6 @@ import {
   type RetrievalMatch,
   type RetrievalStatus,
 } from "../lib/ui-state";
-
-const DEMO_USER_ID = "demo-user";
 
 type SupabaseKnowledgeSource = {
   id: string;
@@ -60,6 +60,8 @@ function toRetrievalMatches(messages: ChatMessageType[]): RetrievalMatch[] {
 }
 
 export function ChatLayout() {
+  const router = useRouter();
+  const { isLoaded, isSignedIn, user } = useAuth();
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [sources, setSources] = useState<KnowledgeSource[]>([]);
@@ -129,7 +131,16 @@ export function ChatLayout() {
   }, [messages, sources]);
 
   useEffect(() => {
+    if (!isLoaded) return;
+    if (!isSignedIn || !user) {
+      setSources([]);
+      setSourceStatus("unavailable");
+      router.replace("/sign-in?next=/chat");
+      return;
+    }
+
     let active = true;
+    const userId = user.id;
 
     async function loadSources() {
       if (!hasSupabasePublicConfig() || !supabase) {
@@ -141,6 +152,7 @@ export function ChatLayout() {
         const { data, error } = await supabase
           .from("documents")
           .select("id, filename, created_at")
+          .eq("user_id", userId)
           .order("created_at", { ascending: false })
           .limit(8);
 
@@ -164,7 +176,7 @@ export function ChatLayout() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [isLoaded, isSignedIn, router, user]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -237,7 +249,7 @@ export function ChatLayout() {
       setIsLoading(true);
 
       try {
-        const response = await submitChatQuestion(trimmedQuestion, DEMO_USER_ID);
+        const response = await submitChatQuestion(trimmedQuestion);
         setMessages((current) =>
           current.map((message) =>
             message.id === assistantId
@@ -317,7 +329,10 @@ export function ChatLayout() {
           </div>
         </div>
       </div>
-      <UploadModal isOpen={isUploadOpen} onClose={() => setIsUploadOpen(false)} />
+      <UploadModal
+        isOpen={isUploadOpen}
+        onClose={() => setIsUploadOpen(false)}
+      />
     </AcademicWorkspace>
   );
 }
