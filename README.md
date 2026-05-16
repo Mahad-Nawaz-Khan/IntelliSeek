@@ -58,7 +58,7 @@ Create local environment files before starting the app. Use committed `.env.exam
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-supabase-publishable-key
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-supabase-publishable-or-anon-key
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_KEY=your-supabase-service-role-or-secret-key
 GROQ_API_KEY=your-groq-api-key
@@ -119,7 +119,7 @@ Set Vercel environment variables according to the features currently enabled:
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-supabase-publishable-key
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-supabase-publishable-or-anon-key
 GROQ_API_KEY=your-groq-api-key
 SUPABASE_SERVICE_KEY=your-supabase-service-role-or-secret-key
 OPENROUTER_API_KEY=your-openrouter-api-key

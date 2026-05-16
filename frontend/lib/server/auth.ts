@@ -7,7 +7,8 @@ import { getServerEnv } from "./env";
 export async function createAuthClient() {
   const cookieStore = await cookies();
   const supabaseUrl = getServerEnv("NEXT_PUBLIC_SUPABASE_URL") ?? getServerEnv("SUPABASE_URL");
-  const supabaseKey = getServerEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY");
+  const supabaseKey = getServerEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY")
+    ?? getServerEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY");
 
   if (!supabaseUrl || !supabaseKey) return null;
 

@@ -1,17 +1,17 @@
-import { createClient } from "@supabase/supabase-js";
+import { createBrowserClient } from "@supabase/ssr";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+const supabasePublicKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+  ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+function isConfigured(value: string | undefined) {
+  return Boolean(value && !value.startsWith("your-"));
+}
 
 export function hasSupabasePublicConfig() {
-  return Boolean(
-    supabaseUrl &&
-      supabaseAnonKey &&
-      supabaseUrl !== "your-supabase-url" &&
-      supabaseAnonKey !== "your-supabase-anon-key",
-  );
+  return isConfigured(supabaseUrl) && isConfigured(supabasePublicKey);
 }
 
 export const supabase = hasSupabasePublicConfig()
-  ? createClient(supabaseUrl!, supabaseAnonKey!)
+  ? createBrowserClient(supabaseUrl!, supabasePublicKey!)
   : null;
