@@ -3,8 +3,9 @@
 import { ArrowLeft, Eye, EyeOff, GraduationCap, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
+import { getSafeReturnPath } from "../../lib/safe-redirect";
 import { hasSupabasePublicConfig, supabase } from "../../lib/supabase";
 
 export default function SignUpPage() {
@@ -20,6 +21,18 @@ export default function SignUpPage() {
   const [oauthProvider, setOauthProvider] = useState<"google" | "github" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [next] = useState(() => {
+    if (typeof window === "undefined") return "/chat";
+    return getSafeReturnPath(new URLSearchParams(window.location.search).get("next"));
+  });
+
+  useEffect(() => {
+    if (!supabase) return;
+
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user) router.replace(getSafeReturnPath(next));
+    });
+  }, [next, router]);
 
   async function handleProvider(provider: "google" | "github") {
     setError(null);
@@ -34,7 +47,7 @@ export default function SignUpPage() {
     const { data, error: oauthError } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
         skipBrowserRedirect: true,
       },
     });
@@ -79,7 +92,7 @@ export default function SignUpPage() {
       email,
       password,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
         data: {
           first_name: firstName.trim() || null,
           last_name: lastName.trim() || null,
@@ -95,7 +108,7 @@ export default function SignUpPage() {
     }
 
     if (data.session) {
-      router.replace("/chat");
+      router.replace(getSafeReturnPath(next));
       return;
     }
 

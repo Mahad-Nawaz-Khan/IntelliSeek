@@ -1,6 +1,8 @@
 import { Bell, Moon, Shield, SlidersHorizontal } from "lucide-react";
 import Link from "next/link";
 
+import { requireAuthenticatedUser } from "../../lib/server/require-auth";
+
 const settings = [
   {
     title: "Dark academic theme",
@@ -28,7 +30,9 @@ const settings = [
   },
 ];
 
-export default function SettingsPage() {
+export default async function SettingsPage() {
+  await requireAuthenticatedUser("/settings");
+
   return (
     <main className="academic-page-shell min-h-screen px-4 py-8 text-slate-100 sm:px-6 lg:px-10">
       <div className="mx-auto max-w-5xl">

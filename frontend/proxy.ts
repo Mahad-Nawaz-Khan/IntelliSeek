@@ -1,15 +1,25 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PROTECTED_PREFIXES = ["/chat", "/library", "/settings"];
+import { getSafeReturnPath, isProtectedPath } from "./lib/safe-redirect";
 
-export async function middleware(request: NextRequest) {
+function redirectToSignIn(request: NextRequest) {
+  const redirectUrl = request.nextUrl.clone();
+  redirectUrl.pathname = "/sign-in";
+  redirectUrl.searchParams.set("next", getSafeReturnPath(`${request.nextUrl.pathname}${request.nextUrl.search}`));
+  return NextResponse.redirect(redirectUrl);
+}
+
+export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
+  const isProtected = isProtectedPath(request.nextUrl.pathname);
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
     ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-  if (!supabaseUrl || !supabaseKey) return response;
+  if (!supabaseUrl || !supabaseKey) {
+    return isProtected ? redirectToSignIn(request) : response;
+  }
 
   const supabase = createServerClient(supabaseUrl, supabaseKey, {
     cookies: {
@@ -25,14 +35,8 @@ export async function middleware(request: NextRequest) {
   });
 
   const { data } = await supabase.auth.getUser();
-  const isProtected = PROTECTED_PREFIXES.some((prefix) => request.nextUrl.pathname.startsWith(prefix));
 
-  if (!data.user && isProtected) {
-    const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = "/sign-in";
-    redirectUrl.searchParams.set("next", request.nextUrl.pathname);
-    return NextResponse.redirect(redirectUrl);
-  }
+  if (!data.user && isProtected) return redirectToSignIn(request);
 
   return response;
 }

@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 
+import { getSafeReturnPath } from "../../../lib/safe-redirect";
 import { createAuthClient } from "../../../lib/server/auth";
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get("code");
-  const next = requestUrl.searchParams.get("next") ?? "/chat";
+  const next = getSafeReturnPath(requestUrl.searchParams.get("next"));
 
   if (code) {
     const supabase = await createAuthClient();
@@ -14,7 +15,7 @@ export async function GET(request: Request) {
       : { error: new Error("Supabase Auth is not configured") };
 
     if (!error) {
-      return NextResponse.redirect(new URL(next.startsWith("/") ? next : "/chat", requestUrl.origin));
+      return NextResponse.redirect(new URL(next, requestUrl.origin));
     }
   }
 

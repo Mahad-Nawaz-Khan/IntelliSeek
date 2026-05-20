@@ -1,9 +1,12 @@
 import { FileText, Library } from "lucide-react";
 import Link from "next/link";
 
+import { requireAuthenticatedUser } from "../../lib/server/require-auth";
 import { BUILT_IN_SOURCES, SAMPLE_UPLOAD_ITEMS } from "../../lib/ui-state";
 
-export default function LibraryPage() {
+export default async function LibraryPage() {
+  await requireAuthenticatedUser("/library");
+
   return (
     <main className="academic-page-shell min-h-screen px-4 py-8 text-slate-100 sm:px-6 lg:px-10">
       <div className="mx-auto max-w-6xl">

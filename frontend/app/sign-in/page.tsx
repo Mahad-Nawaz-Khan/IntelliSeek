@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 
+import { getSafeReturnPath } from "../../lib/safe-redirect";
 import { hasSupabasePublicConfig, supabase } from "../../lib/supabase";
 
 function getErrorMessage(error: string | null) {
@@ -18,8 +19,7 @@ function getErrorMessage(error: string | null) {
 
 function getInitialNext() {
   if (typeof window === "undefined") return "/chat";
-  const nextPath = new URLSearchParams(window.location.search).get("next");
-  return nextPath?.startsWith("/") ? nextPath : "/chat";
+  return getSafeReturnPath(new URLSearchParams(window.location.search).get("next"));
 }
 
 function getInitialError() {
@@ -41,7 +41,7 @@ export default function SignInPage() {
     if (!supabase) return;
 
     supabase.auth.getUser().then(({ data }) => {
-      if (data.user) router.replace(next.startsWith("/") ? next : "/chat");
+      if (data.user) router.replace(getSafeReturnPath(next));
     });
   }, [next, router]);
 
@@ -55,7 +55,7 @@ export default function SignInPage() {
       return;
     }
 
-    const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next.startsWith("/") ? next : "/chat")}`;
+    const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(getSafeReturnPath(next))}`;
     const { data, error: oauthError } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
@@ -98,7 +98,7 @@ export default function SignInPage() {
       return;
     }
 
-    router.replace(next.startsWith("/") ? next : "/chat");
+    router.replace(getSafeReturnPath(next));
   }
 
   return (
