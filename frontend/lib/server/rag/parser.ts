@@ -10,8 +10,56 @@ function decodeXmlText(value: string): string {
     .replace(/&apos;/g, "'");
 }
 
+class ServerDOMMatrix {
+  a = 1;
+  b = 0;
+  c = 0;
+  d = 1;
+  e = 0;
+  f = 0;
+
+  translate() {
+    return this;
+  }
+
+  scale() {
+    return this;
+  }
+
+  rotate() {
+    return this;
+  }
+
+  multiply() {
+    return this;
+  }
+}
+
+class ServerImageData {
+  data: Uint8ClampedArray;
+
+  constructor(
+    public width: number,
+    public height: number,
+  ) {
+    this.data = new Uint8ClampedArray(width * height * 4);
+  }
+}
+
+class ServerPath2D {}
+
+async function loadPdfParser() {
+  Object.assign(globalThis, {
+    DOMMatrix: globalThis.DOMMatrix ?? ServerDOMMatrix,
+    ImageData: globalThis.ImageData ?? ServerImageData,
+    Path2D: globalThis.Path2D ?? ServerPath2D,
+  });
+
+  return import("pdf-parse");
+}
+
 async function extractPdfText(buffer: Buffer): Promise<string> {
-  const { PDFParse } = await import("pdf-parse");
+  const { PDFParse } = await loadPdfParser();
   const parser = new PDFParse({ data: buffer });
   try {
     const result = await parser.getText();
