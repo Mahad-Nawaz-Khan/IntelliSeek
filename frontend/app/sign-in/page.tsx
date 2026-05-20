@@ -139,11 +139,11 @@ function SignInForm() {
 
             <div className="space-y-3">
               <button type="button" onClick={() => handleProvider("google")} disabled={Boolean(oauthProvider)} className="flex w-full items-center justify-center gap-3 rounded-[22px] border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-medium text-white transition hover:border-cyan-300/30 hover:bg-white/[0.09] disabled:cursor-not-allowed disabled:opacity-60">
-                <img src="/icons/google.svg" alt="" className="h-5 w-5" aria-hidden="true" />
+                <Image src="/icons/google.svg" alt="" width={20} height={20} aria-hidden="true" />
                 {oauthProvider === "google" ? "Redirecting..." : "Continue with Google"}
               </button>
               <button type="button" onClick={() => handleProvider("github")} disabled={Boolean(oauthProvider)} className="flex w-full items-center justify-center gap-3 rounded-[22px] border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-medium text-white transition hover:border-cyan-300/30 hover:bg-white/[0.09] disabled:cursor-not-allowed disabled:opacity-60">
-                <img src="/icons/github.svg" alt="" className="h-5 w-5" aria-hidden="true" />
+                <Image src="/icons/github.svg" alt="" width={20} height={20} aria-hidden="true" />
                 {oauthProvider === "github" ? "Redirecting..." : "Continue with GitHub"}
               </button>
             </div>
