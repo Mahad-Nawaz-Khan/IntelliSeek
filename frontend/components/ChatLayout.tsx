@@ -291,6 +291,10 @@ export function ChatLayout() {
     setMessages([]);
   }, []);
 
+  if (!isLoaded || !isSignedIn || !user) {
+    return null;
+  }
+
   return (
     <AcademicWorkspace
       groups={sourceGroups}
