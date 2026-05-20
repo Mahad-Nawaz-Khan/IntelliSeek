@@ -2,8 +2,8 @@
 
 import { ArrowLeft, Eye, EyeOff, GraduationCap, Sparkles } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { FormEvent, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { FormEvent, Suspense, useEffect, useState } from "react";
 
 import { getSafeReturnPath } from "../../lib/safe-redirect";
 import { hasSupabasePublicConfig, supabase } from "../../lib/supabase";
@@ -17,25 +17,17 @@ function getErrorMessage(error: string | null) {
   }
 }
 
-function getInitialNext() {
-  if (typeof window === "undefined") return "/chat";
-  return getSafeReturnPath(new URLSearchParams(window.location.search).get("next"));
-}
-
-function getInitialError() {
-  if (typeof window === "undefined") return null;
-  return getErrorMessage(new URLSearchParams(window.location.search).get("error"));
-}
-
-export default function SignInPage() {
+function SignInForm() {
   const router = useRouter();
-  const [next] = useState(getInitialNext);
+  const searchParams = useSearchParams();
+  const next = getSafeReturnPath(searchParams.get("next"));
+  const callbackError = getErrorMessage(searchParams.get("error"));
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [oauthProvider, setOauthProvider] = useState<"google" | "github" | null>(null);
-  const [error, setError] = useState<string | null>(getInitialError);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!supabase) return;
@@ -140,8 +132,8 @@ export default function SignInPage() {
               <p className="mt-2 text-sm text-slate-400">Use Google, GitHub, or your email account.</p>
             </div>
 
-            {error ? (
-              <div className="mb-5 rounded-2xl border border-red-300/20 bg-red-400/10 px-4 py-3 text-sm text-red-100">{error}</div>
+            {error || callbackError ? (
+              <div className="mb-5 rounded-2xl border border-red-300/20 bg-red-400/10 px-4 py-3 text-sm text-red-100">{error ?? callbackError}</div>
             ) : null}
 
             <div className="space-y-3">
@@ -187,5 +179,13 @@ export default function SignInPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function SignInPage() {
+  return (
+    <Suspense fallback={null}>
+      <SignInForm />
+    </Suspense>
   );
 }
