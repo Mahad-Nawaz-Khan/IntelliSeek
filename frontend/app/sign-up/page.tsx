@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowLeft, Eye, EyeOff, GraduationCap, Sparkles } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
@@ -163,11 +164,11 @@ export default function SignUpPage() {
 
             <div className="space-y-3">
               <button type="button" onClick={() => handleProvider("google")} disabled={Boolean(oauthProvider)} className="flex w-full items-center justify-center gap-3 rounded-[22px] border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-medium text-white transition hover:border-cyan-300/30 hover:bg-white/[0.09] disabled:cursor-not-allowed disabled:opacity-60">
-                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white text-xs font-bold text-slate-950">G</span>
+                <img src="/icons/google.svg" alt="" className="h-5 w-5" aria-hidden="true" />
                 {oauthProvider === "google" ? "Redirecting..." : "Sign up with Google"}
               </button>
               <button type="button" onClick={() => handleProvider("github")} disabled={Boolean(oauthProvider)} className="flex w-full items-center justify-center gap-3 rounded-[22px] border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-medium text-white transition hover:border-cyan-300/30 hover:bg-white/[0.09] disabled:cursor-not-allowed disabled:opacity-60">
-                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white text-xs font-bold text-slate-950">GH</span>
+                <img src="/icons/github.svg" alt="" className="h-5 w-5" aria-hidden="true" />
                 {oauthProvider === "github" ? "Redirecting..." : "Sign up with GitHub"}
               </button>
             </div>
