@@ -31,15 +31,27 @@ export default function SignUpPage() {
       return;
     }
 
-    const { error: oauthError } = await supabase.auth.signInWithOAuth({
+    const { data, error: oauthError } = await supabase.auth.signInWithOAuth({
       provider,
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+        skipBrowserRedirect: true,
+      },
     });
 
     if (oauthError) {
       setError(oauthError.message);
       setOauthProvider(null);
+      return;
     }
+
+    if (data.url) {
+      window.location.assign(data.url);
+      return;
+    }
+
+    setError("Could not start OAuth sign-up.");
+    setOauthProvider(null);
   }
 
   async function handleSubmit(event: FormEvent) {

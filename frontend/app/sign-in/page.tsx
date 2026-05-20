@@ -56,15 +56,27 @@ export default function SignInPage() {
     }
 
     const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next.startsWith("/") ? next : "/chat")}`;
-    const { error: oauthError } = await supabase.auth.signInWithOAuth({
+    const { data, error: oauthError } = await supabase.auth.signInWithOAuth({
       provider,
-      options: { redirectTo },
+      options: {
+        redirectTo,
+        skipBrowserRedirect: true,
+      },
     });
 
     if (oauthError) {
       setError(oauthError.message);
       setOauthProvider(null);
+      return;
     }
+
+    if (data.url) {
+      window.location.assign(data.url);
+      return;
+    }
+
+    setError("Could not start OAuth sign-in.");
+    setOauthProvider(null);
   }
 
   async function handleSubmit(event: FormEvent) {
