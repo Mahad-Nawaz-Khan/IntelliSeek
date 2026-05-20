@@ -1,4 +1,4 @@
-import { ALLOWED_MIME_TYPES, BUCKET_NAME, getExtension, MAX_FILE_SIZE, type AllowedExtension } from "../../../lib/upload-config";
+import { ALLOWED_MIME_TYPES, BUCKET_NAME, getExtension, getStorageUploadErrorMessage, MAX_FILE_SIZE, type AllowedExtension } from "../../../lib/upload-config";
 import { getAuthenticatedUser } from "../../../lib/server/auth";
 import { chunkText } from "../../../lib/server/rag/chunker";
 import { embedTexts } from "../../../lib/server/rag/embeddings";
@@ -85,7 +85,9 @@ export async function POST(request: Request) {
     .from(BUCKET_NAME)
     .download(storagePath);
 
-  if (downloadError || !fileData) return failure(404, "Stored file not found");
+  if (downloadError || !fileData) {
+    return failure(404, downloadError ? getStorageUploadErrorMessage(downloadError.message) : "Stored file not found");
+  }
 
   let extracted: string;
   try {
@@ -114,8 +116,8 @@ export async function POST(request: Request) {
   let embeddings: number[][];
   try {
     embeddings = await embedTexts(chunks);
-  } catch {
-    return failure(500, "Embedding generation failed");
+  } catch (error) {
+    return failure(500, error instanceof Error ? error.message : "Embedding generation failed");
   }
   const chunkRows = chunks.map((chunk, index) => ({
     document_id: documentRows.id,

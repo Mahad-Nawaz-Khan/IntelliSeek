@@ -10,8 +10,14 @@ export const ALLOWED_MIME_TYPES: Record<AllowedExtension, string> = {
   ".txt": "text/plain",
 };
 
-export const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+export const MAX_FILE_SIZE = 10 * 1024 * 1024;
 export const BUCKET_NAME = "academic-documents";
+
+export function getStorageUploadErrorMessage(message: string) {
+  return message.toLowerCase().includes("bucket not found")
+    ? `Storage bucket "${BUCKET_NAME}" was not found. Create it in Supabase Storage or run database/schema.sql for the current Supabase project.`
+    : message;
+}
 
 export function getAllowedMimeSet(): Set<string> {
   return new Set(Object.values(ALLOWED_MIME_TYPES));

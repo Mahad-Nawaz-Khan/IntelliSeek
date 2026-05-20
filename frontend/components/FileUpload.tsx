@@ -3,11 +3,13 @@
 import { useCallback, useState } from "react";
 
 import { useAuth } from "../context/AuthContext";
+import { readParseResponse } from "../lib/parse-response";
 import { supabase } from "../lib/supabase";
 import {
   ALLOWED_MIME_TYPES,
   BUCKET_NAME,
   getExtension,
+  getStorageUploadErrorMessage,
   isAllowedFile,
   type AllowedExtension,
 } from "../lib/upload-config";
@@ -20,15 +22,6 @@ type UploadStatus =
   | "parsing"
   | "parsed"
   | "failed";
-
-type ParseResult = {
-  ok: boolean;
-  status?: string;
-  document_id?: string;
-  filename?: string;
-  text_preview?: string;
-  error?: string;
-};
 
 export function FileUpload() {
   const { isLoaded, isSignedIn, user } = useAuth();
@@ -90,7 +83,7 @@ export function FileUpload() {
         .upload(storagePath, file, { upsert: false });
 
       if (uploadError) {
-        setError(uploadError.message);
+        setError(getStorageUploadErrorMessage(uploadError.message));
         setStatus("failed");
         return;
       }
@@ -112,7 +105,7 @@ export function FileUpload() {
           }),
         });
 
-        const result: ParseResult = await response.json();
+        const result = await readParseResponse(response);
 
         if (result.ok) {
           setDocumentId(result.document_id ?? "");
@@ -122,8 +115,8 @@ export function FileUpload() {
           setError(result.error ?? "Parsing failed");
           setStatus("failed");
         }
-      } catch {
-        setError("Could not reach the parsing service");
+      } catch (error) {
+        setError(error instanceof Error ? error.message : "Could not reach the parsing service");
         setStatus("failed");
       }
     },

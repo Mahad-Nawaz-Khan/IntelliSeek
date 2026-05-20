@@ -4,11 +4,13 @@ import { X } from "lucide-react";
 import { useCallback, useState } from "react";
 
 import { useAuth } from "../../context/AuthContext";
+import { readParseResponse } from "../../lib/parse-response";
 import { supabase } from "../../lib/supabase";
 import {
   ALLOWED_MIME_TYPES,
   BUCKET_NAME,
   getExtension,
+  getStorageUploadErrorMessage,
   isAllowedFile,
   type AllowedExtension,
 } from "../../lib/upload-config";
@@ -19,12 +21,6 @@ import { UploadProgress } from "./UploadProgress";
 type UploadModalProps = {
   isOpen: boolean;
   onClose: () => void;
-};
-
-type ParseResult = {
-  ok: boolean;
-  document_id?: string;
-  error?: string;
 };
 
 function toSizeLabel(size: number) {
@@ -88,7 +84,7 @@ export function UploadModal({ isOpen, onClose }: UploadModalProps) {
       .upload(storagePath, file, { upsert: false });
 
     if (uploadError) {
-      setItem({ ...baseItem, status: "failed", errorMessage: uploadError.message });
+      setItem({ ...baseItem, status: "failed", errorMessage: getStorageUploadErrorMessage(uploadError.message) });
       return;
     }
 
@@ -105,7 +101,7 @@ export function UploadModal({ isOpen, onClose }: UploadModalProps) {
           file_size: file.size,
         }),
       });
-      const result: ParseResult = await response.json();
+      const result = await readParseResponse(response);
 
       if (!result.ok) {
         setItem({ ...baseItem, status: "failed", errorMessage: result.error ?? "Parsing failed" });
@@ -113,8 +109,8 @@ export function UploadModal({ isOpen, onClose }: UploadModalProps) {
       }
 
       setItem({ ...baseItem, progress: 100, status: "indexed" });
-    } catch {
-      setItem({ ...baseItem, status: "failed", errorMessage: "Could not reach the parsing service" });
+    } catch (error) {
+      setItem({ ...baseItem, status: "failed", errorMessage: error instanceof Error ? error.message : "Could not reach the parsing service" });
     }
   }, [isLoaded, isSignedIn, user]);
 
