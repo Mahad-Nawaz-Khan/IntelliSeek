@@ -1,5 +1,7 @@
 import { getServerEnv } from "../env";
 
+export const EMBEDDING_DIMENSION = 1024;
+
 const OPENROUTER_EMBEDDINGS_URL = "https://openrouter.ai/api/v1/embeddings";
 const DEFAULT_EMBEDDING_MODEL = "perplexity/pplx-embed-v1-0.6b";
 
@@ -30,6 +32,10 @@ function normalizeEmbeddingResponse(
 
   if (!embeddings || embeddings.length !== expectedCount) {
     throw new Error("Embedding provider returned an invalid response");
+  }
+
+  if (embeddings.some((embedding) => embedding.length !== EMBEDDING_DIMENSION)) {
+    throw new Error(`Embedding provider returned vectors with an unexpected dimension. Expected ${EMBEDDING_DIMENSION}.`);
   }
 
   return embeddings;

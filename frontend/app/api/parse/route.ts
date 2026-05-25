@@ -1,7 +1,7 @@
 import { ALLOWED_MIME_TYPES, BUCKET_NAME, getExtension, getStorageUploadErrorMessage, MAX_FILE_SIZE, type AllowedExtension } from "../../../lib/upload-config";
 import { getAuthenticatedUser } from "../../../lib/server/auth";
 import { chunkText } from "../../../lib/server/rag/chunker";
-import { embedTexts } from "../../../lib/server/rag/embeddings";
+import { EMBEDDING_DIMENSION, embedTexts } from "../../../lib/server/rag/embeddings";
 import { extractTextFromBuffer } from "../../../lib/server/rag/parser";
 import { getSupabaseServiceClient } from "../../../lib/server/supabase";
 
@@ -19,6 +19,13 @@ function failure(status: number, error: string) {
     { ok: false, status: "Document parsing failed", error },
     { status },
   );
+}
+
+function toVectorLiteral(embedding: number[]) {
+  if (embedding.length !== EMBEDDING_DIMENSION) {
+    throw new Error(`Embedding dimension mismatch. Expected ${EMBEDDING_DIMENSION}, received ${embedding.length}.`);
+  }
+  return `[${embedding.join(",")}]`;
 }
 
 function validateBody(body: ParseRequestBody) {
@@ -119,12 +126,22 @@ export async function POST(request: Request) {
   } catch (error) {
     return failure(500, error instanceof Error ? error.message : "Embedding generation failed");
   }
-  const chunkRows = chunks.map((chunk, index) => ({
-    document_id: documentRows.id,
-    text_content: chunk,
-    chunk_index: index,
-    embedding: embeddings[index],
-  }));
+  let chunkRows: Array<{
+    document_id: string;
+    text_content: string;
+    chunk_index: number;
+    embedding: string;
+  }>;
+  try {
+    chunkRows = chunks.map((chunk, index) => ({
+      document_id: documentRows.id,
+      text_content: chunk,
+      chunk_index: index,
+      embedding: toVectorLiteral(embeddings[index]),
+    }));
+  } catch (error) {
+    return failure(500, error instanceof Error ? error.message : "Embedding formatting failed");
+  }
 
   const { data: insertedChunks, error: chunkError } = await supabase
     .from("chunks")

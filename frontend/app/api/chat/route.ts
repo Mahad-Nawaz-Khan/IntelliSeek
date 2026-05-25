@@ -1,5 +1,7 @@
+import type { SourceCitation } from "../../../lib/chat-api";
+import { generateAgentAnswer } from "../../../lib/server/agents/chat-agent";
 import { getAuthenticatedUser } from "../../../lib/server/auth";
-import { generateAnswer } from "../../../lib/server/groq";
+import { generateAnswer as generateGroqAnswer } from "../../../lib/server/groq";
 import { retrieveContext, toSourceCitations, validateQuestion } from "../../../lib/server/rag/retriever";
 import { getSupabaseServiceClient } from "../../../lib/server/supabase";
 
@@ -39,25 +41,33 @@ export async function POST(request: Request) {
     return failure(400, error instanceof Error ? error.message : "Invalid question");
   }
 
-  let context;
-  try {
-    context = await retrieveContext(question, user.id);
-  } catch {
-    return failure(500, "Retrieval failed");
-  }
-
-  if (!context.length) {
-    return failure(400, "No sufficient context found for this question");
-  }
-
   let answer: string;
-  try {
-    answer = await generateAnswer(question, context);
-  } catch {
-    return failure(500, "Answer generation failed");
-  }
+  let sources: SourceCitation[];
 
-  const sources = toSourceCitations(context);
+  try {
+    const agentResult = await generateAgentAnswer(question, user.id);
+    answer = agentResult.answer;
+    sources = agentResult.sources;
+  } catch {
+    let context;
+    try {
+      context = await retrieveContext(question, user.id);
+    } catch {
+      return failure(500, "Retrieval failed");
+    }
+
+    if (!context.length) {
+      return failure(400, "No sufficient context found for this question");
+    }
+
+    try {
+      answer = await generateGroqAnswer(question, context);
+    } catch {
+      return failure(500, "Answer generation failed");
+    }
+
+    sources = toSourceCitations(context);
+  }
 
   const supabase = getSupabaseServiceClient();
   if (supabase) {

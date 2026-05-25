@@ -1,14 +1,11 @@
 import type { SourceCitation } from "../../chat-api";
 import { embedText } from "./embeddings";
-import { topKBySimilarity } from "./similarity";
-import { loadStoredChunkVectors, type StoredChunkVector } from "./vector-store";
+import { matchUserChunks, type RetrievedChunk } from "./vector-store";
 
-const DEFAULT_TOP_K = 3;
+const DEFAULT_TOP_K = 5;
 const MAX_QUESTION_LENGTH = 1000;
 
-export type RetrievedContext = StoredChunkVector & {
-  score: number;
-};
+export type RetrievedContext = RetrievedChunk;
 
 export function validateQuestion(question: string): string {
   const trimmed = question.trim();
@@ -24,11 +21,8 @@ export async function retrieveContext(
   userId: string,
   limit = DEFAULT_TOP_K,
 ): Promise<RetrievedContext[]> {
-  const candidates = await loadStoredChunkVectors(userId);
-  if (!candidates.length) return [];
-
   const queryEmbedding = await embedText(question);
-  return topKBySimilarity(queryEmbedding, candidates, limit);
+  return matchUserChunks(userId, queryEmbedding, limit);
 }
 
 export function toSourceCitations(context: RetrievedContext[]): SourceCitation[] {

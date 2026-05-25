@@ -1,46 +1,49 @@
 import { getSupabaseServiceClient } from "../supabase";
 
-export type StoredChunkVector = {
+export type RetrievedChunk = {
   chunk_id: string;
   document_id: string;
   filename: string;
   text_content: string;
   chunk_index: number;
-  embedding: number[];
+  score: number;
 };
 
-type ChunkRow = {
-  id: string;
+type MatchUserChunkRow = {
+  chunk_id: string;
   document_id: string;
+  filename: string | null;
   text_content: string;
   chunk_index: number;
-  embedding: number[] | null;
-  documents?: {
-    filename?: string | null;
-  } | null;
+  similarity: number | null;
 };
 
-export async function loadStoredChunkVectors(userId: string): Promise<StoredChunkVector[]> {
+function toVectorLiteral(embedding: number[]) {
+  return `[${embedding.join(",")}]`;
+}
+
+export async function matchUserChunks(
+  userId: string,
+  queryEmbedding: number[],
+  limit: number,
+): Promise<RetrievedChunk[]> {
   const supabase = getSupabaseServiceClient();
   if (!supabase) return [];
 
-  const { data, error } = await supabase
-    .from("chunks")
-    .select("id, document_id, text_content, chunk_index, embedding, documents!inner(filename, user_id)")
-    .eq("documents.user_id", userId)
-    .not("embedding", "is", null)
-    .limit(1000);
+  const { data, error } = await supabase.rpc("match_user_chunks", {
+    query_embedding: toVectorLiteral(queryEmbedding),
+    match_user_id: userId,
+    match_count: limit,
+  });
 
-  if (error) throw new Error("Could not load indexed chunks");
+  if (error) throw new Error("Could not search indexed chunks");
 
-  return ((data ?? []) as ChunkRow[])
-    .filter((chunk) => Array.isArray(chunk.embedding))
-    .map((chunk) => ({
-      chunk_id: chunk.id,
-      document_id: chunk.document_id,
-      filename: chunk.documents?.filename ?? "Uploaded document",
-      text_content: chunk.text_content,
-      chunk_index: chunk.chunk_index,
-      embedding: chunk.embedding ?? [],
-    }));
+  return ((data ?? []) as MatchUserChunkRow[]).map((chunk) => ({
+    chunk_id: chunk.chunk_id,
+    document_id: chunk.document_id,
+    filename: chunk.filename ?? "Uploaded document",
+    text_content: chunk.text_content,
+    chunk_index: chunk.chunk_index,
+    score: chunk.similarity ?? 0,
+  }));
 }
