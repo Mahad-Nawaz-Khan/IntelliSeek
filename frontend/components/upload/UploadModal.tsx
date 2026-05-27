@@ -21,6 +21,7 @@ import { UploadProgress } from "./UploadProgress";
 type UploadModalProps = {
   isOpen: boolean;
   onClose: () => void;
+  onQueued?: () => void;
 };
 
 function toSizeLabel(size: number) {
@@ -34,7 +35,7 @@ function toFileType(filename: string): UploadItem["fileType"] {
   return "unknown";
 }
 
-export function UploadModal({ isOpen, onClose }: UploadModalProps) {
+export function UploadModal({ isOpen, onClose, onQueued }: UploadModalProps) {
   const { isLoaded, isSignedIn, user } = useAuth();
   const [isDragging, setIsDragging] = useState(false);
   const [item, setItem] = useState<UploadItem | null>(null);
@@ -108,11 +109,12 @@ export function UploadModal({ isOpen, onClose }: UploadModalProps) {
         return;
       }
 
-      setItem({ ...baseItem, progress: 100, status: "indexed" });
+      setItem({ ...baseItem, progress: 100, status: "indexing" });
+      onQueued?.();
     } catch (error) {
       setItem({ ...baseItem, status: "failed", errorMessage: error instanceof Error ? error.message : "Could not reach the parsing service" });
     }
-  }, [isLoaded, isSignedIn, user]);
+  }, [isLoaded, isSignedIn, onQueued, user]);
 
   if (!isOpen) return null;
 

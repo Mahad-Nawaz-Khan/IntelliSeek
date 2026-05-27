@@ -8,6 +8,9 @@ create table if not exists public.documents (
   file_type text not null check (file_type in ('application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'pdf', 'docx', 'txt', 'pptx')),
   file_size bigint not null check (file_size >= 0),
   storage_path text not null check (length(trim(storage_path)) > 0),
+  processing_status text not null default 'uploaded' check (processing_status in ('uploaded', 'queued', 'processing', 'indexed', 'failed')),
+  processing_error text,
+  indexed_at timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -30,12 +33,34 @@ create table if not exists public.chat_history (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.document_topics (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null,
+  document_id uuid not null references public.documents(id) on delete cascade,
+  topic text not null check (length(trim(topic)) > 0 and length(topic) <= 80),
+  frequency integer not null default 1 check (frequency > 0),
+  score numeric not null default 0 check (score >= 0),
+  source_chunk_id uuid references public.chunks(id) on delete set null,
+  created_at timestamptz not null default now(),
+  unique (document_id, topic)
+);
+
 alter table public.documents drop constraint if exists documents_user_id_fkey;
+alter table public.documents add column if not exists processing_status text not null default 'uploaded';
+alter table public.documents add column if not exists processing_error text;
+alter table public.documents add column if not exists indexed_at timestamptz;
+alter table public.documents drop constraint if exists documents_processing_status_check;
+alter table public.documents add constraint documents_processing_status_check check (processing_status in ('uploaded', 'queued', 'processing', 'indexed', 'failed'));
 
 create index if not exists documents_user_id_idx on public.documents(user_id);
+create index if not exists documents_processing_status_idx on public.documents(processing_status);
 create index if not exists chunks_document_id_idx on public.chunks(document_id);
 create index if not exists chunks_embedding_hnsw_idx on public.chunks using hnsw (embedding extensions.vector_cosine_ops);
 create index if not exists chat_history_user_id_idx on public.chat_history(user_id);
+create index if not exists document_topics_user_id_idx on public.document_topics(user_id);
+create index if not exists document_topics_document_id_idx on public.document_topics(document_id);
+create index if not exists document_topics_topic_lower_idx on public.document_topics(lower(topic));
+create index if not exists document_topics_user_score_idx on public.document_topics(user_id, score desc);
 
 create or replace function public.match_user_chunks(
   query_embedding extensions.vector(1024),
@@ -71,6 +96,7 @@ $$;
 alter table public.documents enable row level security;
 alter table public.chunks enable row level security;
 alter table public.chat_history enable row level security;
+alter table public.document_topics enable row level security;
 
 drop policy if exists "documents_select_own" on public.documents;
 create policy "documents_select_own"
@@ -167,6 +193,70 @@ create policy "chunks_delete_own_document"
       select 1
       from public.documents
       where documents.id = chunks.document_id
+        and documents.user_id = auth.uid()
+    )
+  );
+
+drop policy if exists "document_topics_select_own" on public.document_topics;
+create policy "document_topics_select_own"
+  on public.document_topics for select
+  to authenticated
+  using (auth.uid() = user_id);
+
+drop policy if exists "document_topics_service_manage_all" on public.document_topics;
+create policy "document_topics_service_manage_all"
+  on public.document_topics for all
+  to service_role
+  using (true)
+  with check (true);
+
+drop policy if exists "document_topics_insert_own_document" on public.document_topics;
+create policy "document_topics_insert_own_document"
+  on public.document_topics for insert
+  to authenticated
+  with check (
+    auth.uid() = user_id
+    and exists (
+      select 1
+      from public.documents
+      where documents.id = document_topics.document_id
+        and documents.user_id = auth.uid()
+    )
+  );
+
+drop policy if exists "document_topics_update_own_document" on public.document_topics;
+create policy "document_topics_update_own_document"
+  on public.document_topics for update
+  to authenticated
+  using (
+    auth.uid() = user_id
+    and exists (
+      select 1
+      from public.documents
+      where documents.id = document_topics.document_id
+        and documents.user_id = auth.uid()
+    )
+  )
+  with check (
+    auth.uid() = user_id
+    and exists (
+      select 1
+      from public.documents
+      where documents.id = document_topics.document_id
+        and documents.user_id = auth.uid()
+    )
+  );
+
+drop policy if exists "document_topics_delete_own_document" on public.document_topics;
+create policy "document_topics_delete_own_document"
+  on public.document_topics for delete
+  to authenticated
+  using (
+    auth.uid() = user_id
+    and exists (
+      select 1
+      from public.documents
+      where documents.id = document_topics.document_id
         and documents.user_id = auth.uid()
     )
   );

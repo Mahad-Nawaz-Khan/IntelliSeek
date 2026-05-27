@@ -1,8 +1,6 @@
-import { ALLOWED_MIME_TYPES, BUCKET_NAME, getExtension, getStorageUploadErrorMessage, MAX_FILE_SIZE, type AllowedExtension } from "../../../lib/upload-config";
+import { ALLOWED_MIME_TYPES, getExtension, MAX_FILE_SIZE, type AllowedExtension } from "../../../lib/upload-config";
 import { getAuthenticatedUser } from "../../../lib/server/auth";
-import { chunkText } from "../../../lib/server/rag/chunker";
-import { EMBEDDING_DIMENSION, embedTexts } from "../../../lib/server/rag/embeddings";
-import { extractTextFromBuffer } from "../../../lib/server/rag/parser";
+import { inngest } from "../../../lib/server/inngest/client";
 import { getSupabaseServiceClient } from "../../../lib/server/supabase";
 
 export const runtime = "nodejs";
@@ -19,13 +17,6 @@ function failure(status: number, error: string) {
     { ok: false, status: "Document parsing failed", error },
     { status },
   );
-}
-
-function toVectorLiteral(embedding: number[]) {
-  if (embedding.length !== EMBEDDING_DIMENSION) {
-    throw new Error(`Embedding dimension mismatch. Expected ${EMBEDDING_DIMENSION}, received ${embedding.length}.`);
-  }
-  return `[${embedding.join(",")}]`;
 }
 
 function validateBody(body: ParseRequestBody) {
@@ -88,24 +79,6 @@ export async function POST(request: Request) {
     return failure(403, "Storage path does not belong to the signed-in user");
   }
 
-  const { data: fileData, error: downloadError } = await supabase.storage
-    .from(BUCKET_NAME)
-    .download(storagePath);
-
-  if (downloadError || !fileData) {
-    return failure(404, downloadError ? getStorageUploadErrorMessage(downloadError.message) : "Stored file not found");
-  }
-
-  let extracted: string;
-  try {
-    extracted = await extractTextFromBuffer(await fileData.arrayBuffer(), filename, fileType);
-  } catch (error) {
-    return failure(400, error instanceof Error ? error.message : "Could not parse file");
-  }
-
-  const chunks = chunkText(extracted);
-  if (!chunks.length) return failure(400, "Extracted text has no indexable content");
-
   const { data: documentRows, error: documentError } = await supabase
     .from("documents")
     .insert({
@@ -114,50 +87,45 @@ export async function POST(request: Request) {
       file_type: fileType,
       file_size: fileSize,
       storage_path: storagePath,
+      processing_status: "queued",
     })
     .select("id")
     .single();
 
   if (documentError || !documentRows?.id) return failure(500, "Document metadata persistence failed");
 
-  let embeddings: number[][];
   try {
-    embeddings = await embedTexts(chunks);
-  } catch (error) {
-    return failure(500, error instanceof Error ? error.message : "Embedding generation failed");
+    await inngest.send({
+      id: `document-index-${documentRows.id}`,
+      name: "document/index.requested",
+      data: {
+        userId: user.id,
+        documentId: documentRows.id,
+        storagePath,
+        filename,
+        fileType,
+      },
+    });
+  } catch {
+    await supabase
+      .from("documents")
+      .update({
+        processing_status: "failed",
+        processing_error: "Indexing job could not be queued",
+      })
+      .eq("id", documentRows.id)
+      .eq("user_id", user.id);
+    return failure(500, "Indexing job could not be queued");
   }
-  let chunkRows: Array<{
-    document_id: string;
-    text_content: string;
-    chunk_index: number;
-    embedding: string;
-  }>;
-  try {
-    chunkRows = chunks.map((chunk, index) => ({
+
+  return Response.json(
+    {
+      ok: true,
+      status: "Document queued for indexing",
       document_id: documentRows.id,
-      text_content: chunk,
-      chunk_index: index,
-      embedding: toVectorLiteral(embeddings[index]),
-    }));
-  } catch (error) {
-    return failure(500, error instanceof Error ? error.message : "Embedding formatting failed");
-  }
-
-  const { data: insertedChunks, error: chunkError } = await supabase
-    .from("chunks")
-    .insert(chunkRows)
-    .select("id");
-
-  if (chunkError) return failure(500, "Chunk persistence failed");
-
-  return Response.json({
-    ok: true,
-    status: "Document parsed and indexed successfully",
-    document_id: documentRows.id,
-    filename,
-    text_preview: extracted.slice(0, 100),
-    chunks_created: chunks.length,
-    vectors_indexed: insertedChunks?.length ?? chunks.length,
-    index_total: insertedChunks?.length ?? chunks.length,
-  });
+      filename,
+      processing_status: "queued",
+    },
+    { status: 202 },
+  );
 }

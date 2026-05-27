@@ -1,6 +1,9 @@
 import "server-only";
 
-import { Agent, run, setDefaultOpenAIClient, setOpenAIAPI, tool } from "@openai/agents";
+import { Agent, run, setDefaultOpenAIClient, setOpenAIAPI, setTracingDisabled, tool } from "@openai/agents";
+// Disable OpenAI Agents SDK tracing at module load to avoid emitting traces
+// (must run before any Agent is constructed or run).
+setTracingDisabled(true);
 import OpenAI from "openai";
 import { z } from "zod";
 
@@ -187,7 +190,7 @@ export async function generateAgentAnswer(question: string, userId: string): Pro
     model: getChatModel(),
     tools: [searchChunks, findDocuments, getDocumentChunks],
   });
-
+  
   const result = await run(agent, question, { maxTurns: 6 });
   const answer = result.finalOutput?.trim();
   if (!answer) throw new Error("Agent answer generation returned no content");

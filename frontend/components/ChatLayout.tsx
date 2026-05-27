@@ -11,7 +11,6 @@ import { ChatWelcome } from "./chat/ChatWelcome";
 import { SUGGESTIONS } from "./SuggestedQueries";
 import { UploadModal } from "./upload/UploadModal";
 import { useAuth } from "../context/AuthContext";
-import { hasSupabasePublicConfig, supabase } from "../lib/supabase";
 import { type ChatMessage as ChatMessageType, submitChatQuestion } from "../lib/chat-api";
 import type { AutocompleteSuggestion } from "../lib/trie-autocomplete";
 import {
@@ -27,6 +26,19 @@ type SupabaseKnowledgeSource = {
   id: string;
   filename: string;
   created_at?: string;
+  processing_status?: "uploaded" | "queued" | "processing" | "indexed" | "failed";
+  processing_error?: string | null;
+  indexed_at?: string | null;
+};
+
+type AutocompleteResponse = {
+  ok: boolean;
+  suggestions?: AutocompleteSuggestion[];
+};
+
+type DocumentsResponse = {
+  ok: boolean;
+  documents?: SupabaseKnowledgeSource[];
 };
 
 function toAutocompleteId(input: string) {
@@ -34,13 +46,20 @@ function toAutocompleteId(input: string) {
 }
 
 function toUploadedSource(source: SupabaseKnowledgeSource): KnowledgeSource {
+  const status = source.processing_status === "queued" || source.processing_status === "processing" || source.processing_status === "uploaded"
+    ? "indexing"
+    : source.processing_status === "failed"
+      ? "failed"
+      : "indexed";
+
   return {
     id: source.id,
     filename: source.filename,
     sourceType: "uploaded",
     fileType: getFileType(source.filename),
-    status: "indexed",
+    status,
     createdAt: source.created_at,
+    summary: source.processing_error ?? undefined,
   };
 }
 
@@ -65,10 +84,12 @@ export function ChatLayout() {
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [sources, setSources] = useState<KnowledgeSource[]>([]);
+  const [serverAutocompleteSuggestions, setServerAutocompleteSuggestions] = useState<AutocompleteSuggestion[]>([]);
   const [sourceStatus, setSourceStatus] = useState<"loading" | "ready" | "empty" | "unavailable">(
     "loading",
   );
   const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [pollDocuments, setPollDocuments] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const revealIntervalsRef = useRef<Map<string, number>>(new Map());
 
@@ -101,22 +122,6 @@ export function ChatLayout() {
       type: "prompt" as const,
     }));
 
-    const documentSuggestions = sources.flatMap((source) => {
-      const filename = source.filename.trim();
-      if (!filename) return [];
-
-      return [
-        `Summarize ${filename}`,
-        `What topics are covered in ${filename}?`,
-        `Explain key concepts from ${filename}`,
-      ].map((question) => ({
-        id: `document-${source.id}-${toAutocompleteId(question)}`,
-        label: question,
-        value: question,
-        type: "document" as const,
-      }));
-    });
-
     const historySuggestions = messages
       .filter((message) => message.role === "user")
       .slice(-5)
@@ -127,8 +132,14 @@ export function ChatLayout() {
         type: "history" as const,
       }));
 
-    return [...promptSuggestions, ...documentSuggestions, ...historySuggestions];
-  }, [messages, sources]);
+    const seen = new Set<string>();
+    return [...promptSuggestions, ...serverAutocompleteSuggestions, ...historySuggestions].filter((suggestion) => {
+      const key = `${suggestion.type}:${suggestion.value.toLocaleLowerCase().replace(/\s+/g, " ").trim()}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [messages, serverAutocompleteSuggestions]);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -140,43 +151,73 @@ export function ChatLayout() {
     }
 
     let active = true;
-    const userId = user.id;
 
     async function loadSources() {
-      if (!hasSupabasePublicConfig() || !supabase) {
-        setSourceStatus("unavailable");
-        return;
-      }
-
       try {
-        const { data, error } = await supabase
-          .from("documents")
-          .select("id, filename, created_at")
-          .eq("user_id", userId)
-          .order("created_at", { ascending: false })
-          .limit(8);
+        const response = await fetch("/api/documents");
+        const result = (await response.json()) as DocumentsResponse;
 
         if (!active) return;
 
-        if (error) {
+        if (!response.ok || !result.ok) {
           setSourceStatus("unavailable");
           return;
         }
 
-        const rows = ((data ?? []) as SupabaseKnowledgeSource[]).map(toUploadedSource);
+        const documents = result.documents ?? [];
+        const rows = documents.map(toUploadedSource);
         setSources(rows);
+        setPollDocuments(rows.some((source) => source.status === "indexing"));
         setSourceStatus(rows.length ? "ready" : "empty");
       } catch {
         if (active) setSourceStatus("unavailable");
       }
     }
 
+    async function loadAutocomplete() {
+      try {
+        const response = await fetch("/api/autocomplete");
+        const result = (await response.json()) as AutocompleteResponse;
+        if (active && response.ok && result.ok) setServerAutocompleteSuggestions(result.suggestions ?? []);
+      } catch {
+        if (active) setServerAutocompleteSuggestions([]);
+      }
+    }
+
     loadSources();
+    loadAutocomplete();
 
     return () => {
       active = false;
     };
   }, [isLoaded, isSignedIn, router, user]);
+
+  useEffect(() => {
+    if (!pollDocuments) return;
+
+    const interval = window.setInterval(async () => {
+      try {
+        const response = await fetch("/api/documents");
+        const result = (await response.json()) as DocumentsResponse;
+        if (!response.ok || !result.ok) return;
+
+        const rows = (result.documents ?? []).map(toUploadedSource);
+        setSources(rows);
+        setPollDocuments(rows.some((source) => source.status === "indexing"));
+
+        if (!rows.some((source) => source.status === "indexing")) {
+          const autocompleteResponse = await fetch("/api/autocomplete");
+          const autocompleteResult = (await autocompleteResponse.json()) as AutocompleteResponse;
+          if (autocompleteResponse.ok && autocompleteResult.ok) {
+            setServerAutocompleteSuggestions(autocompleteResult.suggestions ?? []);
+          }
+        }
+      } catch {
+      }
+    }, 3000);
+
+    return () => window.clearInterval(interval);
+  }, [pollDocuments]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -336,6 +377,7 @@ export function ChatLayout() {
       <UploadModal
         isOpen={isUploadOpen}
         onClose={() => setIsUploadOpen(false)}
+        onQueued={() => setPollDocuments(true)}
       />
     </AcademicWorkspace>
   );

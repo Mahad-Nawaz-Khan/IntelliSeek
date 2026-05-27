@@ -1,4 +1,4 @@
-export type AutocompleteSuggestionType = "prompt" | "document" | "history";
+export type AutocompleteSuggestionType = "prompt" | "topic" | "document" | "history";
 
 export type AutocompleteSuggestion = {
   id: string;
@@ -14,8 +14,9 @@ type TrieNode = {
 
 const TYPE_PRIORITY: Record<AutocompleteSuggestionType, number> = {
   prompt: 0,
-  document: 1,
-  history: 2,
+  topic: 1,
+  document: 2,
+  history: 3,
 };
 
 function createNode(): TrieNode {
