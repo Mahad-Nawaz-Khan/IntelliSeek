@@ -8,7 +8,7 @@ import { z } from "zod";
 import type { SourceCitation } from "../../chat-api";
 import { getServerEnv } from "../env";
 import { embedText } from "../rag/embeddings";
-import { validateQuestion } from "../rag/retriever";
+import { toSourceCitations, validateQuestion, type RetrievedContext } from "../rag/retriever";
 import { matchUserChunks, type RetrievedChunk } from "../rag/vector-store";
 import { getSupabaseServiceClient } from "../supabase";
 
@@ -26,6 +26,18 @@ For topic summaries, use a brief intro followed by a bulleted list of topics.
 Cite factual claims with [Source: filename].
 If a document or answer cannot be found in the uploaded material, say exactly what is missing.
 Do not invent citations or use documents that tools did not return.`;
+
+const GROUNDED_SYSTEM_PROMPT = `You are IntelliSeek, an academic retrieval assistant.
+Answer only using the provided uploaded-file context chunks.
+Every factual claim must be supported by a citation in the format [Source: filename].
+If the provided chunks do not contain enough information to answer, say that the uploaded material does not contain enough information.
+Do not use outside knowledge, do not invent citations, and do not cite files that are not present in the context.`;
+
+const GENERAL_SYSTEM_PROMPT = `You are IntelliSeek, an academic assistant.
+The user's uploaded files were searched before this answer and no relevant uploaded-file content was found.
+Start your answer with: "I could not find relevant information in your uploaded files, so this is a general answer."
+After that sentence, answer from general knowledge in a helpful study-assistant style.
+Do not cite uploaded files or imply that this answer came from the user's files.`;
 
 type AgentToolChunk = RetrievedChunk;
 
@@ -139,10 +151,38 @@ async function getUserDocumentChunks(userId: string, documentId: string, limit: 
   }));
 }
 
-function createAgentRun(userId: string) {
+function configureAgentClient() {
   const client = createOpenRouterClient();
   setDefaultOpenAIClient(client);
   setOpenAIAPI("chat_completions");
+}
+
+function buildContextInput(context: RetrievedContext[]) {
+  return context
+    .map(
+      (chunk, index) =>
+        `[Chunk ${index + 1}]\nSource: ${chunk.filename}\nChunk ID: ${chunk.chunk_id}\nChunk Index: ${chunk.chunk_index}\nSimilarity Score: ${chunk.score.toFixed(3)}\nText: ${chunk.text_content}`,
+    )
+    .join("\n\n");
+}
+
+async function* streamAgentText(agent: Agent, input: string): AsyncGenerator<string, string> {
+  const stream = await run(agent, input, { maxTurns: 1, stream: true });
+
+  for await (const event of stream) {
+    if (event.type === "raw_model_stream_event" && event.data.type === "output_text_delta" && event.data.delta) {
+      yield event.data.delta;
+    }
+  }
+
+  await stream.completed;
+  const answer = stream.finalOutput?.trim();
+  if (!answer) throw new Error("Agent answer generation returned no content");
+  return answer;
+}
+
+function createAgentRun(userId: string) {
+  configureAgentClient();
 
   const usedChunks: AgentToolChunk[] = [];
 
@@ -224,4 +264,52 @@ export async function* streamAgentAnswer(question: string, userId: string): Asyn
   if (!answer) throw new Error("Agent answer generation returned no content");
 
   yield { type: "done", answer, sources: getSources() };
+}
+
+export async function* streamGroundedAgentAnswer(
+  question: string,
+  context: RetrievedContext[],
+): AsyncGenerator<AgentAnswerStreamEvent> {
+  configureAgentClient();
+  const agent = new Agent({
+    name: "IntelliSeek Uploaded File Assistant",
+    instructions: GROUNDED_SYSTEM_PROMPT,
+    model: getChatModel(),
+  });
+  const input = `Uploaded-file context chunks:\n${buildContextInput(context)}\n\nQuestion: ${question}`;
+  const textStream = streamAgentText(agent, input);
+  let answer = "";
+
+  while (true) {
+    const next = await textStream.next();
+    if (next.done) {
+      answer = next.value;
+      break;
+    }
+    yield { type: "delta", text: next.value };
+  }
+
+  yield { type: "done", answer, sources: toSourceCitations(context) };
+}
+
+export async function* streamGeneralAgentAnswer(question: string): AsyncGenerator<AgentAnswerStreamEvent> {
+  configureAgentClient();
+  const agent = new Agent({
+    name: "IntelliSeek General Assistant",
+    instructions: GENERAL_SYSTEM_PROMPT,
+    model: getChatModel(),
+  });
+  const textStream = streamAgentText(agent, question);
+  let answer = "";
+
+  while (true) {
+    const next = await textStream.next();
+    if (next.done) {
+      answer = next.value;
+      break;
+    }
+    yield { type: "delta", text: next.value };
+  }
+
+  yield { type: "done", answer, sources: [] };
 }

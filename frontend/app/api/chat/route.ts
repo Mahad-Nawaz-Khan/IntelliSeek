@@ -1,8 +1,7 @@
 import type { SourceCitation } from "../../../lib/chat-api";
-import { streamAgentAnswer } from "../../../lib/server/agents/chat-agent";
+import { streamGeneralAgentAnswer, streamGroundedAgentAnswer, type AgentAnswerStreamEvent } from "../../../lib/server/agents/chat-agent";
 import { getAuthenticatedUser } from "../../../lib/server/auth";
-import { generateAnswer as generateGroqAnswer } from "../../../lib/server/groq";
-import { retrieveContext, toSourceCitations, validateQuestion } from "../../../lib/server/rag/retriever";
+import { filterRelevantContext, retrieveContext, validateQuestion } from "../../../lib/server/rag/retriever";
 import { getSupabaseServiceClient } from "../../../lib/server/supabase";
 
 export const runtime = "nodejs";
@@ -36,22 +35,25 @@ async function saveChatHistory(question: string, answer: string, sources: Source
   });
 }
 
-async function generateFallbackAnswer(question: string, userId: string) {
-  const context = await retrieveContext(question, userId);
-  if (!context.length) throw new Error("No sufficient context found for this question");
+async function streamAnswer(
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  events: AsyncGenerator<AgentAnswerStreamEvent>,
+  question: string,
+  userId: string,
+) {
+  for await (const event of events) {
+    if (event.type === "delta") {
+      controller.enqueue(toSse("delta", { text: event.text }));
+      continue;
+    }
 
-  return {
-    answer: await generateGroqAnswer(question, context),
-    sources: toSourceCitations(context),
-  };
-}
+    controller.enqueue(toSse("sources", { sources: event.sources }));
+    await saveChatHistory(question, event.answer, event.sources, userId);
+    controller.enqueue(toSse("done", { answer: event.answer, sources: event.sources }));
+    return;
+  }
 
-async function streamFallback(controller: ReadableStreamDefaultController<Uint8Array>, question: string, userId: string) {
-  const { answer, sources } = await generateFallbackAnswer(question, userId);
-  controller.enqueue(toSse("delta", { text: answer }));
-  controller.enqueue(toSse("sources", { sources }));
-  await saveChatHistory(question, answer, sources, userId);
-  controller.enqueue(toSse("done", { answer, sources }));
+  throw new Error("Agent answer generation returned no content");
 }
 
 export async function POST(request: Request) {
@@ -80,28 +82,18 @@ export async function POST(request: Request) {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
-        for await (const event of streamAgentAnswer(question, user.id)) {
-          if (event.type === "delta") {
-            controller.enqueue(toSse("delta", { text: event.text }));
-            continue;
-          }
+        const context = await retrieveContext(question, user.id, 8);
+        const relevantContext = filterRelevantContext(context);
+        const events = relevantContext.length
+          ? streamGroundedAgentAnswer(question, relevantContext)
+          : streamGeneralAgentAnswer(question);
 
-          controller.enqueue(toSse("sources", { sources: event.sources }));
-          await saveChatHistory(question, event.answer, event.sources, user.id);
-          controller.enqueue(toSse("done", { answer: event.answer, sources: event.sources }));
-          controller.close();
-          return;
-        }
-
-        throw new Error("Agent answer generation returned no content");
-      } catch {
-        try {
-          await streamFallback(controller, question, user.id);
-        } catch (fallbackError) {
-          controller.enqueue(toSse("error", {
-            error: fallbackError instanceof Error ? fallbackError.message : "The assistant could not answer this question.",
-          }));
-        }
+        await streamAnswer(controller, events, question, user.id);
+      } catch (error) {
+        controller.enqueue(toSse("error", {
+          error: error instanceof Error ? error.message : "The assistant could not answer this question.",
+        }));
+      } finally {
         controller.close();
       }
     },
