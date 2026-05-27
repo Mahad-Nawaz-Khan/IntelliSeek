@@ -1,7 +1,7 @@
 "use client";
 
 import { X } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { useAuth } from "../../context/AuthContext";
 import { readParseResponse } from "../../lib/parse-response";
@@ -21,7 +21,9 @@ import { UploadProgress } from "./UploadProgress";
 type UploadModalProps = {
   isOpen: boolean;
   onClose: () => void;
-  onQueued?: () => void;
+  onQueued?: (documentId: string) => void;
+  completedDocumentIds?: Set<string>;
+  failedDocuments?: Map<string, string>;
 };
 
 function toSizeLabel(size: number) {
@@ -35,11 +37,27 @@ function toFileType(filename: string): UploadItem["fileType"] {
   return "unknown";
 }
 
-export function UploadModal({ isOpen, onClose, onQueued }: UploadModalProps) {
+export function UploadModal({ isOpen, onClose, onQueued, completedDocumentIds, failedDocuments }: UploadModalProps) {
   const { isLoaded, isSignedIn, user } = useAuth();
   const [isDragging, setIsDragging] = useState(false);
   const [item, setItem] = useState<UploadItem | null>(null);
+  const [queuedDocumentId, setQueuedDocumentId] = useState<string | null>(null);
   const [lastFile, setLastFile] = useState<File | null>(null);
+
+  const displayedItem = useMemo(() => {
+    if (!item || !queuedDocumentId) return item;
+
+    if (completedDocumentIds?.has(queuedDocumentId)) {
+      return { ...item, progress: 100, status: "indexed" as const };
+    }
+
+    const failure = failedDocuments?.get(queuedDocumentId);
+    if (failure) {
+      return { ...item, status: "failed" as const, errorMessage: failure };
+    }
+
+    return item;
+  }, [completedDocumentIds, failedDocuments, item, queuedDocumentId]);
 
   const processFile = useCallback(async (file: File) => {
     setLastFile(file);
@@ -109,8 +127,14 @@ export function UploadModal({ isOpen, onClose, onQueued }: UploadModalProps) {
         return;
       }
 
-      setItem({ ...baseItem, progress: 100, status: "indexing" });
-      onQueued?.();
+      if (!result.document_id) {
+        setItem({ ...baseItem, status: "failed", errorMessage: "Queued document did not return an id" });
+        return;
+      }
+
+      setQueuedDocumentId(result.document_id);
+      setItem({ ...baseItem, progress: 88, status: "indexing" });
+      onQueued?.(result.document_id);
     } catch (error) {
       setItem({ ...baseItem, status: "failed", errorMessage: error instanceof Error ? error.message : "Could not reach the parsing service" });
     }
@@ -118,7 +142,7 @@ export function UploadModal({ isOpen, onClose, onQueued }: UploadModalProps) {
 
   if (!isOpen) return null;
 
-  const isWorking = item?.status === "uploading" || item?.status === "indexing";
+  const isWorking = displayedItem?.status === "uploading" || displayedItem?.status === "indexing";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Upload documents">
@@ -155,9 +179,9 @@ export function UploadModal({ isOpen, onClose, onQueued }: UploadModalProps) {
           }}
         />
 
-        {item && (
+        {displayedItem && (
           <div className="mt-4">
-            <UploadProgress item={item} onRetry={lastFile ? () => processFile(lastFile) : undefined} />
+            <UploadProgress item={displayedItem} onRetry={lastFile ? () => processFile(lastFile) : undefined} />
           </div>
         )}
       </div>

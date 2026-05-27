@@ -10,6 +10,7 @@ type Suggestion = {
   label: string;
   value: string;
   type: AutocompleteSuggestionType;
+  keywords?: string[];
 };
 
 type DocumentRow = {
@@ -122,6 +123,7 @@ export async function GET() {
         label: value,
         value,
         type: "topic",
+        keywords: [row.topic],
       });
     });
   });

@@ -5,6 +5,7 @@ export type AutocompleteSuggestion = {
   label: string;
   value: string;
   type: AutocompleteSuggestionType;
+  keywords?: string[];
 };
 
 type TrieNode = {
@@ -48,22 +49,24 @@ export class TrieAutocomplete {
   }
 
   insert(suggestion: AutocompleteSuggestion) {
-    const key = normalize(suggestion.value);
-    if (!key) return;
+    const keys = [suggestion.value, ...(suggestion.keywords ?? [])].map(normalize).filter(Boolean);
+    if (!keys.length) return;
 
-    const uniqueKey = `${suggestion.type}:${key}`;
+    const uniqueKey = `${suggestion.type}:${normalize(suggestion.value)}`;
     if (this.seen.has(uniqueKey)) return;
     this.seen.add(uniqueKey);
 
-    let node = this.root;
-    for (const char of key) {
-      const next = node.children.get(char) ?? createNode();
-      node.children.set(char, next);
-      node = next;
-    }
+    keys.forEach((key) => {
+      let node = this.root;
+      for (const char of key) {
+        const next = node.children.get(char) ?? createNode();
+        node.children.set(char, next);
+        node = next;
+      }
 
-    node.suggestions.push(suggestion);
-    node.suggestions.sort(compareSuggestions);
+      node.suggestions.push(suggestion);
+      node.suggestions.sort(compareSuggestions);
+    });
   }
 
   search(prefix: string, limit = 6) {

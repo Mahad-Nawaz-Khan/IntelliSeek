@@ -90,6 +90,14 @@ export function ChatLayout() {
   );
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [pollDocuments, setPollDocuments] = useState(false);
+  const completedDocumentIds = useMemo(
+    () => new Set(sources.filter((source) => source.status === "indexed").map((source) => source.id)),
+    [sources],
+  );
+  const failedDocuments = useMemo(
+    () => new Map(sources.filter((source) => source.status === "failed").map((source) => [source.id, source.summary ?? "Indexing failed"])),
+    [sources],
+  );
   const bottomRef = useRef<HTMLDivElement>(null);
   const revealIntervalsRef = useRef<Map<string, number>>(new Map());
 
@@ -195,28 +203,35 @@ export function ChatLayout() {
   useEffect(() => {
     if (!pollDocuments) return;
 
-    const interval = window.setInterval(async () => {
+    let active = true;
+
+    async function refreshIndexedState() {
       try {
         const response = await fetch("/api/documents");
         const result = (await response.json()) as DocumentsResponse;
-        if (!response.ok || !result.ok) return;
+        if (!active || !response.ok || !result.ok) return;
 
         const rows = (result.documents ?? []).map(toUploadedSource);
+        const hasIndexingSources = rows.some((source) => source.status === "indexing");
         setSources(rows);
-        setPollDocuments(rows.some((source) => source.status === "indexing"));
+        setPollDocuments(hasIndexingSources);
 
-        if (!rows.some((source) => source.status === "indexing")) {
-          const autocompleteResponse = await fetch("/api/autocomplete");
-          const autocompleteResult = (await autocompleteResponse.json()) as AutocompleteResponse;
-          if (autocompleteResponse.ok && autocompleteResult.ok) {
-            setServerAutocompleteSuggestions(autocompleteResult.suggestions ?? []);
-          }
+        const autocompleteResponse = await fetch("/api/autocomplete");
+        const autocompleteResult = (await autocompleteResponse.json()) as AutocompleteResponse;
+        if (active && autocompleteResponse.ok && autocompleteResult.ok) {
+          setServerAutocompleteSuggestions(autocompleteResult.suggestions ?? []);
         }
       } catch {
       }
-    }, 3000);
+    }
 
-    return () => window.clearInterval(interval);
+    refreshIndexedState();
+    const interval = window.setInterval(refreshIndexedState, 3000);
+
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
   }, [pollDocuments]);
 
   useEffect(() => {
@@ -378,6 +393,8 @@ export function ChatLayout() {
         isOpen={isUploadOpen}
         onClose={() => setIsUploadOpen(false)}
         onQueued={() => setPollDocuments(true)}
+        completedDocumentIds={completedDocumentIds}
+        failedDocuments={failedDocuments}
       />
     </AcademicWorkspace>
   );
