@@ -14,7 +14,9 @@ type AppSidebarProps = {
   groups: KnowledgeSourceGroup[];
   recentChats: ChatSession[];
   sourceStatus: "loading" | "ready" | "empty" | "unavailable";
+  deletingSourceId?: string | null;
   onClose?: () => void;
+  onDeleteSource?: (sourceId: string) => void;
   onNewChat?: () => void;
 };
 
@@ -24,7 +26,7 @@ const navigation = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
-export function AppSidebar({ groups, recentChats, sourceStatus, onClose, onNewChat }: AppSidebarProps) {
+export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId, onClose, onDeleteSource, onNewChat }: AppSidebarProps) {
   const pathname = usePathname();
   const { signOut, user } = useAuth();
 
@@ -74,7 +76,12 @@ export function AppSidebar({ groups, recentChats, sourceStatus, onClose, onNewCh
       </nav>
 
       <div className="space-y-5 rounded-3xl border border-white/10 bg-white/[0.04] p-3">
-        <SourceGroups groups={groups} status={sourceStatus} />
+        <SourceGroups
+          groups={groups}
+          status={sourceStatus}
+          deletingSourceId={deletingSourceId}
+          onDeleteSource={onDeleteSource}
+        />
       </div>
 
       <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-3">

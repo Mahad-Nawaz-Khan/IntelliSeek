@@ -90,6 +90,7 @@ export function ChatLayout() {
   );
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [pollDocuments, setPollDocuments] = useState(false);
+  const [deletingSourceId, setDeletingSourceId] = useState<string | null>(null);
   const completedDocumentIds = useMemo(
     () => new Set(sources.filter((source) => source.status === "indexed").map((source) => source.id)),
     [sources],
@@ -347,6 +348,28 @@ export function ChatLayout() {
     setMessages([]);
   }, []);
 
+  const handleDeleteSource = useCallback(async (sourceId: string) => {
+    if (deletingSourceId) return;
+
+    setDeletingSourceId(sourceId);
+    try {
+      const response = await fetch("/api/documents", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ document_id: sourceId }),
+      });
+      const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!response.ok || !result?.ok) throw new Error(result?.error ?? "Document deletion failed");
+
+      setSources((current) => current.filter((source) => source.id !== sourceId));
+      setServerAutocompleteSuggestions([]);
+    } catch {
+      setSourceStatus("unavailable");
+    } finally {
+      setDeletingSourceId(null);
+    }
+  }, [deletingSourceId]);
+
   if (!isLoaded || !isSignedIn || !user) {
     return null;
   }
@@ -356,6 +379,8 @@ export function ChatLayout() {
       groups={sourceGroups}
       recentChats={recentChats}
       sourceStatus={sourceStatus}
+      deletingSourceId={deletingSourceId}
+      onDeleteSource={handleDeleteSource}
       onNewChat={handleNewChat}
     >
       <ChatHeader onOpenUpload={() => setIsUploadOpen(true)} />

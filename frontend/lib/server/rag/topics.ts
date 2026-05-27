@@ -13,42 +13,52 @@ type TopicStats = {
 };
 
 const STOP_WORDS = new Set([
-  "about",
-  "above",
-  "after",
-  "again",
-  "against",
   "also",
+  "although",
+  "and",
+  "are",
   "because",
   "been",
-  "before",
-  "being",
-  "between",
-  "both",
+  "but",
+  "can",
   "cannot",
   "chapter",
   "could",
+  "did",
   "does",
   "doing",
+  "done",
   "during",
   "each",
   "example",
+  "for",
   "from",
-  "further",
+  "had",
+  "has",
   "have",
   "having",
   "here",
+  "how",
   "into",
+  "may",
   "more",
   "most",
+  "not",
+  "off",
+  "one",
+  "only",
   "other",
+  "our",
+  "out",
   "same",
   "section",
   "should",
+  "show",
   "shown",
   "such",
   "than",
   "that",
+  "the",
   "their",
   "then",
   "there",
@@ -57,17 +67,26 @@ const STOP_WORDS = new Set([
   "this",
   "those",
   "through",
+  "too",
   "under",
+  "use",
+  "used",
   "using",
   "very",
+  "was",
+  "way",
   "were",
   "what",
   "when",
   "where",
   "which",
   "while",
+  "who",
+  "why",
+  "will",
   "with",
   "would",
+  "you",
 ]);
 
 function tokenize(input: string) {
@@ -88,10 +107,18 @@ function toLabel(topic: string) {
     .trim();
 }
 
+function isUsefulTopic(tokens: string[]) {
+  if (!tokens.length || tokens.some((token) => STOP_WORDS.has(token))) return false;
+  if (tokens.length === 1 && tokens[0].length < 4) return false;
+  return tokens.some((token) => /[a-z]/.test(token) && token.length >= 4);
+}
+
 function addTopic(topics: Map<string, TopicStats>, topic: string, sourceChunkIndex: number, filenameTokens: Set<string>) {
   if (topic.length > 80) return;
 
   const tokens = topic.split(" ");
+  if (!isUsefulTopic(tokens)) return;
+
   const filenameBoost = tokens.some((token) => filenameTokens.has(token)) ? 1.25 : 1;
   const current = topics.get(topic);
 

@@ -12,6 +12,8 @@ type AcademicWorkspaceProps = {
   groups: KnowledgeSourceGroup[];
   recentChats: ChatSession[];
   sourceStatus: "loading" | "ready" | "empty" | "unavailable";
+  deletingSourceId?: string | null;
+  onDeleteSource?: (sourceId: string) => void;
   onNewChat?: () => void;
 };
 
@@ -20,6 +22,8 @@ export function AcademicWorkspace({
   groups,
   recentChats,
   sourceStatus,
+  deletingSourceId,
+  onDeleteSource,
   onNewChat,
 }: AcademicWorkspaceProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -32,6 +36,8 @@ export function AcademicWorkspace({
             groups={groups}
             recentChats={recentChats}
             sourceStatus={sourceStatus}
+            deletingSourceId={deletingSourceId}
+            onDeleteSource={onDeleteSource}
             onNewChat={onNewChat}
           />
         </div>
@@ -42,7 +48,9 @@ export function AcademicWorkspace({
               groups={groups}
               recentChats={recentChats}
               sourceStatus={sourceStatus}
+              deletingSourceId={deletingSourceId}
               onClose={() => setIsSidebarOpen(false)}
+              onDeleteSource={onDeleteSource}
               onNewChat={onNewChat}
             />
           </div>

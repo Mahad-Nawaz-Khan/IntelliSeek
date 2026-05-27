@@ -1,4 +1,4 @@
-import { Database, FileText } from "lucide-react";
+import { Database, FileText, Trash2 } from "lucide-react";
 
 import type { KnowledgeSourceGroup } from "../../lib/ui-state";
 import { StatusBadge } from "../ui/StatusBadge";
@@ -6,9 +6,11 @@ import { StatusBadge } from "../ui/StatusBadge";
 type SourceGroupsProps = {
   groups: KnowledgeSourceGroup[];
   status: "loading" | "ready" | "empty" | "unavailable";
+  deletingSourceId?: string | null;
+  onDeleteSource?: (sourceId: string) => void;
 };
 
-export function SourceGroups({ groups, status }: SourceGroupsProps) {
+export function SourceGroups({ groups, status, deletingSourceId, onDeleteSource }: SourceGroupsProps) {
   return (
     <div className="space-y-4">
       {groups.map((group) => (
@@ -34,6 +36,17 @@ export function SourceGroups({ groups, status }: SourceGroupsProps) {
                       <p className="truncate text-sm font-medium text-slate-100">{source.filename}</p>
                       <p className="mt-1 text-xs capitalize text-slate-500">{source.status}</p>
                     </div>
+                    {source.sourceType === "uploaded" && onDeleteSource ? (
+                      <button
+                        type="button"
+                        onClick={() => onDeleteSource(source.id)}
+                        disabled={deletingSourceId === source.id}
+                        className="rounded-xl border border-red-300/15 bg-red-400/10 p-1.5 text-red-200 opacity-0 transition hover:border-red-200/40 hover:bg-red-400/20 hover:text-red-100 disabled:cursor-not-allowed disabled:opacity-60 group-hover:opacity-100 focus:opacity-100"
+                        aria-label={`Delete ${source.filename}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    ) : null}
                   </div>
                 </li>
               ))}

@@ -39,6 +39,38 @@ function toAutocompleteId(input: string) {
   return input.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
+const BLOCKED_TOPICS = new Set([
+  "also",
+  "and",
+  "are",
+  "but",
+  "can",
+  "for",
+  "from",
+  "how",
+  "not",
+  "only",
+  "the",
+  "this",
+  "use",
+  "used",
+  "was",
+  "what",
+  "when",
+  "where",
+  "which",
+  "with",
+  "you",
+]);
+
+function isUsefulTopic(topic: string) {
+  const normalized = topic.toLocaleLowerCase().replace(/\s+/g, " ").trim();
+  const words = normalized.split(" ").filter(Boolean);
+  if (!words.length || words.some((word) => BLOCKED_TOPICS.has(word))) return false;
+  if (words.length === 1 && words[0].length < 4) return false;
+  return words.some((word) => /[a-z]/.test(word) && word.length >= 4);
+}
+
 function pushUnique(suggestions: Suggestion[], seen: Set<string>, suggestion: Suggestion) {
   const key = `${suggestion.type}:${suggestion.value.toLocaleLowerCase().replace(/\s+/g, " ").trim()}`;
   if (seen.has(key)) return;
@@ -111,20 +143,15 @@ export async function GET() {
   });
 
   ((topicsResult.data ?? []) as TopicRow[]).forEach((row) => {
-    const document = Array.isArray(row.documents) ? row.documents[0] : row.documents;
-    const filename = document?.filename;
-    const values = filename
-      ? [`Explain ${row.topic}`, `How does ${row.topic} relate to ${filename}?`, `Summarize ${row.topic} from ${filename}`]
-      : [`Explain ${row.topic}`];
+    if (!isUsefulTopic(row.topic)) return;
 
-    values.forEach((value) => {
-      pushUnique(suggestions, seen, {
-        id: `topic-${row.id}-${toAutocompleteId(value)}`,
-        label: value,
-        value,
-        type: "topic",
-        keywords: [row.topic],
-      });
+    const value = row.topic;
+    pushUnique(suggestions, seen, {
+      id: `topic-${row.id}-${toAutocompleteId(value)}`,
+      label: value,
+      value,
+      type: "topic",
+      keywords: [row.topic],
     });
   });
 
