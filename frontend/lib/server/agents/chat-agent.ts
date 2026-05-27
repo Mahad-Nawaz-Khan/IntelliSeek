@@ -1,18 +1,16 @@
 import "server-only";
 
 import { Agent, run, setDefaultOpenAIClient, setOpenAIAPI, setTracingDisabled, tool } from "@openai/agents";
-// Disable OpenAI Agents SDK tracing at module load to avoid emitting traces
-// (must run before any Agent is constructed or run).
 setTracingDisabled(true);
 import OpenAI from "openai";
 import { z } from "zod";
 
 import type { SourceCitation } from "../../chat-api";
 import { getServerEnv } from "../env";
-import { validateQuestion } from "../rag/retriever";
-import { getSupabaseServiceClient } from "../supabase";
-import { matchUserChunks, type RetrievedChunk } from "../rag/vector-store";
 import { embedText } from "../rag/embeddings";
+import { validateQuestion } from "../rag/retriever";
+import { matchUserChunks, type RetrievedChunk } from "../rag/vector-store";
+import { getSupabaseServiceClient } from "../supabase";
 
 const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const DEFAULT_CHAT_MODEL = "openai/gpt-5-nano";
@@ -35,6 +33,10 @@ type AgentRunResult = {
   answer: string;
   sources: SourceCitation[];
 };
+
+export type AgentAnswerStreamEvent =
+  | { type: "delta"; text: string }
+  | { type: "done"; answer: string; sources: SourceCitation[] };
 
 type DocumentRow = {
   id: string;
@@ -137,7 +139,7 @@ async function getUserDocumentChunks(userId: string, documentId: string, limit: 
   }));
 }
 
-export async function generateAgentAnswer(question: string, userId: string): Promise<AgentRunResult> {
+function createAgentRun(userId: string) {
   const client = createOpenRouterClient();
   setDefaultOpenAIClient(client);
   setOpenAIAPI("chat_completions");
@@ -184,19 +186,42 @@ export async function generateAgentAnswer(question: string, userId: string): Pro
     },
   });
 
-  const agent = new Agent({
-    name: "IntelliSeek Academic Assistant",
-    instructions: SYSTEM_PROMPT,
-    model: getChatModel(),
-    tools: [searchChunks, findDocuments, getDocumentChunks],
-  });
-  
+  return {
+    agent: new Agent({
+      name: "IntelliSeek Academic Assistant",
+      instructions: SYSTEM_PROMPT,
+      model: getChatModel(),
+      tools: [searchChunks, findDocuments, getDocumentChunks],
+    }),
+    getSources: () => uniqueSources(usedChunks),
+  };
+}
+
+export async function generateAgentAnswer(question: string, userId: string): Promise<AgentRunResult> {
+  const { agent, getSources } = createAgentRun(userId);
   const result = await run(agent, question, { maxTurns: 6 });
   const answer = result.finalOutput?.trim();
   if (!answer) throw new Error("Agent answer generation returned no content");
 
   return {
     answer,
-    sources: uniqueSources(usedChunks),
+    sources: getSources(),
   };
+}
+
+export async function* streamAgentAnswer(question: string, userId: string): AsyncGenerator<AgentAnswerStreamEvent> {
+  const { agent, getSources } = createAgentRun(userId);
+  const stream = await run(agent, question, { maxTurns: 6, stream: true });
+
+  for await (const event of stream) {
+    if (event.type === "raw_model_stream_event" && event.data.type === "output_text_delta" && event.data.delta) {
+      yield { type: "delta", text: event.data.delta };
+    }
+  }
+
+  await stream.completed;
+  const answer = stream.finalOutput?.trim();
+  if (!answer) throw new Error("Agent answer generation returned no content");
+
+  yield { type: "done", answer, sources: getSources() };
 }

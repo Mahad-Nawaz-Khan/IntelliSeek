@@ -11,7 +11,7 @@ import { ChatWelcome } from "./chat/ChatWelcome";
 import { SUGGESTIONS } from "./SuggestedQueries";
 import { UploadModal } from "./upload/UploadModal";
 import { useAuth } from "../context/AuthContext";
-import { type ChatMessage as ChatMessageType, submitChatQuestion } from "../lib/chat-api";
+import { streamChatQuestion, type ChatMessage as ChatMessageType } from "../lib/chat-api";
 import type { AutocompleteSuggestion } from "../lib/trie-autocomplete";
 import {
   createRecentChats,
@@ -100,7 +100,6 @@ export function ChatLayout() {
     [sources],
   );
   const bottomRef = useRef<HTMLDivElement>(null);
-  const revealIntervalsRef = useRef<Map<string, number>>(new Map());
 
   const sourceGroups = useMemo(() => createSourceGroups(sources), [sources]);
   const recentChats = useMemo(() => createRecentChats(messages), [messages]);
@@ -239,47 +238,6 @@ export function ChatLayout() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  useEffect(() => {
-    const intervals = revealIntervalsRef.current;
-    return () => {
-      intervals.forEach((interval) => window.clearInterval(interval));
-      intervals.clear();
-    };
-  }, []);
-
-  const revealAnswer = useCallback((messageId: string, answer: string) => {
-    const existingInterval = revealIntervalsRef.current.get(messageId);
-    if (existingInterval) window.clearInterval(existingInterval);
-
-    let index = 0;
-    const step = Math.max(2, Math.ceil(answer.length / 90));
-
-    const interval = window.setInterval(() => {
-      index = Math.min(answer.length, index + step);
-      setMessages((current) =>
-        current.map((message) =>
-          message.id === messageId
-            ? { ...message, displayedContent: answer.slice(0, index) }
-            : message,
-        ),
-      );
-
-      if (index >= answer.length) {
-        window.clearInterval(interval);
-        revealIntervalsRef.current.delete(messageId);
-        setMessages((current) =>
-          current.map((message) =>
-            message.id === messageId
-              ? { ...message, content: answer, displayedContent: undefined, status: "complete" }
-              : message,
-          ),
-        );
-      }
-    }, 18);
-
-    revealIntervalsRef.current.set(messageId, interval);
-  }, []);
-
   const handleSubmit = useCallback(
     async (question: string) => {
       const trimmedQuestion = question.trim();
@@ -305,21 +263,50 @@ export function ChatLayout() {
       setMessages((current) => [...current, userMessage, assistantPlaceholder]);
       setIsLoading(true);
 
+      let streamedAnswer = "";
+
       try {
-        const response = await submitChatQuestion(trimmedQuestion);
-        setMessages((current) =>
-          current.map((message) =>
-            message.id === assistantId
-              ? {
-                  ...message,
-                  content: response.answer,
-                  displayedContent: "",
-                  sources: response.sources,
-                }
-              : message,
-          ),
-        );
-        revealAnswer(assistantId, response.answer);
+        await streamChatQuestion(trimmedQuestion, {
+          onDelta: (text) => {
+            streamedAnswer += text;
+            setMessages((current) =>
+              current.map((message) =>
+                message.id === assistantId
+                  ? {
+                      ...message,
+                      content: streamedAnswer,
+                      displayedContent: streamedAnswer,
+                      status: "complete",
+                    }
+                  : message,
+              ),
+            );
+          },
+          onSources: (sources) => {
+            setMessages((current) =>
+              current.map((message) =>
+                message.id === assistantId
+                  ? { ...message, sources }
+                  : message,
+              ),
+            );
+          },
+          onDone: (response) => {
+            setMessages((current) =>
+              current.map((message) =>
+                message.id === assistantId
+                  ? {
+                      ...message,
+                      content: response.answer,
+                      displayedContent: undefined,
+                      sources: response.sources,
+                      status: "complete",
+                    }
+                  : message,
+              ),
+            );
+          },
+        });
       } catch (error) {
         setMessages((current) =>
           current.map((message) =>
@@ -330,6 +317,7 @@ export function ChatLayout() {
                     error instanceof Error
                       ? error.message
                       : "The assistant could not answer this question.",
+                  displayedContent: undefined,
                   status: "error",
                 }
               : message,
@@ -339,12 +327,10 @@ export function ChatLayout() {
         setIsLoading(false);
       }
     },
-    [isLoading, revealAnswer],
+    [isLoading],
   );
 
   const handleNewChat = useCallback(() => {
-    revealIntervalsRef.current.forEach((interval) => window.clearInterval(interval));
-    revealIntervalsRef.current.clear();
     setMessages([]);
   }, []);
 

@@ -31,13 +31,54 @@ type ChatErrorResponse = {
   error?: string;
 };
 
+type StreamChatHandlers = {
+  onDelta: (text: string) => void;
+  onSources?: (sources: SourceCitation[]) => void;
+  onDone?: (response: ChatResponse) => void;
+};
+
+type StreamEvent = {
+  event: string;
+  data: unknown;
+};
+
 const CHAT_ENDPOINT = "/api/chat";
 
-export async function submitChatQuestion(question: string): Promise<ChatResponse> {
+function requireQuestion(question: string) {
   const trimmedQuestion = question.trim();
-  if (!trimmedQuestion) {
-    throw new Error("Enter a question before sending.");
+  if (!trimmedQuestion) throw new Error("Enter a question before sending.");
+  return trimmedQuestion;
+}
+
+async function parseJsonError(response: Response) {
+  const data = (await response.json().catch(() => null)) as ChatErrorResponse | null;
+  return data?.error ?? "The assistant could not answer this question.";
+}
+
+function parseSseFrame(frame: string): StreamEvent | null {
+  let event = "message";
+  const dataLines: string[] = [];
+
+  frame.split("\n").forEach((line) => {
+    if (line.startsWith("event: ")) event = line.slice(7).trim();
+    if (line.startsWith("data: ")) dataLines.push(line.slice(6));
+  });
+
+  if (!dataLines.length) return null;
+
+  try {
+    return { event, data: JSON.parse(dataLines.join("\n")) as unknown };
+  } catch {
+    return null;
   }
+}
+
+function isSourceCitationArray(value: unknown): value is SourceCitation[] {
+  return Array.isArray(value);
+}
+
+export async function submitChatQuestion(question: string): Promise<ChatResponse> {
+  const trimmedQuestion = requireQuestion(question);
 
   try {
     const payload: ChatRequest = {
@@ -76,4 +117,80 @@ export async function submitChatQuestion(question: string): Promise<ChatResponse
 
     throw new Error("Could not reach the chat service.");
   }
+}
+
+export async function streamChatQuestion(question: string, handlers: StreamChatHandlers): Promise<ChatResponse> {
+  const trimmedQuestion = requireQuestion(question);
+  const response = await fetch(CHAT_ENDPOINT, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question: trimmedQuestion } satisfies ChatRequest),
+  });
+
+  if (!response.ok) throw new Error(await parseJsonError(response));
+  if (!response.body) throw new Error("The chat service did not return a stream.");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let answer = "";
+  let sources: SourceCitation[] = [];
+  let finalAnswer = "";
+  let finalSources: SourceCitation[] = [];
+  let sawDone = false;
+
+  function handleEvent(streamEvent: StreamEvent) {
+    const data = streamEvent.data as Record<string, unknown>;
+
+    if (streamEvent.event === "delta") {
+      const text = typeof data.text === "string" ? data.text : "";
+      if (!text) return;
+      answer += text;
+      handlers.onDelta(text);
+      return;
+    }
+
+    if (streamEvent.event === "sources") {
+      sources = isSourceCitationArray(data.sources) ? data.sources : [];
+      handlers.onSources?.(sources);
+      return;
+    }
+
+    if (streamEvent.event === "done") {
+      finalAnswer = typeof data.answer === "string" ? data.answer : answer;
+      finalSources = isSourceCitationArray(data.sources) ? data.sources : sources;
+      sawDone = true;
+      handlers.onDone?.({ ok: true, answer: finalAnswer, sources: finalSources });
+      return;
+    }
+
+    if (streamEvent.event === "error") {
+      throw new Error(typeof data.error === "string" ? data.error : "The assistant could not answer this question.");
+    }
+  }
+
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value, { stream: !done });
+
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() ?? "";
+
+    for (const frame of frames) {
+      const streamEvent = parseSseFrame(frame.trim());
+      if (streamEvent) handleEvent(streamEvent);
+    }
+
+    if (done) break;
+  }
+
+  if (buffer.trim()) {
+    const streamEvent = parseSseFrame(buffer.trim());
+    if (streamEvent) handleEvent(streamEvent);
+  }
+
+  if (!sawDone) throw new Error("The assistant stream ended before completion.");
+  if (!finalAnswer.trim()) throw new Error("The assistant returned an empty answer.");
+
+  return { ok: true, answer: finalAnswer, sources: finalSources };
 }
