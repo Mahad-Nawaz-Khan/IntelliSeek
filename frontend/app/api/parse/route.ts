@@ -1,6 +1,9 @@
-import { ALLOWED_MIME_TYPES, getExtension, MAX_FILE_SIZE, type AllowedExtension } from "../../../lib/upload-config";
+import { ALLOWED_MIME_TYPES, BUCKET_NAME, getExtension, MAX_FILE_SIZE, type AllowedExtension } from "../../../lib/upload-config";
+import JSZip from "jszip";
+
 import { getAuthenticatedUser } from "../../../lib/server/auth";
 import { inngest } from "../../../lib/server/inngest/client";
+import { checkRateLimit, getClientIp, rateLimitHeaders, rateLimitResponse } from "../../../lib/server/rate-limit";
 import { getSupabaseServiceClient } from "../../../lib/server/supabase";
 
 export const runtime = "nodejs";
@@ -10,6 +13,15 @@ type ParseRequestBody = {
   filename?: unknown;
   file_type?: unknown;
   file_size?: unknown;
+};
+
+type StorageObjectInfo = {
+  name?: string | null;
+  metadata?: {
+    size?: number;
+    mimetype?: string;
+    contentType?: string;
+  } | null;
 };
 
 function failure(status: number, error: string) {
@@ -52,6 +64,102 @@ function validateBody(body: ParseRequestBody) {
   return null;
 }
 
+function splitStoragePath(storagePath: string) {
+  const normalizedPath = storagePath.replace(/\\/g, "/");
+  const slashIndex = normalizedPath.lastIndexOf("/");
+  if (slashIndex === -1) return null;
+
+  return {
+    folder: normalizedPath.slice(0, slashIndex),
+    name: normalizedPath.slice(slashIndex + 1),
+  };
+}
+
+function hasPdfSignature(bytes: Uint8Array) {
+  return bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46;
+}
+
+function hasZipSignature(bytes: Uint8Array) {
+  return bytes[0] === 0x50 && bytes[1] === 0x4b;
+}
+
+function isPlainText(bytes: Uint8Array) {
+  if (!bytes.length) return false;
+  if (bytes.includes(0)) return false;
+
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function validateOfficeContainer(bytes: Uint8Array, extension: AllowedExtension) {
+  if (!hasZipSignature(bytes)) return false;
+
+  try {
+    const zip = await JSZip.loadAsync(bytes);
+    if (extension === ".docx") return Boolean(zip.file("word/document.xml"));
+    if (extension === ".pptx") return Boolean(zip.file("ppt/presentation.xml"));
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+async function validateFileContent(bytes: Uint8Array, extension: AllowedExtension) {
+  if (extension === ".pdf") return hasPdfSignature(bytes);
+  if (extension === ".txt") return isPlainText(bytes);
+  return validateOfficeContainer(bytes, extension);
+}
+
+async function validateStoredObject(
+  supabase: NonNullable<ReturnType<typeof getSupabaseServiceClient>>,
+  storagePath: string,
+  extension: AllowedExtension,
+  expectedSize: number,
+  expectedMime: string,
+) {
+  const pathParts = splitStoragePath(storagePath);
+  if (!pathParts) return "Malformed storage path";
+
+  const { data, error } = await supabase.storage
+    .from(BUCKET_NAME)
+    .list(pathParts.folder, { limit: 100, search: pathParts.name });
+
+  if (error) return "Uploaded file could not be verified";
+
+  const object = ((data ?? []) as StorageObjectInfo[]).find((item) => item.name === pathParts.name);
+  if (!object) return "Uploaded file was not found in storage";
+
+  const storedSize = object.metadata?.size;
+  if (typeof storedSize === "number" && storedSize !== expectedSize) {
+    return "Uploaded file size does not match storage metadata";
+  }
+
+  const storedMime = object.metadata?.mimetype ?? object.metadata?.contentType;
+  if (typeof storedMime === "string" && storedMime !== expectedMime) {
+    return "Uploaded file MIME type does not match storage metadata";
+  }
+
+  const { data: fileData, error: downloadError } = await supabase.storage
+    .from(BUCKET_NAME)
+    .download(storagePath);
+
+  if (downloadError || !fileData) return "Uploaded file could not be inspected";
+
+  const bytes = new Uint8Array(await fileData.arrayBuffer());
+  if (bytes.byteLength !== expectedSize) {
+    return "Uploaded file size does not match inspected content";
+  }
+
+  const hasExpectedContent = await validateFileContent(bytes, extension);
+  if (!hasExpectedContent) return "Uploaded file content does not match its extension";
+
+  return null;
+}
+
 export async function POST(request: Request) {
   let body: ParseRequestBody;
 
@@ -70,14 +178,25 @@ export async function POST(request: Request) {
   const user = await getAuthenticatedUser();
   if (!user) return failure(401, "Sign in is required");
 
+  const rateLimit = checkRateLimit({
+    key: `parse:${user.id}:${getClientIp(request)}`,
+    limit: 10,
+    windowMs: 60 * 60 * 1000,
+  });
+  if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
+
   const storagePath = (body.storage_path as string).replace(/\\/g, "/");
   const filename = body.filename as string;
   const fileType = body.file_type as string;
   const fileSize = body.file_size as number;
+  const extension = getExtension(filename) as AllowedExtension;
 
   if (!storagePath.startsWith(`${user.id}/`)) {
     return failure(403, "Storage path does not belong to the signed-in user");
   }
+
+  const storedObjectError = await validateStoredObject(supabase, storagePath, extension, fileSize, fileType);
+  if (storedObjectError) return failure(400, storedObjectError);
 
   const { data: documentRows, error: documentError } = await supabase
     .from("documents")
@@ -126,6 +245,6 @@ export async function POST(request: Request) {
       filename,
       processing_status: "queued",
     },
-    { status: 202 },
+    { status: 202, headers: rateLimitHeaders(rateLimit) },
   );
 }

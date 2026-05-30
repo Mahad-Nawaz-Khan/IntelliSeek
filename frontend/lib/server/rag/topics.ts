@@ -98,6 +98,63 @@ function tokenize(input: string) {
     .filter((token) => token.length >= 3 && !/^\d+$/.test(token) && !STOP_WORDS.has(token));
 }
 
+function normalizeWord(input: string) {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/^-+|-+$/g, "");
+}
+
+function splitSentences(input: string) {
+  return input
+    .replace(/\s+/g, " ")
+    .split(/[.!?;:\n]+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+}
+
+function extractCandidatePhrases(input: string) {
+  const candidates: string[] = [];
+
+  splitSentences(input).forEach((sentence) => {
+    const words = sentence
+      .split(/\s+/)
+      .map(normalizeWord)
+      .filter((word) => word.length >= 3 && !/^\d+$/.test(word));
+
+    let phrase: string[] = [];
+
+    const flushPhrase = () => {
+      if (!phrase.length) return;
+
+      if (phrase.length === 1) {
+        candidates.push(phrase[0]);
+      } else {
+        for (let size = Math.min(4, phrase.length); size >= 2; size -= 1) {
+          for (let index = 0; index <= phrase.length - size; index += 1) {
+            candidates.push(phrase.slice(index, index + size).join(" "));
+          }
+        }
+      }
+
+      phrase = [];
+    };
+
+    words.forEach((word) => {
+      if (STOP_WORDS.has(word)) {
+        flushPhrase();
+        return;
+      }
+
+      phrase.push(word);
+    });
+
+    flushPhrase();
+  });
+
+  return candidates;
+}
+
 function toLabel(topic: string) {
   return topic
     .split(" ")
@@ -146,15 +203,7 @@ export function extractTopicsFromChunks(
   const topics = new Map<string, TopicStats>();
 
   chunks.forEach((chunk, chunkIndex) => {
-    const tokens = tokenize(chunk);
-    tokens.forEach((token) => addTopic(topics, token, chunkIndex, filenameTokens));
-
-    for (let size = 2; size <= 3; size += 1) {
-      for (let index = 0; index <= tokens.length - size; index += 1) {
-        const phrase = tokens.slice(index, index + size).join(" ");
-        addTopic(topics, phrase, chunkIndex, filenameTokens);
-      }
-    }
+    extractCandidatePhrases(chunk).forEach((phrase) => addTopic(topics, phrase, chunkIndex, filenameTokens));
   });
 
   return [...topics.entries()]

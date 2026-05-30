@@ -1,6 +1,7 @@
 import type { SourceCitation } from "../../../lib/chat-api";
 import { streamGeneralAgentAnswer, streamGroundedAgentAnswer, type AgentAnswerStreamEvent } from "../../../lib/server/agents/chat-agent";
 import { getAuthenticatedUser } from "../../../lib/server/auth";
+import { checkRateLimit, getClientIp, rateLimitHeaders, rateLimitResponse } from "../../../lib/server/rate-limit";
 import { filterRelevantContext, retrieveContext, validateQuestion } from "../../../lib/server/rag/retriever";
 import { getSupabaseServiceClient } from "../../../lib/server/supabase";
 
@@ -72,6 +73,13 @@ export async function POST(request: Request) {
   const user = await getAuthenticatedUser();
   if (!user) return failure(401, "Sign in is required");
 
+  const rateLimit = checkRateLimit({
+    key: `chat:${user.id}:${getClientIp(request)}`,
+    limit: 20,
+    windowMs: 60 * 1000,
+  });
+  if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
+
   let question: string;
   try {
     question = validateQuestion(body.question);
@@ -104,6 +112,7 @@ export async function POST(request: Request) {
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      ...rateLimitHeaders(rateLimit),
     },
   });
 }
