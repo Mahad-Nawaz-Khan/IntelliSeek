@@ -29,9 +29,9 @@ export function AcademicWorkspace({
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   return (
-    <main className="academic-page-shell h-dvh overflow-hidden text-slate-100">
-      <div className="flex h-full gap-4 p-3 sm:p-4 lg:p-6">
-        <div className="hidden lg:block">
+    <main className="academic-page-shell min-h-dvh text-slate-100">
+      <div className="flex min-h-dvh items-stretch gap-4 p-3 sm:p-4 lg:p-6">
+        <div className="hidden lg:flex lg:shrink-0">
           <AppSidebar
             groups={groups}
             recentChats={recentChats}
@@ -56,7 +56,7 @@ export function AcademicWorkspace({
           </div>
         )}
 
-        <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[2rem] border border-white/10 bg-slate-950/50 shadow-2xl shadow-slate-950/40 backdrop-blur-xl">
+        <section className="flex min-h-[calc(100dvh-1.5rem)] flex-1 flex-col overflow-hidden rounded-[2rem] border border-white/10 bg-slate-950/50 shadow-2xl shadow-slate-950/40 backdrop-blur-xl sm:min-h-[calc(100dvh-2rem)] lg:min-h-[calc(100dvh-3rem)]">
           <div className="border-b border-white/10 p-3 lg:hidden">
             <button
               type="button"

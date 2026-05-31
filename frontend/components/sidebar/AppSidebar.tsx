@@ -31,7 +31,7 @@ export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId
   const { signOut, user } = useAuth();
 
   return (
-    <aside className="flex h-full w-full flex-col gap-4 overflow-y-auto rounded-[2rem] border border-white/10 bg-slate-950/70 p-4 shadow-2xl shadow-slate-950/40 backdrop-blur-xl lg:w-[280px] lg:shrink-0">
+    <aside className="flex w-full flex-col gap-4 rounded-[2rem] border border-white/10 bg-slate-950/70 p-4 shadow-2xl shadow-slate-950/40 backdrop-blur-xl lg:w-[280px] lg:shrink-0">
       <div className="flex items-start justify-between gap-3 rounded-3xl border border-cyan-300/15 bg-cyan-300/10 p-4">
         <Link href="/chat" className="flex min-w-0 items-center gap-3">
           <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-cyan-300 text-slate-950">
