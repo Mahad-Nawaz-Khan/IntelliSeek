@@ -13,7 +13,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
   const content = message.displayedContent ?? message.content;
 
   return (
-    <article className={`flex gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
+    <article className={`flex gap-3 ${isUser ? "ml-8 justify-end sm:ml-16" : "mr-8 justify-start sm:mr-16"}`}>
       {!isUser && (
         <div className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-200">
           <Bot className="h-5 w-5" />
@@ -21,7 +21,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
       )}
 
       <div
-        className={`max-w-[min(44rem,88%)] rounded-3xl border px-5 py-4 shadow-xl backdrop-blur-md transition sm:max-w-[min(48rem,82%)] ${
+        className={`max-w-[min(40rem,85%)] rounded-3xl border px-5 py-4 shadow-xl backdrop-blur-md transition sm:max-w-[min(44rem,78%)] ${
           isUser
             ? "border-cyan-300/20 bg-cyan-500/15 text-cyan-50 shadow-cyan-950/20"
             : message.status === "error"
