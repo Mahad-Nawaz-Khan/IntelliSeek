@@ -1,6 +1,6 @@
 "use client";
 
-import { CornerDownLeft, GitBranch, Send } from "lucide-react";
+import { GitBranch, Plus, Send } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { type AutocompleteSuggestion, TrieAutocomplete } from "../lib/trie-autocomplete";
@@ -9,12 +9,14 @@ type ChatInputProps = {
   autocompleteSuggestions?: AutocompleteSuggestion[];
   disabled?: boolean;
   onSubmit: (question: string) => void;
+  onOpenUpload?: () => void;
 };
 
 export function ChatInput({
   autocompleteSuggestions = [],
   disabled = false,
   onSubmit,
+  onOpenUpload,
 }: ChatInputProps) {
   const [value, setValue] = useState("");
   const [isAutocompleteDismissed, setIsAutocompleteDismissed] = useState(false);
@@ -61,7 +63,7 @@ export function ChatInput({
   }
 
   return (
-    <div className="relative rounded-3xl border border-white/10 bg-slate-950/70 p-3 shadow-2xl shadow-cyan-950/20 backdrop-blur-xl transition-colors focus-within:border-cyan-400/50">
+    <div className="relative rounded-full place-self-center border border-white/10 bg-slate-950/70 p-2 w-200 h-16 shadow-2xl shadow-cyan-950/20 backdrop-blur-xl transition-colors focus-within:border-cyan-400/50">
       {isAutocompleteOpen && matches.length > 0 && (
         <div className="absolute inset-x-3 bottom-full z-20 mb-2 overflow-hidden rounded-2xl border border-cyan-300/20 bg-slate-950/95 shadow-2xl shadow-cyan-950/30 backdrop-blur-xl">
           <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2 text-xs font-medium uppercase tracking-[0.22em] text-cyan-200">
@@ -90,7 +92,17 @@ export function ChatInput({
           </div>
         </div>
       )}
-      <div className="flex items-end gap-3">
+      <div className="flex items-center mx-0.5 ">
+        {onOpenUpload && (
+          <button
+            type="button"
+            onClick={onOpenUpload}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/10 bg-transparent border-none text-slate-300 transition hover:bg-white/[0.12] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
+            aria-label="Upload document"
+          >
+            <Plus className="h-6 w-6" strokeWidth={2.5} />
+          </button>
+        )}
         <textarea
           ref={textareaRef}
           value={value}
@@ -139,16 +151,12 @@ export function ChatInput({
           type="button"
           onClick={submit}
           disabled={disabled || !value.trim()}
-          className="flex h-11 w-11 items-center justify-center rounded-2xl bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-950/30 transition hover:bg-cyan-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+          className="flex h-11 w-11 items-center justify-center rounded-full bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-950/30 transition hover:bg-cyan-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
           aria-label="Send question"
         >
           <Send className="h-5 w-5" />
         </button>
       </div>
-      <p className="flex items-center gap-2 px-3 pt-2 text-xs text-slate-500">
-        <CornerDownLeft className="h-3.5 w-3.5" />
-        Press Enter to send, Shift+Enter for a new line. Type 2+ characters for Trie suggestions.
-      </p>
     </div>
   );
 }

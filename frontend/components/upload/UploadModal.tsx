@@ -21,7 +21,7 @@ import { UploadProgress } from "./UploadProgress";
 type UploadModalProps = {
   isOpen: boolean;
   onClose: () => void;
-  onQueued?: (documentId: string) => void;
+  onUploadToast?: (payload: { toastId: string; documentId?: string; filename: string; status: "uploading" | "indexing" | "failed"; queuedAt?: number; errorMessage?: string }) => void;
   completedDocumentIds?: Set<string>;
   failedDocuments?: Map<string, string>;
 };
@@ -37,7 +37,7 @@ function toFileType(filename: string): UploadItem["fileType"] {
   return "unknown";
 }
 
-export function UploadModal({ isOpen, onClose, onQueued, completedDocumentIds, failedDocuments }: UploadModalProps) {
+export function UploadModal({ isOpen, onClose, onUploadToast, completedDocumentIds, failedDocuments }: UploadModalProps) {
   const { isLoaded, isSignedIn, user } = useAuth();
   const [isDragging, setIsDragging] = useState(false);
   const [item, setItem] = useState<UploadItem | null>(null);
@@ -95,19 +95,25 @@ export function UploadModal({ isOpen, onClose, onQueued, completedDocumentIds, f
 
     const timestamp = Date.now();
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const toastId = `${timestamp}-${safeName}`;
     const storagePath = `${userId}/${timestamp}-${safeName}`;
 
+    onUploadToast?.({ toastId, filename: file.name, status: "uploading", queuedAt: timestamp });
+    onClose();
     setItem({ ...baseItem, progress: 35, status: "uploading" });
     const { error: uploadError } = await supabase.storage
       .from(BUCKET_NAME)
       .upload(storagePath, file, { upsert: false });
 
     if (uploadError) {
-      setItem({ ...baseItem, status: "failed", errorMessage: getStorageUploadErrorMessage(uploadError.message) });
+      const errorMessage = getStorageUploadErrorMessage(uploadError.message);
+      setItem({ ...baseItem, status: "failed", errorMessage });
+      onUploadToast?.({ toastId, filename: file.name, status: "failed", errorMessage });
       return;
     }
 
     setItem({ ...baseItem, progress: 78, status: "indexing" });
+    onUploadToast?.({ toastId, filename: file.name, status: "indexing" });
     try {
       const ext = getExtension(file.name) as AllowedExtension;
       const response = await fetch("/api/parse", {
@@ -123,22 +129,28 @@ export function UploadModal({ isOpen, onClose, onQueued, completedDocumentIds, f
       const result = await readParseResponse(response);
 
       if (!result.ok) {
-        setItem({ ...baseItem, status: "failed", errorMessage: result.error ?? "Parsing failed" });
+        const errorMessage = result.error ?? "Parsing failed";
+        setItem({ ...baseItem, status: "failed", errorMessage });
+        onUploadToast?.({ toastId, filename: file.name, status: "failed", errorMessage });
         return;
       }
 
       if (!result.document_id) {
-        setItem({ ...baseItem, status: "failed", errorMessage: "Queued document did not return an id" });
+        const errorMessage = "Queued document did not return an id";
+        setItem({ ...baseItem, status: "failed", errorMessage });
+        onUploadToast?.({ toastId, filename: file.name, status: "failed", errorMessage });
         return;
       }
 
       setQueuedDocumentId(result.document_id);
       setItem({ ...baseItem, progress: 88, status: "indexing" });
-      onQueued?.(result.document_id);
+      onUploadToast?.({ toastId, documentId: result.document_id, filename: file.name, status: "indexing" });
     } catch (error) {
-      setItem({ ...baseItem, status: "failed", errorMessage: error instanceof Error ? error.message : "Could not reach the parsing service" });
+      const errorMessage = error instanceof Error ? error.message : "Could not reach the parsing service";
+      setItem({ ...baseItem, status: "failed", errorMessage });
+      onUploadToast?.({ toastId, filename: file.name, status: "failed", errorMessage });
     }
-  }, [isLoaded, isSignedIn, onQueued, user]);
+  }, [isLoaded, isSignedIn, onClose, onUploadToast, user]);
 
   if (!isOpen) return null;
 

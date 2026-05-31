@@ -9,6 +9,8 @@ import { ChatHeader } from "./chat/ChatHeader";
 import { ChatMessage } from "./chat/ChatMessage";
 import { ChatWelcome } from "./chat/ChatWelcome";
 import { SUGGESTIONS } from "./SuggestedQueries";
+import { RetrievalStatus as RetrievalStatusBanner } from "./sources/RetrievalStatus";
+import { IndexingToast, type UploadIndexingToast } from "./upload/IndexingToast";
 import { UploadModal } from "./upload/UploadModal";
 import { useAuth } from "../context/AuthContext";
 import { streamChatQuestion, type ChatMessage as ChatMessageType } from "../lib/chat-api";
@@ -91,6 +93,7 @@ export function ChatLayout() {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [pollDocuments, setPollDocuments] = useState(false);
   const [deletingSourceId, setDeletingSourceId] = useState<string | null>(null);
+  const [uploadToasts, setUploadToasts] = useState<UploadIndexingToast[]>([]);
   const completedDocumentIds = useMemo(
     () => new Set(sources.filter((source) => source.status === "indexed").map((source) => source.id)),
     [sources],
@@ -234,6 +237,47 @@ export function ChatLayout() {
     };
   }, [pollDocuments]);
 
+  // Update toast status from polling results
+  useEffect(() => {
+    setUploadToasts((current) =>
+      current.map((toast) => {
+        if (toast.status !== "uploading" && toast.status !== "indexing") return toast;
+
+        if (toast.documentId && completedDocumentIds.has(toast.documentId)) {
+          return { ...toast, status: "completed" as const };
+        }
+
+        const failure = toast.documentId ? failedDocuments.get(toast.documentId) : undefined;
+        if (failure) {
+          return { ...toast, status: "failed" as const, errorMessage: failure };
+        }
+
+        return toast;
+      }),
+    );
+  }, [completedDocumentIds, failedDocuments]);
+
+  // Auto-dismiss completed toasts after green flash
+  useEffect(() => {
+    const completedIds = uploadToasts
+      .filter((t) => t.status === "completed")
+      .map((t) => t.toastId);
+
+    if (completedIds.length === 0) return;
+
+    const timeout = window.setTimeout(() => {
+      setUploadToasts((current) =>
+        current.filter((t) => !completedIds.includes(t.toastId)),
+      );
+    }, 1800);
+
+    return () => window.clearTimeout(timeout);
+  }, [uploadToasts]);
+
+  const dismissToast = useCallback((toastId: string) => {
+    setUploadToasts((current) => current.filter((t) => t.toastId !== toastId));
+  }, []);
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -371,42 +415,61 @@ export function ChatLayout() {
       onOpenUpload={() => setIsUploadOpen(true)}
     >
       <ChatHeader onOpenUpload={() => setIsUploadOpen(true)} />
-      <div className="flex flex-1">
+      <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex-1 px-4 py-6 sm:px-6">
-            {messages.length === 0 ? (
-              <ChatWelcome disabled={isLoading} onSelect={handleSubmit} />
-            ) : (
-              <div className="mx-auto max-w-5xl space-y-5">
-                {isLoading && retrievalStatus.matches?.length ? (
-                  <div className="rounded-2xl border border-cyan-300/15 bg-cyan-300/8 p-3 text-sm text-cyan-50">
-                    Retrieving relevant sources...
+          <div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
+            <div className="flex min-h-full flex-col">
+              <div className="flex-1 pb-6">
+                {messages.length === 0 ? (
+                  <ChatWelcome disabled={isLoading} onSelect={handleSubmit} />
+                ) : (
+                  <div className="mx-auto max-w-5xl space-y-5">
+                    {isLoading && retrievalStatus.matches?.length ? (
+                      <RetrievalStatusBanner status={retrievalStatus} />
+                    ) : null}
+                    {messages.map((message) => (
+                      <ChatMessage key={message.id} message={message} />
+                    ))}
+                    <div ref={bottomRef} />
                   </div>
-                ) : null}
-                {messages.map((message) => (
-                  <ChatMessage key={message.id} message={message} />
-                ))}
-                <div ref={bottomRef} />
+                )}
               </div>
-            )}
-          </div>
 
-          <div className="border-t border-white/10 p-4 sm:p-6">
-            <ChatComposer
-              autocompleteSuggestions={autocompleteSuggestions}
-              disabled={isLoading}
-              onSubmit={handleSubmit}
-            />
+              <div className="sticky bottom-0 z-20 -mx-4 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent px-4 pb-6 pt-6 sm:-mx-6 sm:px-6">
+                <ChatComposer
+                  autocompleteSuggestions={autocompleteSuggestions}
+                  disabled={isLoading}
+                  onSubmit={handleSubmit}
+                  onOpenUpload={() => setIsUploadOpen(true)}
+                />
+              </div>
+            </div>
           </div>
         </div>
       </div>
       <UploadModal
         isOpen={isUploadOpen}
         onClose={() => setIsUploadOpen(false)}
-        onQueued={() => setPollDocuments(true)}
+        onUploadToast={({ toastId, documentId, filename, status, queuedAt, errorMessage }) => {
+          if (documentId) setPollDocuments(true);
+          setUploadToasts((current) => {
+            const existing = current.find((t) => t.toastId === toastId);
+            const nextToast: UploadIndexingToast = {
+              toastId,
+              documentId: documentId ?? existing?.documentId,
+              filename,
+              queuedAt: queuedAt ?? existing?.queuedAt ?? Date.now(),
+              status,
+              errorMessage,
+            };
+
+            return [...current.filter((t) => t.toastId !== toastId), nextToast];
+          });
+        }}
         completedDocumentIds={completedDocumentIds}
         failedDocuments={failedDocuments}
       />
+      <IndexingToast toasts={uploadToasts} onDismiss={dismissToast} />
     </AcademicWorkspace>
   );
 }

@@ -1,5 +1,8 @@
-import { Bell, Moon, Upload, UserCircle } from "lucide-react";
+"use client";
 
+import { Bell, Moon, Sun, Upload, UserCircle } from "lucide-react";
+
+import { useTheme } from "../../context/ThemeContext";
 import { PrimaryButton } from "../ui/PrimaryButton";
 
 type ChatHeaderProps = {
@@ -7,8 +10,11 @@ type ChatHeaderProps = {
 };
 
 export function ChatHeader({ onOpenUpload }: ChatHeaderProps) {
+  const { theme, toggleTheme } = useTheme();
+  const isDark = theme === "dark";
+
   return (
-    <header className="flex flex-col gap-4 border-b border-white/10 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
+    <header className="flex flex-col gap-4  px-4 pt-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
       <div>
         <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-200">IntelliSeek AI</p>
         <h2 className="mt-1 text-xl font-semibold text-white">Semantic Academic Assistant</h2>
@@ -20,10 +26,12 @@ export function ChatHeader({ onOpenUpload }: ChatHeaderProps) {
         </PrimaryButton>
         <button
           type="button"
+          onClick={toggleTheme}
           className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10 hover:text-white"
-          aria-label="Dark theme enabled"
+          aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
+          title={isDark ? "Switch to light theme" : "Switch to dark theme"}
         >
-          <Moon className="h-4 w-4" />
+          {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </button>
         <button
           type="button"
