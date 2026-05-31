@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import type { SourceCitation } from "../../chat-api";
 import { getServerEnv } from "../env";
+import { streamGroqGeneralAnswer, streamGroqGroundedAnswer } from "../groq";
 import { embedText } from "../rag/embeddings";
 import { toSourceCitations, validateQuestion, type RetrievedContext } from "../rag/retriever";
 import { matchUserChunks, type RetrievedChunk } from "../rag/vector-store";
@@ -16,28 +17,40 @@ const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const DEFAULT_CHAT_MODEL = "openai/gpt-5-nano";
 const MAX_DOCUMENT_CHUNKS = 20;
 
+const PRIMARY_STYLE_GUIDE = `Write like ChatGPT's web app: clear, direct, and easy to scan.
+Use Markdown naturally: short paragraphs, bullets, and small headings when they help.
+Start with the answer, then explain.
+For learning questions, include intuition and a small example when useful.
+For algorithms or code, include time/space complexity when relevant.
+Avoid decorative filler, over-formatting, and unnecessary disclaimers.`;
+
 const SYSTEM_PROMPT = `You are IntelliSeek, an academic document assistant for uploaded study material.
 Use the available tools before deciding that context is missing.
 For broad questions about a named document, first find the document, then read representative chunks from that document.
 For specific questions, search the user's chunks semantically.
 Answer in a helpful study-assistant style while staying grounded in the retrieved chunks.
-Format responses in clean Markdown with short paragraphs, clear spacing, and headings or bullet lists when helpful.
 For topic summaries, use a brief intro followed by a bulleted list of topics.
 Cite factual claims with [Source: filename].
 If a document or answer cannot be found in the uploaded material, say exactly what is missing.
-Do not invent citations or use documents that tools did not return.`;
+Do not invent citations or use documents that tools did not return.
+
+${PRIMARY_STYLE_GUIDE}`;
 
 const GROUNDED_SYSTEM_PROMPT = `You are IntelliSeek, an academic retrieval assistant.
 Answer only using the provided uploaded-file context chunks.
 Every factual claim must be supported by a citation in the format [Source: filename].
 If the provided chunks do not contain enough information to answer, say that the uploaded material does not contain enough information.
-Do not use outside knowledge, do not invent citations, and do not cite files that are not present in the context.`;
+Do not use outside knowledge, do not invent citations, and do not cite files that are not present in the context.
+
+${PRIMARY_STYLE_GUIDE}`;
 
 const GENERAL_SYSTEM_PROMPT = `You are IntelliSeek, an academic assistant.
 The user's uploaded files were searched before this answer and no relevant uploaded-file content was found.
 Start your answer with: "I could not find relevant information in your uploaded files, so this is a general answer."
 After that sentence, answer from general knowledge in a helpful study-assistant style.
-Do not cite uploaded files or imply that this answer came from the user's files.`;
+Do not cite uploaded files or imply that this answer came from the user's files.
+
+${PRIMARY_STYLE_GUIDE}`;
 
 type AgentToolChunk = RetrievedChunk;
 
@@ -270,45 +283,71 @@ export async function* streamGroundedAgentAnswer(
   question: string,
   context: RetrievedContext[],
 ): AsyncGenerator<AgentAnswerStreamEvent> {
-  configureAgentClient();
-  const agent = new Agent({
-    name: "IntelliSeek Uploaded File Assistant",
-    instructions: GROUNDED_SYSTEM_PROMPT,
-    model: getChatModel(),
-  });
-  const input = `Uploaded-file context chunks:\n${buildContextInput(context)}\n\nQuestion: ${question}`;
-  const textStream = streamAgentText(agent, input);
   let answer = "";
 
-  while (true) {
-    const next = await textStream.next();
-    if (next.done) {
-      answer = next.value;
-      break;
+  try {
+    configureAgentClient();
+    const agent = new Agent({
+      name: "IntelliSeek Uploaded File Assistant",
+      instructions: GROUNDED_SYSTEM_PROMPT,
+      model: getChatModel(),
+    });
+    const input = `Uploaded-file context chunks:\n${buildContextInput(context)}\n\nQuestion: ${question}`;
+    const textStream = streamAgentText(agent, input);
+
+    while (true) {
+      const next = await textStream.next();
+      if (next.done) {
+        answer = next.value;
+        break;
+      }
+      yield { type: "delta", text: next.value };
     }
-    yield { type: "delta", text: next.value };
+  } catch {
+    const fallbackStream = streamGroqGroundedAnswer(question, context);
+    while (true) {
+      const next = await fallbackStream.next();
+      if (next.done) {
+        answer = next.value;
+        break;
+      }
+      yield { type: "delta", text: next.value };
+    }
   }
 
   yield { type: "done", answer, sources: toSourceCitations(context) };
 }
 
 export async function* streamGeneralAgentAnswer(question: string): AsyncGenerator<AgentAnswerStreamEvent> {
-  configureAgentClient();
-  const agent = new Agent({
-    name: "IntelliSeek General Assistant",
-    instructions: GENERAL_SYSTEM_PROMPT,
-    model: getChatModel(),
-  });
-  const textStream = streamAgentText(agent, question);
   let answer = "";
 
-  while (true) {
-    const next = await textStream.next();
-    if (next.done) {
-      answer = next.value;
-      break;
+  try {
+    configureAgentClient();
+    const agent = new Agent({
+      name: "IntelliSeek General Assistant",
+      instructions: GENERAL_SYSTEM_PROMPT,
+      model: getChatModel(),
+    });
+    const textStream = streamAgentText(agent, question);
+
+    while (true) {
+      const next = await textStream.next();
+      if (next.done) {
+        answer = next.value;
+        break;
+      }
+      yield { type: "delta", text: next.value };
     }
-    yield { type: "delta", text: next.value };
+  } catch {
+    const fallbackStream = streamGroqGeneralAnswer(question);
+    while (true) {
+      const next = await fallbackStream.next();
+      if (next.done) {
+        answer = next.value;
+        break;
+      }
+      yield { type: "delta", text: next.value };
+    }
   }
 
   yield { type: "done", answer, sources: [] };

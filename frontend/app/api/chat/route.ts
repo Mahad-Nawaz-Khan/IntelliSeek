@@ -2,7 +2,14 @@ import type { SourceCitation } from "../../../lib/chat-api";
 import { streamGeneralAgentAnswer, streamGroundedAgentAnswer, type AgentAnswerStreamEvent } from "../../../lib/server/agents/chat-agent";
 import { getAuthenticatedUser } from "../../../lib/server/auth";
 import { checkRateLimit, getClientIp, rateLimitHeaders, rateLimitResponse } from "../../../lib/server/rate-limit";
-import { filterRelevantContext, retrieveContext, validateQuestion } from "../../../lib/server/rag/retriever";
+import {
+  filterRelevantContext,
+  hasIndexedDocuments,
+  isDocumentSummaryRequest,
+  retrieveContext,
+  retrieveRepresentativeDocumentContext,
+  validateQuestion,
+} from "../../../lib/server/rag/retriever";
 import { getSupabaseServiceClient } from "../../../lib/server/supabase";
 
 export const runtime = "nodejs";
@@ -57,6 +64,11 @@ async function streamAnswer(
   throw new Error("Agent answer generation returned no content");
 }
 
+async function* streamStaticAnswer(answer: string, sources: SourceCitation[] = []): AsyncGenerator<AgentAnswerStreamEvent> {
+  yield { type: "delta", text: answer };
+  yield { type: "done", answer, sources };
+}
+
 export async function POST(request: Request) {
   let body: ChatRequestBody;
 
@@ -90,11 +102,25 @@ export async function POST(request: Request) {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
-        const context = await retrieveContext(question, user.id, 8);
-        const relevantContext = filterRelevantContext(context);
-        const events = relevantContext.length
+        const isSummaryRequest = isDocumentSummaryRequest(question);
+        let relevantContext = isSummaryRequest
+          ? await retrieveRepresentativeDocumentContext(user.id, 10, question)
+          : [];
+
+        if (!relevantContext.length) {
+          const context = await retrieveContext(question, user.id, 8);
+          relevantContext = filterRelevantContext(context);
+        }
+
+        let events = relevantContext.length
           ? streamGroundedAgentAnswer(question, relevantContext)
           : streamGeneralAgentAnswer(question);
+
+        if (!relevantContext.length && isSummaryRequest && await hasIndexedDocuments(user.id)) {
+          events = streamStaticAnswer(
+            "I found indexed uploaded document metadata, but I could not load any indexed text chunks to summarize. Please re-index the document or upload it again, then try the summary request once indexing finishes.",
+          );
+        }
 
         await streamAnswer(controller, events, question, user.id);
       } catch (error) {

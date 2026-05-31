@@ -13,6 +13,7 @@
     "@openai/agents": "^0.11.5",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "latest",
+    "groq-sdk": "^1.2.1",
     "inngest": "^4.4.0",
     "jszip": "^3.10.1",
     "lucide-react": "^1.16.0",

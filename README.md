@@ -1,6 +1,6 @@
 # IntelliSeek
 
-IntelliSeek is a Vercel-deployable academic assistant foundation built with Next.js, Tailwind CSS, JavaScript-compatible retrieval, and Groq-powered answer generation.
+IntelliSeek is a Vercel-deployable academic assistant foundation built with Next.js, Tailwind CSS, JavaScript-compatible retrieval, OpenRouter-powered answer generation, and optional Groq fallback.
 
 ## Governed architecture
 
@@ -26,7 +26,7 @@ Core technology choices:
 | Frontend | Next.js App Router |
 | Backend | Next.js API routes |
 | Styling | Tailwind CSS |
-| AI generation | Groq API |
+| AI generation | OpenRouter primary, Groq fallback |
 | Embeddings | JavaScript-compatible local/API embeddings |
 | Search | Cosine similarity and Top-K retrieval |
 | Storage | JSON artifacts and/or Supabase |
@@ -47,7 +47,8 @@ Keep server-only secrets out of client components and public environment variabl
 
 - Node.js for the Next.js app
 - npm for dependency installation
-- A Groq API key for answer generation
+- An OpenRouter API key for embeddings and primary answer generation
+- Optional Groq API key for fallback answer generation
 - Supabase project values if using Supabase for storage or metadata
 
 ## Environment placeholders
