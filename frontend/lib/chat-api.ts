@@ -1,3 +1,7 @@
+import type { AutocompleteSuggestionMetadata } from "./trie-autocomplete";
+
+export type ChatRetrievalHint = AutocompleteSuggestionMetadata;
+
 export type SourceCitation = {
   document_id: string;
   filename: string;
@@ -17,6 +21,11 @@ export type ChatMessage = {
 
 export type ChatRequest = {
   question: string;
+  retrievalHint?: ChatRetrievalHint;
+};
+
+type ChatRequestOptions = {
+  retrievalHint?: ChatRetrievalHint;
 };
 
 export type ChatResponse = {
@@ -77,12 +86,13 @@ function isSourceCitationArray(value: unknown): value is SourceCitation[] {
   return Array.isArray(value);
 }
 
-export async function submitChatQuestion(question: string): Promise<ChatResponse> {
+export async function submitChatQuestion(question: string, options: ChatRequestOptions = {}): Promise<ChatResponse> {
   const trimmedQuestion = requireQuestion(question);
 
   try {
     const payload: ChatRequest = {
       question: trimmedQuestion,
+      ...(options.retrievalHint ? { retrievalHint: options.retrievalHint } : {}),
     };
 
     const response = await fetch(CHAT_ENDPOINT, {
@@ -119,12 +129,16 @@ export async function submitChatQuestion(question: string): Promise<ChatResponse
   }
 }
 
-export async function streamChatQuestion(question: string, handlers: StreamChatHandlers): Promise<ChatResponse> {
+export async function streamChatQuestion(question: string, handlers: StreamChatHandlers, options: ChatRequestOptions = {}): Promise<ChatResponse> {
   const trimmedQuestion = requireQuestion(question);
+  const payload: ChatRequest = {
+    question: trimmedQuestion,
+    ...(options.retrievalHint ? { retrievalHint: options.retrievalHint } : {}),
+  };
   const response = await fetch(CHAT_ENDPOINT, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question: trimmedQuestion } satisfies ChatRequest),
+    body: JSON.stringify(payload),
   });
 
   if (!response.ok) throw new Error(await parseJsonError(response));

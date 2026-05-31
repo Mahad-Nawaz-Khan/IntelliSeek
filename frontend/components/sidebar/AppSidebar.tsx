@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, GraduationCap, Library, LogOut, MessageSquarePlus, Settings, X } from "lucide-react";
+import { BookOpen, GraduationCap, Library, LogOut, Menu, MessageSquarePlus, Settings, UserCircle, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -19,6 +19,8 @@ type AppSidebarProps = {
   onDeleteSource?: (sourceId: string) => void;
   onNewChat?: () => void;
   onOpenUpload?: () => void;
+  isCollapsed?: boolean;
+  onToggleCollapsed?: () => void;
 };
 
 const navigation = [
@@ -27,9 +29,81 @@ const navigation = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
-export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId, onClose, onDeleteSource, onNewChat, onOpenUpload }: AppSidebarProps) {
+export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId, onClose, onDeleteSource, onNewChat, onOpenUpload, isCollapsed, onToggleCollapsed }: AppSidebarProps) {
   const pathname = usePathname();
   const { signOut, user } = useAuth();
+
+  if (isCollapsed) {
+    return (
+      <aside className="flex h-full w-[64px] shrink-0 flex-col items-center gap-2 overflow-hidden bg-slate-950/75 px-1.5 py-4 backdrop-blur-xl">
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10 hover:text-white"
+          aria-label="Expand sidebar"
+          title="Expand sidebar"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+
+        <div className="my-1 h-px w-6 bg-white/10" />
+
+        {onNewChat && (
+          <button
+            type="button"
+            onClick={onNewChat}
+            className="flex h-10 w-10 items-center justify-center rounded-2xl text-slate-400 transition hover:bg-white/[0.06] hover:text-white"
+            aria-label="New chat"
+            title="New chat"
+          >
+            <MessageSquarePlus className="h-4 w-4" />
+          </button>
+        )}
+
+        <nav className="flex flex-col items-center gap-1">
+          {navigation.map((item) => {
+            const Icon = item.icon;
+            const active = pathname === item.href;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex h-10 w-10 items-center justify-center rounded-2xl transition ${
+                  active
+                    ? "bg-cyan-300/12 text-cyan-50"
+                    : "text-slate-400 hover:bg-white/[0.06] hover:text-white"
+                }`}
+                aria-label={item.label}
+                title={item.label}
+              >
+                <Icon className="h-4 w-4" />
+              </Link>
+            );
+          })}
+        </nav>
+
+        <div className="mt-auto">
+          {user?.email ? (
+            <span
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-cyan-300/15 text-xs font-semibold text-cyan-200"
+              title={`Signed in as ${user.email}`}
+              aria-label={`Signed in as ${user.email}`}
+            >
+              {user.email.charAt(0).toUpperCase()}
+            </span>
+          ) : (
+            <span
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-white/5 text-slate-400"
+              title="User profile"
+              aria-label="User profile"
+            >
+              <UserCircle className="h-5 w-5" />
+            </span>
+          )}
+        </div>
+      </aside>
+    );
+  }
 
   return (
     <aside className="scrollbar-hidden flex h-full w-full flex-col gap-3 overflow-y-auto bg-slate-950/75 px-3 py-4 backdrop-blur-xl lg:w-[232px] lg:shrink-0">
@@ -46,6 +120,11 @@ export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId
         {onClose && (
           <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-slate-300 hover:bg-white/5 lg:hidden" aria-label="Close sidebar">
             <X className="h-4 w-4" />
+          </button>
+        )}
+        {onToggleCollapsed && (
+          <button type="button" onClick={onToggleCollapsed} className="hidden rounded-lg p-1.5 text-slate-300 hover:bg-white/5 lg:inline-flex" aria-label="Collapse sidebar" title="Collapse sidebar">
+            <Menu className="h-4 w-4" />
           </button>
         )}
       </div>

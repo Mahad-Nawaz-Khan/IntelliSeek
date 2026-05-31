@@ -9,7 +9,7 @@ type ChatWelcomeProps = {
 
 export function ChatWelcome({ disabled = false, onSelect }: ChatWelcomeProps) {
   return (
-    <section className="mx-auto flex w-full max-w-4xl flex-col items-center px-4 py-0 mt-0 text-center">
+    <section className="mx-auto flex w-full max-w-4xl flex-col items-center px-4 py-0 my-0 text-center">
       <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-[1.25rem] border border-cyan-300/20 bg-cyan-300/10 text-cyan-200 shadow-2xl shadow-cyan-950/30">
         <Sparkles className="h-7 w-7" />
       </div>

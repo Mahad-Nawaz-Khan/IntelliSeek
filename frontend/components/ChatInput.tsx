@@ -8,7 +8,7 @@ import { type AutocompleteSuggestion, TrieAutocomplete } from "../lib/trie-autoc
 type ChatInputProps = {
   autocompleteSuggestions?: AutocompleteSuggestion[];
   disabled?: boolean;
-  onSubmit: (question: string) => void;
+  onSubmit: (question: string, selectedSuggestion?: AutocompleteSuggestion) => void;
   onOpenUpload?: () => void;
 };
 
@@ -19,6 +19,7 @@ export function ChatInput({
   onOpenUpload,
 }: ChatInputProps) {
   const [value, setValue] = useState("");
+  const [selectedSuggestion, setSelectedSuggestion] = useState<AutocompleteSuggestion | undefined>();
   const [isAutocompleteDismissed, setIsAutocompleteDismissed] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -47,6 +48,7 @@ export function ChatInput({
 
   function selectSuggestion(suggestion: AutocompleteSuggestion) {
     setValue(suggestion.value);
+    setSelectedSuggestion(suggestion);
     setIsAutocompleteDismissed(true);
     setHighlightedIndex(0);
     textareaRef.current?.focus();
@@ -56,8 +58,9 @@ export function ChatInput({
     const question = value.trim();
     if (!question || disabled) return;
 
-    onSubmit(question);
+    onSubmit(question, selectedSuggestion?.value.trim() === question ? selectedSuggestion : undefined);
     setValue("");
+    setSelectedSuggestion(undefined);
     setIsAutocompleteDismissed(false);
     setHighlightedIndex(0);
   }
@@ -112,6 +115,7 @@ export function ChatInput({
           placeholder="Ask IntelliSeek about your uploaded material..."
           onChange={(event) => {
             setValue(event.target.value);
+            setSelectedSuggestion(undefined);
             setIsAutocompleteDismissed(false);
             setHighlightedIndex(0);
           }}

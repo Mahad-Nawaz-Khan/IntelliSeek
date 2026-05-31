@@ -27,6 +27,18 @@ type IndexedDocumentRow = {
   filename: string;
 };
 
+type DocumentChunkRow = {
+  id: string;
+  document_id: string;
+  text_content: string;
+  chunk_index: number;
+  documents: Array<{
+    filename: string | null;
+  }> | {
+    filename: string | null;
+  } | null;
+};
+
 const SUMMARY_INTENT_PATTERN = /\b(summarize|summerize|summarise|summary|summery|overview|outline|key points|main points|topics covered)\b/i;
 const DOCUMENT_REFERENCE_PATTERNS = [
   /\b(my|uploaded|all|these|the)?\s*(notes|documents|files|file|material|uploads)\b/i,
@@ -115,6 +127,46 @@ export async function hasIndexedDocuments(userId: string) {
     .limit(1);
 
   return !error && Boolean(data?.length);
+}
+
+export async function retrieveDocumentContextByIds(
+  userId: string,
+  documentIds: string[],
+  limit = 10,
+): Promise<RetrievedContext[]> {
+  const supabase = getSupabaseServiceClient();
+  if (!supabase) return [];
+
+  const uniqueDocumentIds = [...new Set(documentIds.map((id) => id.trim()).filter(Boolean))].slice(0, 4);
+  if (!uniqueDocumentIds.length) return [];
+
+  const { data: documents, error: documentsError } = await supabase
+    .from("documents")
+    .select("id, filename")
+    .eq("user_id", userId)
+    .eq("processing_status", "indexed")
+    .in("id", uniqueDocumentIds);
+
+  if (documentsError || !documents?.length) return [];
+
+  const ownedDocumentIds = ((documents ?? []) as IndexedDocumentRow[]).map((document) => document.id);
+  const { data, error } = await supabase
+    .from("chunks")
+    .select("id, document_id, text_content, chunk_index, documents!inner(filename)")
+    .in("document_id", ownedDocumentIds)
+    .order("chunk_index", { ascending: true })
+    .limit(Math.min(Math.max(limit, 1), 20));
+
+  if (error) return [];
+
+  return ((data ?? []) as DocumentChunkRow[]).map((chunk) => ({
+    chunk_id: chunk.id,
+    document_id: chunk.document_id,
+    filename: getJoinedDocument(chunk)?.filename ?? "Uploaded document",
+    text_content: chunk.text_content,
+    chunk_index: chunk.chunk_index,
+    score: 1,
+  }));
 }
 
 export async function retrieveRepresentativeDocumentContext(

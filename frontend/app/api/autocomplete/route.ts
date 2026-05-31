@@ -3,7 +3,7 @@ import { getAuthenticatedUser } from "../../../lib/server/auth";
 import { checkRateLimit, getClientIp, rateLimitHeaders, rateLimitResponse } from "../../../lib/server/rate-limit";
 import { extractTopicsFromChunks } from "../../../lib/server/rag/topics";
 import { getSupabaseServiceClient } from "../../../lib/server/supabase";
-import type { AutocompleteSuggestionType } from "../../../lib/trie-autocomplete";
+import type { AutocompleteSuggestionMetadata, AutocompleteSuggestionType } from "../../../lib/trie-autocomplete";
 
 export const runtime = "nodejs";
 
@@ -13,6 +13,7 @@ type Suggestion = {
   value: string;
   type: AutocompleteSuggestionType;
   keywords?: string[];
+  metadata?: AutocompleteSuggestionMetadata;
 };
 
 type DocumentRow = {
@@ -148,6 +149,11 @@ function getJoinedDocument(row: ChunkRow) {
   return row.documents;
 }
 
+function getTopicDocuments(row: TopicRow) {
+  if (Array.isArray(row.documents)) return row.documents;
+  return row.documents ? [row.documents] : [];
+}
+
 async function getFallbackTopicRows(
   supabase: NonNullable<ReturnType<typeof getSupabaseServiceClient>>,
   documents: DocumentRow[],
@@ -244,6 +250,18 @@ export async function GET(request: Request) {
     const topic = normalizeTopicForSuggestion(row.topic);
     if (!topic || !isUsefulTopic(topic)) return;
 
+    const topicDocuments = getTopicDocuments(row);
+    const documentIds = topicDocuments.map((document) => document.id);
+    const metadata: AutocompleteSuggestionMetadata | undefined = documentIds.length
+      ? {
+          source: "uploaded",
+          kind: "topic",
+          topic: row.topic,
+          topicId: row.id.startsWith("fallback-") ? undefined : row.id,
+          documentIds,
+        }
+      : undefined;
+
     topicToSuggestions(topic).forEach((value) => {
       pushUnique(suggestions, seen, {
         id: `topic-${row.id}-${toAutocompleteId(value)}`,
@@ -251,6 +269,7 @@ export async function GET(request: Request) {
         value,
         type: "topic",
         keywords: [topic, row.topic],
+        metadata,
       });
     });
   });
@@ -266,6 +285,11 @@ export async function GET(request: Request) {
         label: value,
         value,
         type: "document",
+        metadata: {
+          source: "uploaded",
+          kind: "document",
+          documentId: document.id,
+        },
       });
     });
   });

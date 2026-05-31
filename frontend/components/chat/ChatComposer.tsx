@@ -4,7 +4,7 @@ import { ChatInput } from "../ChatInput";
 type ChatComposerProps = {
   autocompleteSuggestions: AutocompleteSuggestion[];
   disabled?: boolean;
-  onSubmit: (question: string) => void;
+  onSubmit: (question: string, selectedSuggestion?: AutocompleteSuggestion) => void;
   onOpenUpload?: () => void;
 };
 

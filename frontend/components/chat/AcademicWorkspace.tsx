@@ -29,6 +29,7 @@ export function AcademicWorkspace({
   onOpenUpload,
 }: AcademicWorkspaceProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isDesktopSidebarCollapsed, setIsDesktopSidebarCollapsed] = useState(false);
 
   return (
     <main className="academic-page-shell h-dvh overflow-hidden text-slate-100">
@@ -42,6 +43,8 @@ export function AcademicWorkspace({
             onDeleteSource={onDeleteSource}
             onNewChat={onNewChat}
             onOpenUpload={onOpenUpload}
+            isCollapsed={isDesktopSidebarCollapsed}
+            onToggleCollapsed={() => setIsDesktopSidebarCollapsed((v) => !v)}
           />
         </div>
 

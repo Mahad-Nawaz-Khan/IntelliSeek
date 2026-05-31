@@ -1,11 +1,26 @@
 export type AutocompleteSuggestionType = "prompt" | "topic" | "document" | "history";
 
+export type AutocompleteSuggestionMetadata =
+  | {
+      source: "uploaded";
+      kind: "document";
+      documentId: string;
+    }
+  | {
+      source: "uploaded";
+      kind: "topic";
+      topic: string;
+      topicId?: string;
+      documentIds: string[];
+    };
+
 export type AutocompleteSuggestion = {
   id: string;
   label: string;
   value: string;
   type: AutocompleteSuggestionType;
   keywords?: string[];
+  metadata?: AutocompleteSuggestionMetadata;
 };
 
 type TrieNode = {

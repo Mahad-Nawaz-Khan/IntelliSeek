@@ -283,7 +283,7 @@ export function ChatLayout() {
   }, [messages]);
 
   const handleSubmit = useCallback(
-    async (question: string) => {
+    async (question: string, selectedSuggestion?: AutocompleteSuggestion) => {
       const trimmedQuestion = question.trim();
       if (!trimmedQuestion || isLoading) return;
 
@@ -350,7 +350,7 @@ export function ChatLayout() {
               ),
             );
           },
-        });
+        }, selectedSuggestion?.metadata ? { retrievalHint: selectedSuggestion.metadata } : undefined);
       } catch (error) {
         setMessages((current) =>
           current.map((message) =>
