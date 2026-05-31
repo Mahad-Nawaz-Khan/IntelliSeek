@@ -73,7 +73,7 @@ export async function POST(request: Request) {
   const user = await getAuthenticatedUser();
   if (!user) return failure(401, "Sign in is required");
 
-  const rateLimit = checkRateLimit({
+  const rateLimit = await checkRateLimit({
     key: `chat:${user.id}:${getClientIp(request)}`,
     limit: 20,
     windowMs: 60 * 1000,

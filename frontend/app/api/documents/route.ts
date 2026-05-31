@@ -11,7 +11,7 @@ export async function GET(request: Request) {
     return Response.json({ ok: false, error: "Sign in is required" }, { status: 401 });
   }
 
-  const rateLimit = checkRateLimit({
+  const rateLimit = await checkRateLimit({
     key: `documents:get:${user.id}:${getClientIp(request)}`,
     limit: 120,
     windowMs: 60 * 1000,
@@ -43,7 +43,7 @@ export async function DELETE(request: Request) {
     return Response.json({ ok: false, error: "Sign in is required" }, { status: 401 });
   }
 
-  const rateLimit = checkRateLimit({
+  const rateLimit = await checkRateLimit({
     key: `documents:delete:${user.id}:${getClientIp(request)}`,
     limit: 20,
     windowMs: 60 * 60 * 1000,

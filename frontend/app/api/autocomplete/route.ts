@@ -159,7 +159,7 @@ export async function GET(request: Request) {
     return Response.json({ ok: false, error: "Sign in is required" }, { status: 401 });
   }
 
-  const rateLimit = checkRateLimit({
+  const rateLimit = await checkRateLimit({
     key: `autocomplete:${user.id}:${getClientIp(request)}`,
     limit: 120,
     windowMs: 60 * 1000,

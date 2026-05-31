@@ -2,6 +2,17 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
+## Environment
+
+Set these optional variables to make API rate limits global across Vercel serverless instances:
+
+```bash
+UPSTASH_REDIS_REST_URL="https://...upstash.io"
+UPSTASH_REDIS_REST_TOKEN="..."
+```
+
+When these variables are missing, the app falls back to an in-memory limiter for local development.
+
 First, run the development server:
 
 ```bash
