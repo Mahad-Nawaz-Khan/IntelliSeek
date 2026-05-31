@@ -18,6 +18,7 @@ type AppSidebarProps = {
   onClose?: () => void;
   onDeleteSource?: (sourceId: string) => void;
   onNewChat?: () => void;
+  onOpenUpload?: () => void;
 };
 
 const navigation = [
@@ -26,7 +27,7 @@ const navigation = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
-export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId, onClose, onDeleteSource, onNewChat }: AppSidebarProps) {
+export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId, onClose, onDeleteSource, onNewChat, onOpenUpload }: AppSidebarProps) {
   const pathname = usePathname();
   const { signOut, user } = useAuth();
 
@@ -81,6 +82,7 @@ export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId
           status={sourceStatus}
           deletingSourceId={deletingSourceId}
           onDeleteSource={onDeleteSource}
+          onOpenUpload={onOpenUpload}
         />
       </div>
 

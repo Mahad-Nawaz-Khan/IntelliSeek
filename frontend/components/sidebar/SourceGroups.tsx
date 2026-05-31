@@ -1,4 +1,4 @@
-import { Database, FileText, Trash2 } from "lucide-react";
+import { Database, FileUp, FileText, Trash2 } from "lucide-react";
 
 import type { KnowledgeSourceGroup } from "../../lib/ui-state";
 import { StatusBadge } from "../ui/StatusBadge";
@@ -8,9 +8,10 @@ type SourceGroupsProps = {
   status: "loading" | "ready" | "empty" | "unavailable";
   deletingSourceId?: string | null;
   onDeleteSource?: (sourceId: string) => void;
+  onOpenUpload?: () => void;
 };
 
-export function SourceGroups({ groups, status, deletingSourceId, onDeleteSource }: SourceGroupsProps) {
+export function SourceGroups({ groups, status, deletingSourceId, onDeleteSource, onOpenUpload }: SourceGroupsProps) {
   return (
     <div className="space-y-4">
       {groups.map((group) => (
@@ -22,6 +23,16 @@ export function SourceGroups({ groups, status, deletingSourceId, onDeleteSource 
             </h3>
             <StatusBadge tone="slate">{group.sources.length}</StatusBadge>
           </div>
+          {group.id === "your-uploads" && onOpenUpload ? (
+            <button
+              type="button"
+              onClick={onOpenUpload}
+              className="mb-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-cyan-300/20 bg-cyan-300/10 px-3 py-2 text-sm font-medium text-cyan-50 transition hover:border-cyan-200/40 hover:bg-cyan-300/16 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
+            >
+              <FileUp className="h-4 w-4" />
+              Upload document
+            </button>
+          ) : null}
           {status === "loading" && group.id === "your-uploads" ? (
             <p className="rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-500">Loading sources...</p>
           ) : status === "unavailable" && group.id === "your-uploads" ? (

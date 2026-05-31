@@ -15,6 +15,7 @@ type AcademicWorkspaceProps = {
   deletingSourceId?: string | null;
   onDeleteSource?: (sourceId: string) => void;
   onNewChat?: () => void;
+  onOpenUpload?: () => void;
 };
 
 export function AcademicWorkspace({
@@ -25,6 +26,7 @@ export function AcademicWorkspace({
   deletingSourceId,
   onDeleteSource,
   onNewChat,
+  onOpenUpload,
 }: AcademicWorkspaceProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
@@ -39,6 +41,7 @@ export function AcademicWorkspace({
             deletingSourceId={deletingSourceId}
             onDeleteSource={onDeleteSource}
             onNewChat={onNewChat}
+            onOpenUpload={onOpenUpload}
           />
         </div>
 
@@ -52,6 +55,7 @@ export function AcademicWorkspace({
               onClose={() => setIsSidebarOpen(false)}
               onDeleteSource={onDeleteSource}
               onNewChat={onNewChat}
+              onOpenUpload={onOpenUpload}
             />
           </div>
         )}

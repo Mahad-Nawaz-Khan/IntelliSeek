@@ -368,6 +368,7 @@ export function ChatLayout() {
       deletingSourceId={deletingSourceId}
       onDeleteSource={handleDeleteSource}
       onNewChat={handleNewChat}
+      onOpenUpload={() => setIsUploadOpen(true)}
     >
       <ChatHeader onOpenUpload={() => setIsUploadOpen(true)} />
       <div className="flex flex-1">
@@ -394,7 +395,6 @@ export function ChatLayout() {
             <ChatComposer
               autocompleteSuggestions={autocompleteSuggestions}
               disabled={isLoading}
-              onOpenUpload={() => setIsUploadOpen(true)}
               onSubmit={handleSubmit}
             />
           </div>
