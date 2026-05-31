@@ -55,7 +55,7 @@ function toAutocompleteId(input: string) {
   return input.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
-const BLOCKED_TOPICS = new Set([
+const BLOCKED_TOPIC_WORDS = new Set([
   "also",
   "and",
   "are",
@@ -79,6 +79,26 @@ const BLOCKED_TOPICS = new Set([
   "you",
 ]);
 
+const GENERIC_COMMAND_TOPICS = new Set([
+  "answer",
+  "answered",
+  "answers",
+  "ask",
+  "asked",
+  "define",
+  "describe",
+  "discuss",
+  "explain",
+  "explained",
+  "explaining",
+  "explains",
+  "give",
+  "question",
+  "questions",
+  "summarize",
+  "summary",
+]);
+
 const TOPIC_TEMPLATES = [
   "Explain {topic}",
   "What is {topic}?",
@@ -86,10 +106,25 @@ const TOPIC_TEMPLATES = [
   "Give me key points about {topic}",
 ];
 
+function normalizeTopicForSuggestion(topic: string) {
+  const normalized = topic.toLocaleLowerCase().replace(/\s+/g, " ").trim();
+  const words = normalized.split(" ").filter(Boolean);
+
+  while (words.length > 1 && GENERIC_COMMAND_TOPICS.has(words[0])) {
+    words.shift();
+  }
+
+  if (!words.length) return null;
+  return words
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
 function isUsefulTopic(topic: string) {
   const normalized = topic.toLocaleLowerCase().replace(/\s+/g, " ").trim();
   const words = normalized.split(" ").filter(Boolean);
-  if (!words.length || words.some((word) => BLOCKED_TOPICS.has(word))) return false;
+  if (!words.length || words.some((word) => BLOCKED_TOPIC_WORDS.has(word))) return false;
+  if (words.length === 1 && GENERIC_COMMAND_TOPICS.has(words[0])) return false;
   if (words.length === 1 && words[0].length < 4) return false;
   return words.some((word) => /[a-z]/.test(word) && word.length >= 4);
 }
@@ -206,15 +241,16 @@ export async function GET(request: Request) {
   const seen = new Set<string>();
 
   topicRows.forEach((row) => {
-    if (!isUsefulTopic(row.topic)) return;
+    const topic = normalizeTopicForSuggestion(row.topic);
+    if (!topic || !isUsefulTopic(topic)) return;
 
-    topicToSuggestions(row.topic).forEach((value) => {
+    topicToSuggestions(topic).forEach((value) => {
       pushUnique(suggestions, seen, {
         id: `topic-${row.id}-${toAutocompleteId(value)}`,
         label: value,
         value,
         type: "topic",
-        keywords: [row.topic],
+        keywords: [topic, row.topic],
       });
     });
   });
