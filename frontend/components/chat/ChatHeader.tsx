@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, Moon, Sun, Upload, UserCircle } from "lucide-react";
+import { Moon, Sun, Upload } from "lucide-react";
 
 import { useTheme } from "../../context/ThemeContext";
 import { PrimaryButton } from "../ui/PrimaryButton";
@@ -32,20 +32,6 @@ export function ChatHeader({ onOpenUpload }: ChatHeaderProps) {
           title={isDark ? "Switch to light theme" : "Switch to dark theme"}
         >
           {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-        </button>
-        <button
-          type="button"
-          className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10 hover:text-white"
-          aria-label="Notifications"
-        >
-          <Bell className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10 hover:text-white"
-          aria-label="Profile"
-        >
-          <UserCircle className="h-5 w-5" />
         </button>
       </div>
     </header>
