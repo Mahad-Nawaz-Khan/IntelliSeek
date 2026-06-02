@@ -127,3 +127,35 @@ export async function* streamGroqGeneralAnswer(question: string): AsyncGenerator
     { role: "user", content: question },
   ]);
 }
+
+function cleanGeneratedTitle(title: string) {
+  return title
+    .replace(/["'`]/g, "")
+    .replace(/[.!?;:]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80);
+}
+
+export async function generateGroqChatTitle(question: string, answer: string): Promise<string> {
+  const client = createGroqClient();
+  const completion = await client.chat.completions.create({
+    model: getGroqModel(),
+    messages: [
+      {
+        role: "system",
+        content: "Create a concise chat title. Use 3-7 words. No quotes. Avoid punctuation-heavy output. Return only the title.",
+      },
+      {
+        role: "user",
+        content: `User question:\n${question}\n\nAssistant answer:\n${answer.slice(0, 1200)}`,
+      },
+    ],
+    temperature: 0.2,
+    max_completion_tokens: 32,
+  });
+
+  const title = cleanGeneratedTitle(completion.choices[0]?.message?.content ?? "");
+  if (!title) throw new Error("Groq title generation returned no content");
+  return title;
+}

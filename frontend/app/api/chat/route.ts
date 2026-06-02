@@ -1,6 +1,7 @@
 import type { ChatRetrievalHint, SourceCitation } from "../../../lib/chat-api";
-import { streamAgentAnswer, streamGeneralAgentAnswer, streamGroundedAgentAnswer, type AgentAnswerStreamEvent } from "../../../lib/server/agents/chat-agent";
+import { streamAgentAnswer, streamGeneralAgentAnswer, streamGroundedAgentAnswer, type AgentAnswerStreamEvent, type ConversationTurn } from "../../../lib/server/agents/chat-agent";
 import { getAuthenticatedUser } from "../../../lib/server/auth";
+import { generateGroqChatTitle } from "../../../lib/server/groq";
 import { createRequestLogger, type LogData, type RequestLogger } from "../../../lib/server/logger";
 import { checkRateLimit, getClientIp, rateLimitHeaders, rateLimitResponse } from "../../../lib/server/rate-limit";
 import {
@@ -19,6 +20,19 @@ export const runtime = "nodejs";
 type ChatRequestBody = {
   question?: unknown;
   retrievalHint?: unknown;
+  chatSessionId?: unknown;
+};
+
+type ChatSessionRow = {
+  id: string;
+  title: string;
+  title_status: "pending" | "generated" | "fallback";
+};
+
+type ChatHistoryContextRow = {
+  question: string;
+  answer: string;
+  created_at: string;
 };
 
 const encoder = new TextEncoder();
@@ -72,7 +86,117 @@ function isLikelyUploadedMaterialRequest(question: string) {
   return /\b(uploaded|document|documents|file|files|notes|material|source|sources)\b/i.test(question);
 }
 
-async function saveChatHistory(question: string, answer: string, sources: SourceCitation[], userId: string, log?: RequestLogger) {
+function parseChatSessionId(value: unknown) {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value !== "string") throw new Error("Invalid chat session id");
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
+    throw new Error("Invalid chat session id");
+  }
+  return value;
+}
+
+function fallbackTitle(question: string) {
+  const normalized = question.replace(/\s+/g, " ").trim();
+  return (normalized.length > 80 ? `${normalized.slice(0, 77).trim()}...` : normalized) || "New chat";
+}
+
+async function createChatSession(userId: string, log?: RequestLogger): Promise<ChatSessionRow> {
+  const supabase = getSupabaseServiceClient();
+  if (!supabase) throw new Error("Supabase service client is not configured");
+
+  const { data, error } = await supabase
+    .from("chat_sessions")
+    .insert({ user_id: userId })
+    .select("id, title, title_status")
+    .single();
+
+  if (error || !data) {
+    log?.error("chat_sessions.insert.failed", { errorCategory: "supabase_insert", userId, error });
+    throw new Error("Could not create chat session");
+  }
+
+  return data as ChatSessionRow;
+}
+
+async function getOwnedChatSession(sessionId: string, userId: string, log?: RequestLogger): Promise<ChatSessionRow> {
+  const supabase = getSupabaseServiceClient();
+  if (!supabase) throw new Error("Supabase service client is not configured");
+
+  const { data, error } = await supabase
+    .from("chat_sessions")
+    .select("id, title, title_status")
+    .eq("id", sessionId)
+    .eq("user_id", userId)
+    .single();
+
+  if (error || !data) {
+    log?.warn("chat_sessions.select.not_found", { errorCategory: "auth_failure", userId, sessionId, error });
+    throw new Error("Chat session was not found");
+  }
+
+  return data as ChatSessionRow;
+}
+
+async function getRecentConversationContext(userId: string, chatSessionId: string, log?: RequestLogger): Promise<ConversationTurn[]> {
+  const supabase = getSupabaseServiceClient();
+  if (!supabase) return [];
+
+  const { data, error } = await supabase
+    .from("chat_history")
+    .select("question, answer, created_at")
+    .eq("user_id", userId)
+    .eq("chat_session_id", chatSessionId)
+    .order("created_at", { ascending: false })
+    .limit(6);
+
+  if (error) {
+    log?.warn("chat_history.context.failed", { errorCategory: "supabase_query", userId, sessionId: chatSessionId, error });
+    return [];
+  }
+
+  return ((data ?? []) as ChatHistoryContextRow[])
+    .reverse()
+    .map((row) => ({ question: row.question, answer: row.answer }));
+}
+
+async function updateChatSessionTimestamp(userId: string, chatSessionId: string, log?: RequestLogger) {
+  const supabase = getSupabaseServiceClient();
+  if (!supabase) return;
+
+  const { error } = await supabase
+    .from("chat_sessions")
+    .update({ updated_at: new Date().toISOString() })
+    .eq("id", chatSessionId)
+    .eq("user_id", userId);
+
+  if (error) log?.warn("chat_sessions.touch.failed", { errorCategory: "supabase_query", userId, sessionId: chatSessionId, error });
+}
+
+async function generateAndStoreTitle(chatSessionId: string, userId: string, question: string, answer: string, log?: RequestLogger) {
+  const supabase = getSupabaseServiceClient();
+  if (!supabase) return;
+
+  try {
+    const title = await generateGroqChatTitle(question, answer);
+    const { error } = await supabase
+      .from("chat_sessions")
+      .update({ title, title_status: "generated", updated_at: new Date().toISOString() })
+      .eq("id", chatSessionId)
+      .eq("user_id", userId)
+      .eq("title_status", "pending");
+    if (error) throw error;
+  } catch (error) {
+    const { error: fallbackError } = await supabase
+      .from("chat_sessions")
+      .update({ title: fallbackTitle(question), title_status: "fallback", updated_at: new Date().toISOString() })
+      .eq("id", chatSessionId)
+      .eq("user_id", userId)
+      .eq("title_status", "pending");
+    log?.warn("chat_sessions.title.failed", { errorCategory: "unknown", userId, sessionId: chatSessionId, error, fallbackError });
+  }
+}
+
+async function saveChatHistory(question: string, answer: string, sources: SourceCitation[], userId: string, chatSessionId: string, log?: RequestLogger) {
   const supabase = getSupabaseServiceClient();
   if (!supabase) {
     log?.error("chat_history.insert.client_unavailable", { errorCategory: "supabase_insert", userId });
@@ -81,6 +205,7 @@ async function saveChatHistory(question: string, answer: string, sources: Source
 
   const { error } = await supabase.from("chat_history").insert({
     user_id: userId,
+    chat_session_id: chatSessionId,
     question,
     answer,
     sources_cited: sources,
@@ -104,6 +229,8 @@ async function streamAnswer(
   events: AsyncGenerator<AgentAnswerStreamEvent>,
   question: string,
   userId: string,
+  chatSessionId: string,
+  shouldGenerateTitle: boolean,
   log?: RequestLogger,
 ) {
   for await (const event of events) {
@@ -113,8 +240,10 @@ async function streamAnswer(
     }
 
     controller.enqueue(toSse("sources", { sources: event.sources }));
-    await saveChatHistory(question, event.answer, event.sources, userId, log);
-    controller.enqueue(toSse("done", { answer: event.answer, sources: event.sources }));
+    await saveChatHistory(question, event.answer, event.sources, userId, chatSessionId, log);
+    await updateChatSessionTimestamp(userId, chatSessionId, log);
+    if (shouldGenerateTitle) void generateAndStoreTitle(chatSessionId, userId, question, event.answer, log);
+    controller.enqueue(toSse("done", { answer: event.answer, sources: event.sources, chatSessionId }));
     log?.info("stream.complete", { userId, sourceCount: event.sources.length, answerLength: event.answer.length });
     return;
   }
@@ -140,6 +269,7 @@ export async function POST(request: Request) {
   log.info("request.start", {
     questionLength: typeof body.question === "string" ? body.question.length : undefined,
     hasRetrievalHint: Boolean(body.retrievalHint),
+    hasChatSessionId: typeof body.chatSessionId === "string" && Boolean(body.chatSessionId),
   });
 
   if (typeof body.question !== "string") {
@@ -160,8 +290,10 @@ export async function POST(request: Request) {
   }
 
   let question: string;
+  let requestedChatSessionId: string | undefined;
   try {
     question = validateQuestion(body.question);
+    requestedChatSessionId = parseChatSessionId(body.chatSessionId);
   } catch (error) {
     return failure(400, error instanceof Error ? error.message : "Invalid question", log, { errorCategory: "validation", userId: user.id, error });
   }
@@ -172,6 +304,11 @@ export async function POST(request: Request) {
     async start(controller) {
       try {
         const retrievalHint = parseRetrievalHint(body.retrievalHint);
+        const chatSession = requestedChatSessionId
+          ? await getOwnedChatSession(requestedChatSessionId, user.id, log)
+          : await createChatSession(user.id, log);
+        const conversationContext = await getRecentConversationContext(user.id, chatSession.id, log);
+        const shouldGenerateTitle = !requestedChatSessionId && chatSession.title_status === "pending";
         log.info("retrieval.hint", {
           userId: user.id,
           hintKind: retrievalHint?.kind,
@@ -216,15 +353,15 @@ export async function POST(request: Request) {
         let answerMode: "grounded" | "agent" | "general" | "static-warning";
         if (relevantContext.length) {
           answerMode = "grounded";
-          events = streamGroundedAgentAnswer(question, relevantContext);
+          events = streamGroundedAgentAnswer(question, relevantContext, conversationContext);
         } else if (retrievalHint || isLikelyUploadedMaterialRequest(question)) {
           answerMode = "agent";
           log.info("retrieval.strategy.start", { userId: user.id, strategy: "agent_fallback" });
-          events = streamAgentAnswer(question, user.id);
+          events = streamAgentAnswer(question, user.id, conversationContext);
         } else {
           answerMode = "general";
           log.info("retrieval.strategy.start", { userId: user.id, strategy: "general_answer" });
-          events = streamGeneralAgentAnswer(question);
+          events = streamGeneralAgentAnswer(question, conversationContext);
         }
 
         if (!relevantContext.length && isSummaryRequest && !retrievalHint && await hasIndexedDocuments(user.id, log)) {
@@ -236,7 +373,7 @@ export async function POST(request: Request) {
 
         log.info("answer.mode.selected", { userId: user.id, answerMode, contextCount: relevantContext.length });
 
-        await streamAnswer(controller, events, question, user.id, log);
+        await streamAnswer(controller, events, question, user.id, chatSession.id, shouldGenerateTitle, log);
       } catch (error) {
         log.error("stream.failed", { errorCategory: "unknown", userId: user.id, error });
         controller.enqueue(toSse("error", {

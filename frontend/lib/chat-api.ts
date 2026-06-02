@@ -22,16 +22,33 @@ export type ChatMessage = {
 export type ChatRequest = {
   question: string;
   retrievalHint?: ChatRetrievalHint;
+  chatSessionId?: string;
 };
 
 type ChatRequestOptions = {
   retrievalHint?: ChatRetrievalHint;
+  chatSessionId?: string | null;
 };
 
 export type ChatResponse = {
   ok: true;
   answer: string;
   sources: SourceCitation[];
+  chatSessionId?: string;
+};
+
+export type ChatSessionSummary = {
+  id: string;
+  title: string;
+  title_status?: "pending" | "generated" | "fallback";
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type ChatSessionMessagesResponse = {
+  ok: true;
+  session: ChatSessionSummary;
+  messages: ChatMessage[];
 };
 
 type ChatErrorResponse = {
@@ -93,6 +110,7 @@ export async function submitChatQuestion(question: string, options: ChatRequestO
     const payload: ChatRequest = {
       question: trimmedQuestion,
       ...(options.retrievalHint ? { retrievalHint: options.retrievalHint } : {}),
+      ...(options.chatSessionId ? { chatSessionId: options.chatSessionId } : {}),
     };
 
     const response = await fetch(CHAT_ENDPOINT, {
@@ -119,6 +137,7 @@ export async function submitChatQuestion(question: string, options: ChatRequestO
       ok: true,
       answer: data.answer,
       sources: Array.isArray(data.sources) ? data.sources : [],
+      chatSessionId: data.chatSessionId,
     };
   } catch (error) {
     if (error instanceof Error) {
@@ -134,6 +153,7 @@ export async function streamChatQuestion(question: string, handlers: StreamChatH
   const payload: ChatRequest = {
     question: trimmedQuestion,
     ...(options.retrievalHint ? { retrievalHint: options.retrievalHint } : {}),
+    ...(options.chatSessionId ? { chatSessionId: options.chatSessionId } : {}),
   };
   const response = await fetch(CHAT_ENDPOINT, {
     method: "POST",
@@ -151,6 +171,7 @@ export async function streamChatQuestion(question: string, handlers: StreamChatH
   let sources: SourceCitation[] = [];
   let finalAnswer = "";
   let finalSources: SourceCitation[] = [];
+  let finalChatSessionId: string | undefined;
   let sawDone = false;
 
   function handleEvent(streamEvent: StreamEvent) {
@@ -173,8 +194,10 @@ export async function streamChatQuestion(question: string, handlers: StreamChatH
     if (streamEvent.event === "done") {
       finalAnswer = typeof data.answer === "string" ? data.answer : answer;
       finalSources = isSourceCitationArray(data.sources) ? data.sources : sources;
+      const chatSessionId = typeof data.chatSessionId === "string" ? data.chatSessionId : undefined;
+      finalChatSessionId = chatSessionId;
       sawDone = true;
-      handlers.onDone?.({ ok: true, answer: finalAnswer, sources: finalSources });
+      handlers.onDone?.({ ok: true, answer: finalAnswer, sources: finalSources, chatSessionId });
       return;
     }
 
@@ -206,5 +229,28 @@ export async function streamChatQuestion(question: string, handlers: StreamChatH
   if (!sawDone) throw new Error("The assistant stream ended before completion.");
   if (!finalAnswer.trim()) throw new Error("The assistant returned an empty answer.");
 
-  return { ok: true, answer: finalAnswer, sources: finalSources };
+  return { ok: true, answer: finalAnswer, sources: finalSources, chatSessionId: finalChatSessionId };
+}
+
+export async function fetchChatSessions(): Promise<ChatSessionSummary[]> {
+  const response = await fetch("/api/chat/sessions");
+  const data = (await response.json().catch(() => null)) as { ok?: boolean; sessions?: ChatSessionSummary[]; error?: string } | null;
+  if (!response.ok || !data?.ok) throw new Error(data?.error ?? "Could not load recent chats");
+  return data.sessions ?? [];
+}
+
+export async function fetchChatSessionMessages(sessionId: string): Promise<ChatSessionMessagesResponse> {
+  const response = await fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}`);
+  const data = (await response.json().catch(() => null)) as (ChatSessionMessagesResponse | ChatErrorResponse) | null;
+  if (!response.ok || !data?.ok) {
+    const error = data && "error" in data ? data.error : undefined;
+    throw new Error(error ?? "Could not load chat session");
+  }
+  return data as ChatSessionMessagesResponse;
+}
+
+export async function deleteChatSession(sessionId: string): Promise<void> {
+  const response = await fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+  const data = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+  if (!response.ok || !data?.ok) throw new Error(data?.error ?? "Could not delete chat session");
 }

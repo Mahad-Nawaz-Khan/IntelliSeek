@@ -27,11 +27,65 @@ create table if not exists public.chunks (
 create table if not exists public.chat_history (
   id uuid primary key default gen_random_uuid(),
   user_id uuid references auth.users(id) on delete cascade,
+  chat_session_id uuid,
   question text not null check (length(trim(question)) > 0),
   answer text not null check (length(trim(answer)) > 0),
   sources_cited jsonb not null default '[]'::jsonb check (jsonb_typeof(sources_cited) = 'array'),
   created_at timestamptz not null default now()
 );
+
+create table if not exists public.chat_sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  title text not null default 'New chat',
+  title_status text not null default 'pending' check (title_status in ('pending', 'generated', 'fallback')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.chat_history add column if not exists chat_session_id uuid;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'chat_history_chat_session_id_fkey'
+      and conrelid = 'public.chat_history'::regclass
+  ) then
+    alter table public.chat_history
+      add constraint chat_history_chat_session_id_fkey
+      foreign key (chat_session_id) references public.chat_sessions(id) on delete cascade;
+  end if;
+end $$;
+
+insert into public.chat_sessions (id, user_id, title, title_status, created_at, updated_at)
+select
+  gen_random_uuid(),
+  chat_history.user_id,
+  left(regexp_replace(chat_history.question, '\s+', ' ', 'g'), 80),
+  'fallback',
+  chat_history.created_at,
+  chat_history.created_at
+from public.chat_history
+where chat_history.chat_session_id is null
+  and chat_history.user_id is not null;
+
+update public.chat_history
+set chat_session_id = legacy_sessions.id
+from (
+  select distinct on (chat_history.id)
+    chat_history.id as history_id,
+    chat_sessions.id
+  from public.chat_history
+  join public.chat_sessions
+    on chat_sessions.user_id = chat_history.user_id
+   and chat_sessions.created_at = chat_history.created_at
+   and chat_sessions.title = left(regexp_replace(chat_history.question, '\s+', ' ', 'g'), 80)
+  where chat_history.chat_session_id is null
+  order by chat_history.id, chat_sessions.id
+) as legacy_sessions
+where chat_history.id = legacy_sessions.history_id;
 
 create table if not exists public.document_topics (
   id uuid primary key default gen_random_uuid(),
@@ -57,6 +111,8 @@ create index if not exists documents_processing_status_idx on public.documents(p
 create index if not exists chunks_document_id_idx on public.chunks(document_id);
 create index if not exists chunks_embedding_hnsw_idx on public.chunks using hnsw (embedding extensions.vector_cosine_ops);
 create index if not exists chat_history_user_id_idx on public.chat_history(user_id);
+create index if not exists chat_sessions_user_updated_idx on public.chat_sessions(user_id, updated_at desc);
+create index if not exists chat_history_user_session_created_idx on public.chat_history(user_id, chat_session_id, created_at);
 create index if not exists document_topics_user_id_idx on public.document_topics(user_id);
 create index if not exists document_topics_document_id_idx on public.document_topics(document_id);
 create index if not exists document_topics_topic_lower_idx on public.document_topics(lower(topic));
@@ -95,6 +151,7 @@ $$;
 
 alter table public.documents enable row level security;
 alter table public.chunks enable row level security;
+alter table public.chat_sessions enable row level security;
 alter table public.chat_history enable row level security;
 alter table public.document_topics enable row level security;
 
@@ -260,6 +317,40 @@ create policy "document_topics_delete_own_document"
         and documents.user_id = auth.uid()
     )
   );
+
+drop policy if exists "chat_history_select_own" on public.chat_history;
+
+drop policy if exists "chat_sessions_select_own" on public.chat_sessions;
+create policy "chat_sessions_select_own"
+  on public.chat_sessions for select
+  to authenticated
+  using (auth.uid() = user_id);
+
+drop policy if exists "chat_sessions_insert_own" on public.chat_sessions;
+create policy "chat_sessions_insert_own"
+  on public.chat_sessions for insert
+  to authenticated
+  with check (auth.uid() = user_id);
+
+drop policy if exists "chat_sessions_update_own" on public.chat_sessions;
+create policy "chat_sessions_update_own"
+  on public.chat_sessions for update
+  to authenticated
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+drop policy if exists "chat_sessions_delete_own" on public.chat_sessions;
+create policy "chat_sessions_delete_own"
+  on public.chat_sessions for delete
+  to authenticated
+  using (auth.uid() = user_id);
+
+drop policy if exists "chat_sessions_service_manage_all" on public.chat_sessions;
+create policy "chat_sessions_service_manage_all"
+  on public.chat_sessions for all
+  to service_role
+  using (true)
+  with check (true);
 
 drop policy if exists "chat_history_select_own" on public.chat_history;
 create policy "chat_history_select_own"

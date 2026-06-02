@@ -59,6 +59,11 @@ type AgentRunResult = {
   sources: SourceCitation[];
 };
 
+export type ConversationTurn = {
+  question: string;
+  answer: string;
+};
+
 export type AgentAnswerStreamEvent =
   | { type: "delta"; text: string }
   | { type: "done"; answer: string; sources: SourceCitation[] };
@@ -179,6 +184,16 @@ function buildContextInput(context: RetrievedContext[]) {
     .join("\n\n");
 }
 
+function buildConversationInput(question: string, conversationContext: ConversationTurn[] = []) {
+  if (!conversationContext.length) return question;
+
+  const priorTurns = conversationContext
+    .map((turn, index) => `Turn ${index + 1}\nUser: ${turn.question}\nAssistant: ${turn.answer}`)
+    .join("\n\n");
+
+  return `Recent prior conversation for intent only:\n${priorTurns}\n\nCurrent user question:\n${question}`;
+}
+
 async function* streamAgentText(agent: Agent, input: string): AsyncGenerator<string, string> {
   const stream = await run(agent, input, { maxTurns: 1, stream: true });
 
@@ -250,9 +265,9 @@ function createAgentRun(userId: string) {
   };
 }
 
-export async function generateAgentAnswer(question: string, userId: string): Promise<AgentRunResult> {
+export async function generateAgentAnswer(question: string, userId: string, conversationContext: ConversationTurn[] = []): Promise<AgentRunResult> {
   const { agent, getSources } = createAgentRun(userId);
-  const result = await run(agent, question, { maxTurns: 6 });
+  const result = await run(agent, buildConversationInput(question, conversationContext), { maxTurns: 6 });
   const answer = result.finalOutput?.trim();
   if (!answer) throw new Error("Agent answer generation returned no content");
 
@@ -262,9 +277,9 @@ export async function generateAgentAnswer(question: string, userId: string): Pro
   };
 }
 
-export async function* streamAgentAnswer(question: string, userId: string): AsyncGenerator<AgentAnswerStreamEvent> {
+export async function* streamAgentAnswer(question: string, userId: string, conversationContext: ConversationTurn[] = []): AsyncGenerator<AgentAnswerStreamEvent> {
   const { agent, getSources } = createAgentRun(userId);
-  const stream = await run(agent, question, { maxTurns: 6, stream: true });
+  const stream = await run(agent, buildConversationInput(question, conversationContext), { maxTurns: 6, stream: true });
 
   for await (const event of stream) {
     if (event.type === "raw_model_stream_event" && event.data.type === "output_text_delta" && event.data.delta) {
@@ -282,6 +297,7 @@ export async function* streamAgentAnswer(question: string, userId: string): Asyn
 export async function* streamGroundedAgentAnswer(
   question: string,
   context: RetrievedContext[],
+  conversationContext: ConversationTurn[] = [],
 ): AsyncGenerator<AgentAnswerStreamEvent> {
   let answer = "";
 
@@ -292,7 +308,7 @@ export async function* streamGroundedAgentAnswer(
       instructions: GROUNDED_SYSTEM_PROMPT,
       model: getChatModel(),
     });
-    const input = `Uploaded-file context chunks:\n${buildContextInput(context)}\n\nQuestion: ${question}`;
+    const input = `Uploaded-file context chunks:\n${buildContextInput(context)}\n\n${buildConversationInput(question, conversationContext)}`;
     const textStream = streamAgentText(agent, input);
 
     while (true) {
@@ -304,7 +320,7 @@ export async function* streamGroundedAgentAnswer(
       yield { type: "delta", text: next.value };
     }
   } catch {
-    const fallbackStream = streamGroqGroundedAnswer(question, context);
+    const fallbackStream = streamGroqGroundedAnswer(buildConversationInput(question, conversationContext), context);
     while (true) {
       const next = await fallbackStream.next();
       if (next.done) {
@@ -318,7 +334,7 @@ export async function* streamGroundedAgentAnswer(
   yield { type: "done", answer, sources: toSourceCitations(context) };
 }
 
-export async function* streamGeneralAgentAnswer(question: string): AsyncGenerator<AgentAnswerStreamEvent> {
+export async function* streamGeneralAgentAnswer(question: string, conversationContext: ConversationTurn[] = []): AsyncGenerator<AgentAnswerStreamEvent> {
   let answer = "";
 
   try {
@@ -328,7 +344,7 @@ export async function* streamGeneralAgentAnswer(question: string): AsyncGenerato
       instructions: GENERAL_SYSTEM_PROMPT,
       model: getChatModel(),
     });
-    const textStream = streamAgentText(agent, question);
+    const textStream = streamAgentText(agent, buildConversationInput(question, conversationContext));
 
     while (true) {
       const next = await textStream.next();
@@ -339,7 +355,7 @@ export async function* streamGeneralAgentAnswer(question: string): AsyncGenerato
       yield { type: "delta", text: next.value };
     }
   } catch {
-    const fallbackStream = streamGroqGeneralAnswer(question);
+    const fallbackStream = streamGroqGeneralAnswer(buildConversationInput(question, conversationContext));
     while (true) {
       const next = await fallbackStream.next();
       if (next.done) {

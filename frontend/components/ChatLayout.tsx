@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import { AcademicWorkspace } from "./chat/AcademicWorkspace";
 import { ChatComposer } from "./chat/ChatComposer";
@@ -13,10 +13,16 @@ import { RetrievalStatus as RetrievalStatusBanner } from "./sources/RetrievalSta
 import { IndexingToast, type UploadIndexingToast } from "./upload/IndexingToast";
 import { UploadModal } from "./upload/UploadModal";
 import { useAuth } from "../context/AuthContext";
-import { streamChatQuestion, type ChatMessage as ChatMessageType } from "../lib/chat-api";
+import {
+  deleteChatSession,
+  fetchChatSessionMessages,
+  fetchChatSessions,
+  streamChatQuestion,
+  type ChatMessage as ChatMessageType,
+  type ChatSessionSummary,
+} from "../lib/chat-api";
 import type { AutocompleteSuggestion } from "../lib/trie-autocomplete";
 import {
-  createRecentChats,
   createSourceGroups,
   getFileType,
   type KnowledgeSource,
@@ -82,9 +88,13 @@ function toRetrievalMatches(messages: ChatMessageType[]): RetrievalMatch[] {
 
 export function ChatLayout() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { isLoaded, isSignedIn, user } = useAuth();
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingSession, setIsLoadingSession] = useState(false);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [recentSessionRows, setRecentSessionRows] = useState<ChatSessionSummary[]>([]);
   const [sources, setSources] = useState<KnowledgeSource[]>([]);
   const [serverAutocompleteSuggestions, setServerAutocompleteSuggestions] = useState<AutocompleteSuggestion[]>([]);
   const [sourceStatus, setSourceStatus] = useState<"loading" | "ready" | "empty" | "unavailable">(
@@ -93,7 +103,9 @@ export function ChatLayout() {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [pollDocuments, setPollDocuments] = useState(false);
   const [deletingSourceId, setDeletingSourceId] = useState<string | null>(null);
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [uploadToasts, setUploadToasts] = useState<UploadIndexingToast[]>([]);
+  const loadedSessionRef = useRef<string | null>(null);
   const completedDocumentIds = useMemo(
     () => new Set(sources.filter((source) => source.status === "indexed").map((source) => source.id)),
     [sources],
@@ -105,7 +117,14 @@ export function ChatLayout() {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const sourceGroups = useMemo(() => createSourceGroups(sources), [sources]);
-  const recentChats = useMemo(() => createRecentChats(messages), [messages]);
+  const recentChats = useMemo(() => recentSessionRows.map((session) => ({
+    id: session.id,
+    title: session.title || "New chat",
+    lastMessageAt: session.updated_at
+      ? new Date(session.updated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : undefined,
+    status: session.id === activeSessionId ? "active" as const : "inactive" as const,
+  })), [activeSessionId, recentSessionRows]);
   const retrievalMatches = useMemo(() => toRetrievalMatches(messages), [messages]);
   const retrievalStatus = useMemo<RetrievalStatus>(() => {
     if (isLoading) {
@@ -117,7 +136,7 @@ export function ChatLayout() {
     }
 
     return { state: "complete", message: "Sources ready", matches: retrievalMatches };
-  }, [isLoading, retrievalMatches, sources]);
+  }, [isLoading, retrievalMatches]);
 
   const autocompleteSuggestions = useMemo<AutocompleteSuggestion[]>(() => {
     const promptSuggestions = SUGGESTIONS.map((suggestion) => ({
@@ -146,10 +165,22 @@ export function ChatLayout() {
     });
   }, [messages, serverAutocompleteSuggestions]);
 
+  const refreshRecentChats = useCallback(async () => {
+    try {
+      setRecentSessionRows(await fetchChatSessions());
+    } catch {
+      setRecentSessionRows([]);
+    }
+  }, []);
+
   useEffect(() => {
     if (!isLoaded) return;
     if (!isSignedIn || !user) {
       setSources([]);
+      setRecentSessionRows([]);
+      setActiveSessionId(null);
+      setMessages([]);
+      loadedSessionRef.current = null;
       setSourceStatus("unavailable");
       router.replace("/sign-in?next=/chat");
       return;
@@ -191,11 +222,54 @@ export function ChatLayout() {
 
     loadSources();
     loadAutocomplete();
+    refreshRecentChats();
 
     return () => {
       active = false;
     };
-  }, [isLoaded, isSignedIn, router, user]);
+  }, [isLoaded, isSignedIn, refreshRecentChats, router, user]);
+
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn || !user) return;
+
+    const sessionId = searchParams.get("session");
+    if (!sessionId) {
+      if (activeSessionId) setActiveSessionId(null);
+      loadedSessionRef.current = null;
+      return;
+    }
+
+    if (sessionId === loadedSessionRef.current) return;
+
+    const requestedSessionId = sessionId;
+    let active = true;
+    setIsLoadingSession(true);
+
+    async function loadSession() {
+      try {
+        const result = await fetchChatSessionMessages(requestedSessionId);
+        if (!active) return;
+        setActiveSessionId(result.session.id);
+        setMessages(result.messages);
+        loadedSessionRef.current = result.session.id;
+        await refreshRecentChats();
+      } catch {
+        if (!active) return;
+        setActiveSessionId(null);
+        setMessages([]);
+        loadedSessionRef.current = null;
+        router.replace("/chat");
+      } finally {
+        if (active) setIsLoadingSession(false);
+      }
+    }
+
+    loadSession();
+
+    return () => {
+      active = false;
+    };
+  }, [activeSessionId, isLoaded, isSignedIn, refreshRecentChats, router, searchParams, user]);
 
   useEffect(() => {
     if (!pollDocuments) return;
@@ -279,7 +353,7 @@ export function ChatLayout() {
   const handleSubmit = useCallback(
     async (question: string, selectedSuggestion?: AutocompleteSuggestion) => {
       const trimmedQuestion = question.trim();
-      if (!trimmedQuestion || isLoading) return;
+      if (!trimmedQuestion || isLoading || isLoadingSession) return;
 
       const now = Date.now();
       const userMessage: ChatMessageType = {
@@ -330,6 +404,11 @@ export function ChatLayout() {
             );
           },
           onDone: (response) => {
+            if (response.chatSessionId) {
+              setActiveSessionId(response.chatSessionId);
+              loadedSessionRef.current = response.chatSessionId;
+              router.replace(`/chat?session=${encodeURIComponent(response.chatSessionId)}`);
+            }
             setMessages((current) =>
               current.map((message) =>
                 message.id === assistantId
@@ -343,8 +422,13 @@ export function ChatLayout() {
                   : message,
               ),
             );
+            void refreshRecentChats();
+            window.setTimeout(() => void refreshRecentChats(), 2500);
           },
-        }, selectedSuggestion?.metadata ? { retrievalHint: selectedSuggestion.metadata } : undefined);
+        }, {
+          ...(selectedSuggestion?.metadata ? { retrievalHint: selectedSuggestion.metadata } : {}),
+          ...(activeSessionId ? { chatSessionId: activeSessionId } : {}),
+        });
       } catch (error) {
         setMessages((current) =>
           current.map((message) =>
@@ -365,12 +449,40 @@ export function ChatLayout() {
         setIsLoading(false);
       }
     },
-    [isLoading],
+    [activeSessionId, isLoading, isLoadingSession, refreshRecentChats, router],
   );
 
   const handleNewChat = useCallback(() => {
+    setActiveSessionId(null);
     setMessages([]);
-  }, []);
+    loadedSessionRef.current = null;
+    router.push("/chat");
+  }, [router]);
+
+  const handleOpenSession = useCallback((sessionId: string) => {
+    if (isLoading) return;
+    router.push(`/chat?session=${encodeURIComponent(sessionId)}`);
+  }, [isLoading, router]);
+
+  const handleDeleteSession = useCallback(async (sessionId: string) => {
+    if (deletingSessionId) return;
+
+    setDeletingSessionId(sessionId);
+    try {
+      await deleteChatSession(sessionId);
+      setRecentSessionRows((current) => current.filter((session) => session.id !== sessionId));
+      if (sessionId === activeSessionId) {
+        setActiveSessionId(null);
+        setMessages([]);
+        loadedSessionRef.current = null;
+        router.push("/chat");
+      }
+      await refreshRecentChats();
+    } catch {
+    } finally {
+      setDeletingSessionId(null);
+    }
+  }, [activeSessionId, deletingSessionId, refreshRecentChats, router]);
 
   const handleDeleteSource = useCallback(async (sourceId: string) => {
     if (deletingSourceId) return;
@@ -404,7 +516,10 @@ export function ChatLayout() {
       recentChats={recentChats}
       sourceStatus={sourceStatus}
       deletingSourceId={deletingSourceId}
+      deletingSessionId={deletingSessionId}
       onDeleteSource={handleDeleteSource}
+      onDeleteSession={handleDeleteSession}
+      onOpenSession={handleOpenSession}
       onNewChat={handleNewChat}
       onOpenUpload={() => setIsUploadOpen(true)}
     >
@@ -414,7 +529,9 @@ export function ChatLayout() {
           <div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
             <div className="flex min-h-full flex-col">
               <div className="flex-1 pb-6">
-                {messages.length === 0 ? (
+                {isLoadingSession ? (
+                  <div className="mx-auto max-w-5xl py-10 text-sm text-slate-400">Loading conversation...</div>
+                ) : messages.length === 0 ? (
                   <ChatWelcome disabled={isLoading} onSelect={handleSubmit} />
                 ) : (
                   <div className="mx-auto max-w-5xl space-y-5">
@@ -432,7 +549,7 @@ export function ChatLayout() {
               <div className="sticky bottom-0 z-20 -mx-4 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent px-4 pb-6 pt-6 sm:-mx-6 sm:px-6">
                 <ChatComposer
                   autocompleteSuggestions={autocompleteSuggestions}
-                  disabled={isLoading}
+                  disabled={isLoading || isLoadingSession}
                   onSubmit={handleSubmit}
                   onOpenUpload={() => setIsUploadOpen(true)}
                 />

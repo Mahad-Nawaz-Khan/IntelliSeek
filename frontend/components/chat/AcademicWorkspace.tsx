@@ -13,7 +13,10 @@ type AcademicWorkspaceProps = {
   recentChats: ChatSession[];
   sourceStatus: "loading" | "ready" | "empty" | "unavailable";
   deletingSourceId?: string | null;
+  deletingSessionId?: string | null;
   onDeleteSource?: (sourceId: string) => void;
+  onDeleteSession?: (sessionId: string) => void;
+  onOpenSession?: (sessionId: string) => void;
   onNewChat?: () => void;
   onOpenUpload?: () => void;
 };
@@ -24,7 +27,10 @@ export function AcademicWorkspace({
   recentChats,
   sourceStatus,
   deletingSourceId,
+  deletingSessionId,
   onDeleteSource,
+  onDeleteSession,
+  onOpenSession,
   onNewChat,
   onOpenUpload,
 }: AcademicWorkspaceProps) {
@@ -40,7 +46,10 @@ export function AcademicWorkspace({
             recentChats={recentChats}
             sourceStatus={sourceStatus}
             deletingSourceId={deletingSourceId}
+            deletingSessionId={deletingSessionId}
             onDeleteSource={onDeleteSource}
+            onDeleteSession={onDeleteSession}
+            onOpenSession={onOpenSession}
             onNewChat={onNewChat}
             onOpenUpload={onOpenUpload}
             isCollapsed={isDesktopSidebarCollapsed}
@@ -55,8 +64,14 @@ export function AcademicWorkspace({
               recentChats={recentChats}
               sourceStatus={sourceStatus}
               deletingSourceId={deletingSourceId}
+              deletingSessionId={deletingSessionId}
               onClose={() => setIsSidebarOpen(false)}
               onDeleteSource={onDeleteSource}
+              onDeleteSession={onDeleteSession}
+              onOpenSession={(sessionId) => {
+                onOpenSession?.(sessionId);
+                setIsSidebarOpen(false);
+              }}
               onNewChat={onNewChat}
               onOpenUpload={onOpenUpload}
             />
