@@ -22,6 +22,8 @@ type AppSidebarProps = {
   onOpenSession?: (sessionId: string) => void;
   onNewChat?: () => void;
   onOpenUpload?: () => void;
+  onOpenKnowledgeBaseUpload?: () => void;
+  canManageKnowledgeBase?: boolean;
   isCollapsed?: boolean;
   onToggleCollapsed?: () => void;
 };
@@ -32,7 +34,7 @@ const navigation = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
-export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId, deletingSessionId, onClose, onDeleteSource, onDeleteSession, onOpenSession, onNewChat, onOpenUpload, isCollapsed, onToggleCollapsed }: AppSidebarProps) {
+export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId, deletingSessionId, onClose, onDeleteSource, onDeleteSession, onOpenSession, onNewChat, onOpenUpload, onOpenKnowledgeBaseUpload, canManageKnowledgeBase, isCollapsed, onToggleCollapsed }: AppSidebarProps) {
   const pathname = usePathname();
   const { signOut, user } = useAuth();
 
@@ -165,6 +167,8 @@ export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId
           deletingSourceId={deletingSourceId}
           onDeleteSource={onDeleteSource}
           onOpenUpload={onOpenUpload}
+          onOpenKnowledgeBaseUpload={onOpenKnowledgeBaseUpload}
+          canManageKnowledgeBase={canManageKnowledgeBase}
         />
       </div>
 

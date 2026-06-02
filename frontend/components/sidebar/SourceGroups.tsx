@@ -12,9 +12,11 @@ type SourceGroupsProps = {
   deletingSourceId?: string | null;
   onDeleteSource?: (sourceId: string) => void;
   onOpenUpload?: () => void;
+  onOpenKnowledgeBaseUpload?: () => void;
+  canManageKnowledgeBase?: boolean;
 };
 
-export function SourceGroups({ groups, status, deletingSourceId, onDeleteSource, onOpenUpload }: SourceGroupsProps) {
+export function SourceGroups({ groups, status, deletingSourceId, onDeleteSource, onOpenUpload, onOpenKnowledgeBaseUpload, canManageKnowledgeBase }: SourceGroupsProps) {
   const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set());
 
   function toggleGroup(groupId: string) {
@@ -58,7 +60,16 @@ export function SourceGroups({ groups, status, deletingSourceId, onDeleteSource,
 
             {isOpen ? (
               <div className="mt-1.5 pl-2">
-                {group.id === "your-uploads" && onOpenUpload ? (
+                {group.id === "knowledge-base" && canManageKnowledgeBase && onOpenKnowledgeBaseUpload ? (
+                  <button
+                    type="button"
+                    onClick={onOpenKnowledgeBaseUpload}
+                    className="mb-2 flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-300/10 px-2.5 py-2 text-xs font-medium text-cyan-50 transition hover:bg-cyan-300/16 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
+                  >
+                    <FileUp className="h-3.5 w-3.5" />
+                    Upload to knowledge base
+                  </button>
+                ) : group.id === "your-uploads" && onOpenUpload ? (
                   <button
                     type="button"
                     onClick={onOpenUpload}
@@ -82,7 +93,7 @@ export function SourceGroups({ groups, status, deletingSourceId, onDeleteSource,
                             <p className="truncate text-sm font-medium text-slate-100">{source.filename}</p>
                             <p className="mt-1 text-xs capitalize text-slate-500">{source.status}</p>
                           </div>
-                          {source.sourceType === "uploaded" && onDeleteSource ? (
+                          {(source.sourceType === "uploaded" || (source.sourceType === "knowledge-base" && canManageKnowledgeBase)) && onDeleteSource ? (
                             <button
                               type="button"
                               onClick={() => onDeleteSource(source.id)}

@@ -19,6 +19,7 @@ type Suggestion = {
 type DocumentRow = {
   id: string;
   filename: string;
+  source_scope?: "personal" | "knowledge_base";
 };
 
 type TopicRow = {
@@ -27,9 +28,11 @@ type TopicRow = {
   documents: Array<{
     id: string;
     filename: string;
+    source_scope?: string | null;
   }> | {
     id: string;
     filename: string;
+    source_scope?: string | null;
   } | null;
 };
 
@@ -41,11 +44,18 @@ type ChunkRow = {
   documents: Array<{
     id: string;
     filename: string;
+    source_scope?: string | null;
   }> | {
     id: string;
     filename: string;
+    source_scope?: string | null;
   } | null;
 };
+
+function applyAccessibleDocumentFilter<T>(query: T, userId: string): T {
+  return (query as { or: (filters: string, options?: { foreignTable?: string }) => T })
+    .or(`user_id.eq.${userId},source_scope.eq.knowledge_base`, { foreignTable: "documents" });
+}
 
 type HistoryRow = {
   id: string;
@@ -212,20 +222,25 @@ export async function GET(request: Request) {
     return Response.json({ ok: false, error: "Supabase service client is not configured" }, { status: 500 });
   }
 
-  const [documentsResult, topicsResult, historyResult] = await Promise.all([
-    supabase
+  const documentsQuery = supabase
       .from("documents")
-      .select("id, filename")
-      .eq("user_id", user.id)
+      .select("id, filename, source_scope")
+      .or(`user_id.eq.${user.id},source_scope.eq.knowledge_base`)
       .eq("processing_status", "indexed")
       .order("created_at", { ascending: false })
-      .limit(8),
+      .limit(8);
+  const topicsQuery = applyAccessibleDocumentFilter(
     supabase
       .from("document_topics")
-      .select("id, topic, documents!inner(id, filename)")
-      .eq("user_id", user.id)
+      .select("id, topic, documents!inner(id, filename, user_id, source_scope)")
       .order("score", { ascending: false })
       .limit(20),
+    user.id,
+  );
+
+  const [documentsResult, topicsResult, historyResult] = await Promise.all([
+    documentsQuery,
+    topicsQuery,
     supabase
       .from("chat_history")
       .select("id, question")

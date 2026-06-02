@@ -12,12 +12,13 @@ import { UploadProgress } from "./UploadProgress";
 type UploadModalProps = {
   isOpen: boolean;
   onClose: () => void;
+  uploadTarget?: "personal" | "knowledge_base";
   onUploadToast?: (payload: UploadToastPayload) => void;
   completedDocumentIds?: Set<string>;
   failedDocuments?: Map<string, string>;
 };
 
-export function UploadModal({ isOpen, onClose, onUploadToast, completedDocumentIds, failedDocuments }: UploadModalProps) {
+export function UploadModal({ isOpen, onClose, uploadTarget = "personal", onUploadToast, completedDocumentIds, failedDocuments }: UploadModalProps) {
   const { isLoaded, isSignedIn, user } = useAuth();
   const [isDragging, setIsDragging] = useState(false);
   const [item, setItem] = useState<UploadItem | null>(null);
@@ -46,6 +47,7 @@ export function UploadModal({ isOpen, onClose, onUploadToast, completedDocumentI
       userId: user?.id,
       isAuthLoaded: isLoaded,
       isSignedIn,
+      uploadTarget,
       onToast: onUploadToast,
       onUploadStarted: onClose,
       onProgress: (nextItem, documentId) => {
@@ -53,7 +55,7 @@ export function UploadModal({ isOpen, onClose, onUploadToast, completedDocumentI
         if (documentId) setQueuedDocumentId(documentId);
       },
     });
-  }, [isLoaded, isSignedIn, onClose, onUploadToast, user]);
+  }, [isLoaded, isSignedIn, onClose, onUploadToast, uploadTarget, user]);
 
   if (!isOpen) return null;
 
@@ -64,9 +66,9 @@ export function UploadModal({ isOpen, onClose, onUploadToast, completedDocumentI
       <div className="w-full max-w-2xl rounded-[2rem] border border-white/10 bg-slate-950/95 p-5 shadow-2xl shadow-slate-950/60">
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-200">Upload notes</p>
-            <h2 className="mt-1 text-2xl font-semibold text-white">Add academic material</h2>
-            <p className="mt-2 text-sm text-slate-400">Files are uploaded, parsed, indexed, and made available for source-grounded answers.</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-200">{uploadTarget === "knowledge_base" ? "Admin upload" : "Upload notes"}</p>
+            <h2 className="mt-1 text-2xl font-semibold text-white">{uploadTarget === "knowledge_base" ? "Add to knowledge base" : "Add academic material"}</h2>
+            <p className="mt-2 text-sm text-slate-400">{uploadTarget === "knowledge_base" ? "Files are indexed as shared knowledge-base sources for all users." : "Files are uploaded, parsed, indexed, and made available for source-grounded answers."}</p>
           </div>
           <button type="button" onClick={onClose} className="rounded-2xl border border-white/10 bg-white/5 p-2 text-slate-300 transition hover:bg-white/10 hover:text-white" aria-label="Close upload modal">
             <X className="h-5 w-5" />

@@ -24,6 +24,7 @@ type UploadDocumentOptions = {
   userId?: string;
   isAuthLoaded: boolean;
   isSignedIn: boolean;
+  uploadTarget?: "personal" | "knowledge_base";
   toastValidationFailures?: boolean;
   onToast?: (payload: UploadToastPayload) => void;
   onProgress?: (item: UploadItem, documentId?: string) => void;
@@ -61,6 +62,7 @@ export async function uploadDocumentFile({
   userId,
   isAuthLoaded,
   isSignedIn,
+  uploadTarget = "personal",
   toastValidationFailures = false,
   onToast,
   onProgress,
@@ -114,6 +116,7 @@ export async function uploadDocumentFile({
         filename: file.name,
         file_type: contentType,
         file_size: file.size,
+        source_scope: uploadTarget,
       }),
     });
     const result = await readParseResponse(response);

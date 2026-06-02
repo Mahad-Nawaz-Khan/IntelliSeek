@@ -21,14 +21,17 @@ type RepresentativeChunkRow = {
   chunk_index: number;
   documents: Array<{
     filename: string | null;
+    source_scope?: string | null;
   }> | {
     filename: string | null;
+    source_scope?: string | null;
   } | null;
 };
 
 type IndexedDocumentRow = {
   id: string;
   filename: string;
+  source_scope?: "personal" | "knowledge_base";
 };
 
 type DocumentChunkRow = {
@@ -38,12 +41,19 @@ type DocumentChunkRow = {
   chunk_index: number;
   documents: Array<{
     filename: string | null;
+    source_scope?: string | null;
   }> | {
     filename: string | null;
+    source_scope?: string | null;
   } | null;
 };
 
 type NeighborChunkRow = DocumentChunkRow;
+
+function applyAccessibleDocumentFilter<T>(query: T, userId: string): T {
+  return (query as { or: (filters: string, options?: { foreignTable?: string }) => T })
+    .or(`user_id.eq.${userId},source_scope.eq.knowledge_base`, { foreignTable: "documents" });
+}
 
 const SUMMARY_INTENT_PATTERN = /\b(summarize|summerize|summarise|summary|summery|overview|outline|key points|main points|topics covered)\b/i;
 const DOCUMENT_REFERENCE_PATTERNS = [
@@ -229,12 +239,13 @@ export async function retrieveKeywordContext(
 
   let query = supabase
     .from("chunks")
-    .select("id, document_id, text_content, chunk_index, documents!inner(filename, user_id, processing_status)")
-    .eq("documents.user_id", userId)
+    .select("id, document_id, text_content, chunk_index, documents!inner(filename, user_id, source_scope, processing_status)")
     .eq("documents.processing_status", "indexed")
     .or(orFilter)
     .order("chunk_index", { ascending: true })
     .limit(Math.min(Math.max(limit * 2, 8), 20));
+
+  query = applyAccessibleDocumentFilter(query, userId);
 
   if (uniqueDocumentIds.length) query = query.in("document_id", uniqueDocumentIds);
 
@@ -285,13 +296,14 @@ export async function expandContextWithNeighbors(
   });
 
   const rows = (await Promise.all([...neighborLookups.entries()].map(async ([documentId, indexes]) => {
-    const { data, error } = await supabase
+    const query = supabase
       .from("chunks")
-      .select("id, document_id, text_content, chunk_index, documents!inner(filename, user_id)")
+      .select("id, document_id, text_content, chunk_index, documents!inner(filename, user_id, source_scope)")
       .eq("document_id", documentId)
-      .eq("documents.user_id", userId)
       .in("chunk_index", [...indexes])
       .order("chunk_index", { ascending: true });
+
+    const { data, error } = await applyAccessibleDocumentFilter(query, userId);
 
     if (error) {
       log?.warn("retrieval.neighbors.failed", { errorCategory: "supabase_query", userId, documentId, error });
@@ -377,7 +389,7 @@ export async function hasIndexedDocuments(userId: string, log?: RequestLogger) {
   const { data, error } = await supabase
     .from("documents")
     .select("id")
-    .eq("user_id", userId)
+    .or(`user_id.eq.${userId},source_scope.eq.knowledge_base`)
     .eq("processing_status", "indexed")
     .limit(1);
 
@@ -414,8 +426,8 @@ export async function retrieveDocumentContextByIds(
 
   const { data: documents, error: documentsError } = await supabase
     .from("documents")
-    .select("id, filename")
-    .eq("user_id", userId)
+    .select("id, filename, source_scope")
+    .or(`user_id.eq.${userId},source_scope.eq.knowledge_base`)
     .eq("processing_status", "indexed")
     .in("id", uniqueDocumentIds);
 
@@ -432,7 +444,7 @@ export async function retrieveDocumentContextByIds(
   const ownedDocumentIds = ((documents ?? []) as IndexedDocumentRow[]).map((document) => document.id);
   const { data, error } = await supabase
     .from("chunks")
-    .select("id, document_id, text_content, chunk_index, documents!inner(filename)")
+    .select("id, document_id, text_content, chunk_index, documents!inner(filename, source_scope)")
     .in("document_id", ownedDocumentIds)
     .order("chunk_index", { ascending: true })
     .limit(Math.min(Math.max(limit, 1), 20));
@@ -471,8 +483,8 @@ export async function retrieveRepresentativeDocumentContext(
 
   const { data: documents, error: documentsError } = await supabase
     .from("documents")
-    .select("id, filename")
-    .eq("user_id", userId)
+    .select("id, filename, source_scope")
+    .or(`user_id.eq.${userId},source_scope.eq.knowledge_base`)
     .eq("processing_status", "indexed")
     .order("created_at", { ascending: false })
     .limit(12);
@@ -509,7 +521,7 @@ export async function retrieveRepresentativeDocumentContext(
   const documentIds = selectedDocuments.map((document) => document.id);
   const { data, error } = await supabase
     .from("chunks")
-    .select("id, document_id, text_content, chunk_index, documents!inner(filename)")
+    .select("id, document_id, text_content, chunk_index, documents!inner(filename, source_scope)")
     .in("document_id", documentIds)
     .order("chunk_index", { ascending: true })
     .limit(Math.min(Math.max(limit, 1), 12));

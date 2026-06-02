@@ -5,9 +5,10 @@ create table if not exists public.documents (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null,
   filename text not null check (length(trim(filename)) > 0),
-  file_type text not null check (file_type in ('application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'pdf', 'docx', 'txt', 'pptx')),
+  file_type text not null check (file_type in ('application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain', 'text/markdown', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'pdf', 'docx', 'txt', 'md', 'pptx')),
   file_size bigint not null check (file_size >= 0),
   storage_path text not null check (length(trim(storage_path)) > 0),
+  source_scope text not null default 'personal' check (source_scope in ('personal', 'knowledge_base')),
   processing_status text not null default 'uploaded' check (processing_status in ('uploaded', 'queued', 'processing', 'indexed', 'failed')),
   processing_error text,
   indexed_at timestamptz,
@@ -100,13 +101,17 @@ create table if not exists public.document_topics (
 );
 
 alter table public.documents drop constraint if exists documents_user_id_fkey;
+alter table public.documents add column if not exists source_scope text not null default 'personal';
 alter table public.documents add column if not exists processing_status text not null default 'uploaded';
 alter table public.documents add column if not exists processing_error text;
 alter table public.documents add column if not exists indexed_at timestamptz;
 alter table public.documents drop constraint if exists documents_processing_status_check;
 alter table public.documents add constraint documents_processing_status_check check (processing_status in ('uploaded', 'queued', 'processing', 'indexed', 'failed'));
+alter table public.documents drop constraint if exists documents_source_scope_check;
+alter table public.documents add constraint documents_source_scope_check check (source_scope in ('personal', 'knowledge_base'));
 
 create index if not exists documents_user_id_idx on public.documents(user_id);
+create index if not exists documents_source_scope_idx on public.documents(source_scope);
 create index if not exists documents_processing_status_idx on public.documents(processing_status);
 create index if not exists chunks_document_id_idx on public.chunks(document_id);
 create index if not exists chunks_embedding_hnsw_idx on public.chunks using hnsw (embedding extensions.vector_cosine_ops);
@@ -143,7 +148,7 @@ as $$
     1 - (chunks.embedding <=> query_embedding) as similarity
   from public.chunks
   join public.documents on documents.id = chunks.document_id
-  where documents.user_id = match_user_id
+  where (documents.user_id = match_user_id or documents.source_scope = 'knowledge_base')
     and chunks.embedding is not null
   order by chunks.embedding <=> query_embedding
   limit least(match_count, 20);
@@ -159,7 +164,7 @@ drop policy if exists "documents_select_own" on public.documents;
 create policy "documents_select_own"
   on public.documents for select
   to authenticated
-  using (auth.uid() = user_id);
+  using (auth.uid() = user_id or source_scope = 'knowledge_base');
 
 drop policy if exists "documents_service_manage_all" on public.documents;
 create policy "documents_service_manage_all"
@@ -196,7 +201,7 @@ create policy "chunks_select_own_document"
       select 1
       from public.documents
       where documents.id = chunks.document_id
-        and documents.user_id = auth.uid()
+        and (documents.user_id = auth.uid() or documents.source_scope = 'knowledge_base')
     )
   );
 
@@ -258,7 +263,15 @@ drop policy if exists "document_topics_select_own" on public.document_topics;
 create policy "document_topics_select_own"
   on public.document_topics for select
   to authenticated
-  using (auth.uid() = user_id);
+  using (
+    auth.uid() = user_id
+    or exists (
+      select 1
+      from public.documents
+      where documents.id = document_topics.document_id
+        and documents.source_scope = 'knowledge_base'
+    )
+  );
 
 drop policy if exists "document_topics_service_manage_all" on public.document_topics;
 create policy "document_topics_service_manage_all"
@@ -387,7 +400,8 @@ values (
     'application/pdf',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     'text/plain',
-    'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'text/markdown'
   ]
 )
 on conflict (id) do update

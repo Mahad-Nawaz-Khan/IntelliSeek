@@ -1,6 +1,7 @@
 import { BUCKET_NAME } from "../../../lib/upload-config";
 import { getAuthenticatedUser } from "../../../lib/server/auth";
 import { checkRateLimit, getClientIp, rateLimitHeaders, rateLimitResponse } from "../../../lib/server/rate-limit";
+import { isAdminUser } from "../../../lib/server/roles";
 import { getSupabaseServiceClient } from "../../../lib/server/supabase";
 
 export const runtime = "nodejs";
@@ -25,10 +26,10 @@ export async function GET(request: Request) {
 
   const { data, error } = await supabase
     .from("documents")
-    .select("id, filename, created_at, processing_status, processing_error, indexed_at")
-    .eq("user_id", user.id)
+    .select("id, user_id, filename, created_at, processing_status, processing_error, indexed_at, source_scope")
+    .or(`user_id.eq.${user.id},source_scope.eq.knowledge_base`)
     .order("created_at", { ascending: false })
-    .limit(20);
+    .limit(100);
 
   if (error) {
     return Response.json({ ok: false, error: "Document status lookup failed" }, { status: 500 });
@@ -63,9 +64,8 @@ export async function DELETE(request: Request) {
 
   const { data: document, error: lookupError } = await supabase
     .from("documents")
-    .select("id, storage_path")
+    .select("id, user_id, storage_path, source_scope")
     .eq("id", documentId)
-    .eq("user_id", user.id)
     .maybeSingle();
 
   if (lookupError) {
@@ -76,11 +76,19 @@ export async function DELETE(request: Request) {
     return Response.json({ ok: false, error: "Document not found" }, { status: 404 });
   }
 
+  const isKnowledgeBaseDocument = document.source_scope === "knowledge_base";
+  if (isKnowledgeBaseDocument && !isAdminUser(user)) {
+    return Response.json({ ok: false, error: "Only admins can delete knowledge-base documents" }, { status: 403 });
+  }
+  if (!isKnowledgeBaseDocument && document.user_id !== user.id) {
+    return Response.json({ ok: false, error: "Document not found" }, { status: 404 });
+  }
+
   const { error: topicsDeleteError } = await supabase
     .from("document_topics")
     .delete()
     .eq("document_id", document.id)
-    .eq("user_id", user.id);
+    .eq("user_id", document.user_id);
 
   if (topicsDeleteError) {
     return Response.json({ ok: false, error: "Document autocomplete cleanup failed" }, { status: 500 });
@@ -99,7 +107,7 @@ export async function DELETE(request: Request) {
     .from("documents")
     .delete()
     .eq("id", document.id)
-    .eq("user_id", user.id);
+    .eq("user_id", document.user_id);
 
   if (deleteError) {
     return Response.json({ ok: false, error: "Document deletion failed" }, { status: 500 });

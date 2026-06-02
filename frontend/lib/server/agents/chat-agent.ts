@@ -85,6 +85,7 @@ type DocumentRow = {
   id: string;
   filename: string;
   created_at: string;
+  source_scope?: "personal" | "knowledge_base";
 };
 
 type ChunkRow = {
@@ -94,8 +95,14 @@ type ChunkRow = {
   chunk_index: number;
   documents?: {
     filename?: string | null;
+    source_scope?: string | null;
   } | null;
 };
+
+function applyAccessibleDocumentFilter<T>(query: T, userId: string): T {
+  return (query as { or: (filters: string, options?: { foreignTable?: string }) => T })
+    .or(`user_id.eq.${userId},source_scope.eq.knowledge_base`, { foreignTable: "documents" });
+}
 
 function getOpenRouterBaseUrl() {
   return getServerEnv("OPENROUTER_BASE_URL") ?? DEFAULT_OPENROUTER_BASE_URL;
@@ -148,8 +155,8 @@ async function findUserDocuments(userId: string, query: string, limit: number): 
 
   const { data, error } = await supabase
     .from("documents")
-    .select("id, filename, created_at")
-    .eq("user_id", userId)
+    .select("id, filename, created_at, source_scope")
+    .or(`user_id.eq.${userId},source_scope.eq.knowledge_base`)
     .ilike("filename", `%${query}%`)
     .order("created_at", { ascending: false })
     .limit(Math.min(Math.max(limit, 1), 10));
@@ -162,13 +169,14 @@ async function getUserDocumentChunks(userId: string, documentId: string, limit: 
   const supabase = getSupabaseServiceClient();
   if (!supabase) throw new Error("Supabase service client is not configured");
 
-  const { data, error } = await supabase
+  const query = supabase
     .from("chunks")
-    .select("id, document_id, text_content, chunk_index, documents!inner(filename, user_id)")
+    .select("id, document_id, text_content, chunk_index, documents!inner(filename, user_id, source_scope)")
     .eq("document_id", documentId)
-    .eq("documents.user_id", userId)
     .order("chunk_index", { ascending: true })
     .limit(Math.min(Math.max(limit, 1), MAX_DOCUMENT_CHUNKS));
+
+  const { data, error } = await applyAccessibleDocumentFilter(query, userId);
 
   if (error) throw new Error("Could not load document chunks");
 

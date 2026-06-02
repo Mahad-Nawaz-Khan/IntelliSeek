@@ -20,6 +20,8 @@ type AcademicWorkspaceProps = {
   onOpenSession?: (sessionId: string) => void;
   onNewChat?: () => void;
   onOpenUpload?: () => void;
+  onOpenKnowledgeBaseUpload?: () => void;
+  canManageKnowledgeBase?: boolean;
 };
 
 export function AcademicWorkspace({
@@ -34,6 +36,8 @@ export function AcademicWorkspace({
   onOpenSession,
   onNewChat,
   onOpenUpload,
+  onOpenKnowledgeBaseUpload,
+  canManageKnowledgeBase,
 }: AcademicWorkspaceProps) {
   const { theme, toggleTheme } = useTheme();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -55,6 +59,8 @@ export function AcademicWorkspace({
             onOpenSession={onOpenSession}
             onNewChat={onNewChat}
             onOpenUpload={onOpenUpload}
+            onOpenKnowledgeBaseUpload={onOpenKnowledgeBaseUpload}
+            canManageKnowledgeBase={canManageKnowledgeBase}
             isCollapsed={isDesktopSidebarCollapsed}
             onToggleCollapsed={() => setIsDesktopSidebarCollapsed((v) => !v)}
           />
@@ -77,6 +83,8 @@ export function AcademicWorkspace({
               }}
               onNewChat={onNewChat}
               onOpenUpload={onOpenUpload}
+              onOpenKnowledgeBaseUpload={onOpenKnowledgeBaseUpload}
+              canManageKnowledgeBase={canManageKnowledgeBase}
             />
           </div>
         )}

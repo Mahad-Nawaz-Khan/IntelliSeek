@@ -5,6 +5,7 @@ import { getAuthenticatedUser } from "../../../lib/server/auth";
 import { inngest } from "../../../lib/server/inngest/client";
 import { createRequestLogger, type LogData, type RequestLogger } from "../../../lib/server/logger";
 import { checkRateLimit, getClientIp, rateLimitHeaders, rateLimitResponse } from "../../../lib/server/rate-limit";
+import { isAdminUser } from "../../../lib/server/roles";
 import { getSupabaseServiceClient } from "../../../lib/server/supabase";
 
 export const runtime = "nodejs";
@@ -14,6 +15,7 @@ type ParseRequestBody = {
   filename?: unknown;
   file_type?: unknown;
   file_size?: unknown;
+  source_scope?: unknown;
 };
 
 type StorageObjectInfo = {
@@ -222,7 +224,12 @@ export async function POST(request: Request) {
   const filename = body.filename as string;
   const fileType = body.file_type as string;
   const fileSize = body.file_size as number;
+  const sourceScope = body.source_scope === "knowledge_base" ? "knowledge_base" : "personal";
   const extension = getExtension(filename) as AllowedExtension;
+
+  if (sourceScope === "knowledge_base" && !isAdminUser(user)) {
+    return failure(403, "Only admins can upload to the knowledge base", log, { errorCategory: "auth_failure", userId: user.id });
+  }
 
   if (!storagePath.startsWith(`${user.id}/`)) {
     return failure(403, "Storage path does not belong to the signed-in user", log, { errorCategory: "auth_failure", userId: user.id });
@@ -240,6 +247,7 @@ export async function POST(request: Request) {
       file_size: fileSize,
       storage_path: storagePath,
       processing_status: "queued",
+      source_scope: sourceScope,
     })
     .select("id")
     .single();
@@ -261,6 +269,7 @@ export async function POST(request: Request) {
         storagePath,
         filename,
         fileType,
+        sourceScope,
       },
     });
     log.info("inngest.enqueue.complete", { userId: user.id, documentId: documentRows.id });

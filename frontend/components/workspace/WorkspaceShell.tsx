@@ -16,15 +16,22 @@ import { UploadModal } from "../upload/UploadModal";
 
 type SupabaseKnowledgeSource = {
   id: string;
+  user_id?: string;
   filename: string;
   created_at?: string;
   processing_status?: "uploaded" | "queued" | "processing" | "indexed" | "failed";
   processing_error?: string | null;
+  source_scope?: "personal" | "knowledge_base";
 };
 
 type DocumentsResponse = {
   ok: boolean;
   documents?: SupabaseKnowledgeSource[];
+};
+
+type MeResponse = {
+  ok: boolean;
+  user?: { role?: "admin" | "user" };
 };
 
 type WorkspaceShellProps = {
@@ -41,7 +48,7 @@ function toUploadedSource(source: SupabaseKnowledgeSource): KnowledgeSource {
   return {
     id: source.id,
     filename: source.filename,
-    sourceType: "uploaded",
+    sourceType: source.source_scope === "knowledge_base" ? "knowledge-base" : "uploaded",
     fileType: getFileType(source.filename),
     status,
     createdAt: source.created_at,
@@ -56,6 +63,8 @@ export function WorkspaceShell({ children }: WorkspaceShellProps) {
   const [sourceStatus, setSourceStatus] = useState<"loading" | "ready" | "empty" | "unavailable">("loading");
   const [recentSessionRows, setRecentSessionRows] = useState<ChatSessionSummary[]>([]);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [uploadTarget, setUploadTarget] = useState<"personal" | "knowledge_base">("personal");
+  const [isAdmin, setIsAdmin] = useState(false);
   const [deletingSourceId, setDeletingSourceId] = useState<string | null>(null);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [uploadToasts, setUploadToasts] = useState<UploadIndexingToast[]>([]);
@@ -105,6 +114,16 @@ export function WorkspaceShell({ children }: WorkspaceShellProps) {
     }
   }, []);
 
+  const refreshRole = useCallback(async () => {
+    try {
+      const response = await fetch("/api/me");
+      const result = (await response.json()) as MeResponse;
+      setIsAdmin(Boolean(response.ok && result.ok && result.user?.role === "admin"));
+    } catch {
+      setIsAdmin(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (isLoaded && (!isSignedIn || !user)) {
       router.replace("/sign-in?next=/chat");
@@ -116,7 +135,8 @@ export function WorkspaceShell({ children }: WorkspaceShellProps) {
 
     void refreshSources();
     void refreshRecentChats();
-  }, [isLoaded, isSignedIn, refreshRecentChats, refreshSources, router, user]);
+    void refreshRole();
+  }, [isLoaded, isSignedIn, refreshRecentChats, refreshRole, refreshSources, router, user]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -205,12 +225,24 @@ export function WorkspaceShell({ children }: WorkspaceShellProps) {
       onDeleteSession={handleDeleteSession}
       onOpenSession={(sessionId) => router.push(`/chat?session=${encodeURIComponent(sessionId)}`)}
       onNewChat={() => router.push("/chat")}
-      onOpenUpload={() => setIsUploadOpen(true)}
+      onOpenUpload={() => {
+        setUploadTarget("personal");
+        setIsUploadOpen(true);
+      }}
+      onOpenKnowledgeBaseUpload={isAdmin ? () => {
+        setUploadTarget("knowledge_base");
+        setIsUploadOpen(true);
+      } : undefined}
+      canManageKnowledgeBase={isAdmin}
     >
       {children}
       <UploadModal
         isOpen={isUploadOpen}
-        onClose={() => setIsUploadOpen(false)}
+        onClose={() => {
+          setIsUploadOpen(false);
+          setUploadTarget("personal");
+        }}
+        uploadTarget={uploadTarget}
         onUploadToast={(toast) => {
           if (toast.documentId) void refreshSources();
           setUploadToasts((current) => {

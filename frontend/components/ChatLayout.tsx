@@ -39,6 +39,7 @@ type SupabaseKnowledgeSource = {
   processing_status?: "uploaded" | "queued" | "processing" | "indexed" | "failed";
   processing_error?: string | null;
   indexed_at?: string | null;
+  source_scope?: "personal" | "knowledge_base";
 };
 
 type AutocompleteResponse = {
@@ -78,7 +79,7 @@ function toUploadedSource(source: SupabaseKnowledgeSource): KnowledgeSource {
   return {
     id: source.id,
     filename: source.filename,
-    sourceType: "uploaded",
+    sourceType: source.source_scope === "knowledge_base" ? "knowledge-base" : "uploaded",
     fileType: getFileType(source.filename),
     status,
     createdAt: source.created_at,

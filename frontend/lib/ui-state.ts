@@ -10,7 +10,7 @@ export type NavigationItem = {
 export type KnowledgeSource = {
   id: string;
   filename: string;
-  sourceType: "built-in" | "uploaded";
+  sourceType: "knowledge-base" | "uploaded";
   fileType?: "pdf" | "docx" | "pptx" | "txt" | "md" | "unknown";
   status: "available" | "indexing" | "indexed" | "failed";
   createdAt?: string;
@@ -65,52 +65,6 @@ export type RetrievalStatus = {
   matches?: RetrievalMatch[];
 };
 
-export const BUILT_IN_SOURCES: KnowledgeSource[] = [
-  {
-    id: "built-in-dsa",
-    filename: "DSA.pdf",
-    sourceType: "built-in",
-    fileType: "pdf",
-    status: "available",
-    summary: "Core algorithms, trees, graphs, recursion, and dynamic programming notes.",
-  },
-  {
-    id: "built-in-ai-notes",
-    filename: "AI_Notes.pdf",
-    sourceType: "built-in",
-    fileType: "pdf",
-    status: "available",
-    summary: "Semantic search, embeddings, retrieval, and answer generation concepts.",
-  },
-  {
-    id: "built-in-lecture-3",
-    filename: "Lecture_3.pptx",
-    sourceType: "built-in",
-    fileType: "pptx",
-    status: "available",
-    summary: "Traversal examples and academic explanation patterns.",
-  },
-];
-
-export const SAMPLE_UPLOAD_ITEMS: UploadItem[] = [
-  {
-    id: "sample-upload-assignment",
-    filename: "Assignment.pdf",
-    fileType: "pdf",
-    sizeLabel: "2.4 MB",
-    progress: 100,
-    status: "indexed",
-  },
-  {
-    id: "sample-upload-oop",
-    filename: "OOP_Notes.docx",
-    fileType: "docx",
-    sizeLabel: "1.1 MB",
-    progress: 72,
-    status: "indexing",
-  },
-];
-
 export function getFileType(filename: string): KnowledgeSource["fileType"] {
   const extension = filename.split(".").pop()?.toLowerCase();
   if (extension === "pdf" || extension === "docx" || extension === "pptx" || extension === "txt" || extension === "md") {
@@ -120,18 +74,21 @@ export function getFileType(filename: string): KnowledgeSource["fileType"] {
 }
 
 export function createSourceGroups(uploadedSources: KnowledgeSource[]): KnowledgeSourceGroup[] {
+  const knowledgeBaseSources = uploadedSources.filter((source) => source.sourceType === "knowledge-base");
+  const personalSources = uploadedSources.filter((source) => source.sourceType === "uploaded");
+
   return [
     {
       id: "knowledge-base",
       title: "Knowledge Base",
-      emptyMessage: "Built-in academic sources will appear here.",
-      sources: BUILT_IN_SOURCES,
+      emptyMessage: "No shared knowledge-base documents have been uploaded yet.",
+      sources: knowledgeBaseSources,
     },
     {
       id: "your-uploads",
       title: "Your Uploads",
       emptyMessage: "Upload notes to build your personal source library.",
-      sources: uploadedSources,
+      sources: personalSources,
     },
   ];
 }
