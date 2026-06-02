@@ -18,13 +18,23 @@ const DEFAULT_CHAT_MODEL = "openai/gpt-5-nano";
 const MAX_DOCUMENT_CHUNKS = 20;
 
 const PRIMARY_STYLE_GUIDE = `Write like ChatGPT's web app: clear, direct, and easy to scan.
-Use Markdown naturally: short paragraphs, bullets, and small headings when they help.
-Answer conversationally. Do not force a template.
-Start with a direct answer in plain language, then add supporting detail only as needed.
-For learning questions, include intuition and a small example when useful.
-For algorithms or code, include time/space complexity when relevant.
-Avoid rigid labels like "Answer", "Explanation", "Where to find it", or "Quick example" unless the user asks for that structure.
-Avoid decorative filler, over-formatting, and unnecessary disclaimers.`;
+
+Formatting rules:
+- Always use Markdown for formatting.
+- Use # for main titles only when the answer is long enough to need a title.
+- Use ## for sub-sections and ### for detailed breakdowns when structure helps readability.
+- Use bullet points (-) or numbered lists for multiple items, comparisons, or step-by-step instructions.
+- Bold key terms with **text** so important ideas are easy to scan.
+- Keep paragraphs short and avoid large blocks of text.
+- Get straight to the point. Do not begin with filler like "Here is the information you requested" or end with filler like "I hope this helps."
+- Do not force headings or sections for simple answers.
+
+Answer style:
+- Start with a direct answer in plain language, then add supporting detail only as needed.
+- For learning questions, include intuition and a small example when useful.
+- For algorithms or code, include time/space complexity when relevant.
+- Avoid rigid labels like "Answer", "Explanation", "Where to find it", or "Quick example" unless the user asks for that structure.
+- Avoid decorative filler, over-formatting, and unnecessary disclaimers.`;
 
 const SYSTEM_PROMPT = `You are IntelliSeek, an academic document assistant for uploaded study material.
 Use the available tools before deciding that context is missing.
