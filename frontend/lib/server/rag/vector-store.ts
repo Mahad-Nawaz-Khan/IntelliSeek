@@ -1,4 +1,5 @@
 import { getSupabaseServiceClient } from "../supabase";
+import type { RequestLogger } from "../logger";
 
 export type RetrievedChunk = {
   chunk_id: string;
@@ -26,9 +27,20 @@ export async function matchUserChunks(
   userId: string,
   queryEmbedding: number[],
   limit: number,
+  log?: RequestLogger,
 ): Promise<RetrievedChunk[]> {
   const supabase = getSupabaseServiceClient();
-  if (!supabase) return [];
+  if (!supabase) {
+    log?.error("vector.rpc.client_unavailable", { errorCategory: "supabase_query", userId });
+    return [];
+  }
+
+  const startedAt = Date.now();
+  log?.info("vector.rpc.start", {
+    userId,
+    limit,
+    embeddingDimension: queryEmbedding.length,
+  });
 
   const { data, error } = await supabase.rpc("match_user_chunks", {
     query_embedding: toVectorLiteral(queryEmbedding),
@@ -36,9 +48,19 @@ export async function matchUserChunks(
     match_count: limit,
   });
 
-  if (error) throw new Error("Could not search indexed chunks");
+  if (error) {
+    log?.error("vector.rpc.failed", {
+      errorCategory: "supabase_query",
+      userId,
+      limit,
+      embeddingDimension: queryEmbedding.length,
+      durationMs: Date.now() - startedAt,
+      error,
+    });
+    throw new Error("Could not search indexed chunks");
+  }
 
-  return ((data ?? []) as MatchUserChunkRow[]).map((chunk) => ({
+  const chunks = ((data ?? []) as MatchUserChunkRow[]).map((chunk) => ({
     chunk_id: chunk.chunk_id,
     document_id: chunk.document_id,
     filename: chunk.filename ?? "Uploaded document",
@@ -46,4 +68,13 @@ export async function matchUserChunks(
     chunk_index: chunk.chunk_index,
     score: chunk.similarity ?? 0,
   }));
+
+  log?.info("vector.rpc.complete", {
+    userId,
+    limit,
+    resultCount: chunks.length,
+    durationMs: Date.now() - startedAt,
+  });
+
+  return chunks;
 }

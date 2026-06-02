@@ -1,4 +1,5 @@
 import { getServerEnv } from "../env";
+import type { RequestLogger } from "../logger";
 
 export const EMBEDDING_DIMENSION = 1024;
 
@@ -41,12 +42,21 @@ function normalizeEmbeddingResponse(
   return embeddings;
 }
 
-export async function embedTexts(texts: string[]): Promise<number[][]> {
+export async function embedTexts(texts: string[], log?: RequestLogger): Promise<number[][]> {
   const inputs = texts.map((text) => text.trim()).filter(Boolean);
   if (!inputs.length) return [];
 
+  const model = getEmbeddingModel();
+  const startedAt = Date.now();
+  log?.info("embeddings.start", { model, inputCount: inputs.length });
+
   const apiKey = getOpenRouterApiKey();
   if (!apiKey) {
+    log?.error("embeddings.api_key.missing", {
+      errorCategory: "embedding_failure",
+      model,
+      inputCount: inputs.length,
+    });
     throw new Error("OPENROUTER_API_KEY is not configured");
   }
 
@@ -57,22 +67,47 @@ export async function embedTexts(texts: string[]): Promise<number[][]> {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: getEmbeddingModel(),
+      model,
       input: inputs,
     }),
   });
 
   if (!response.ok) {
+    log?.error("embeddings.http.failed", {
+      errorCategory: "embedding_failure",
+      model,
+      inputCount: inputs.length,
+      status: response.status,
+      durationMs: Date.now() - startedAt,
+    });
     throw new Error("Embedding generation failed");
   }
 
-  return normalizeEmbeddingResponse(
-    (await response.json()) as OpenRouterEmbeddingResponse,
-    inputs.length,
-  );
+  try {
+    const embeddings = normalizeEmbeddingResponse(
+      (await response.json()) as OpenRouterEmbeddingResponse,
+      inputs.length,
+    );
+    log?.info("embeddings.complete", {
+      model,
+      inputCount: inputs.length,
+      embeddingCount: embeddings.length,
+      durationMs: Date.now() - startedAt,
+    });
+    return embeddings;
+  } catch (error) {
+    log?.error("embeddings.response.invalid", {
+      errorCategory: "embedding_failure",
+      model,
+      inputCount: inputs.length,
+      durationMs: Date.now() - startedAt,
+      error,
+    });
+    throw error;
+  }
 }
 
-export async function embedText(text: string): Promise<number[]> {
-  const [embedding] = await embedTexts([text]);
+export async function embedText(text: string, log?: RequestLogger): Promise<number[]> {
+  const [embedding] = await embedTexts([text], log);
   return embedding;
 }

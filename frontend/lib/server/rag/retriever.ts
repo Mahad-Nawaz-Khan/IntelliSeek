@@ -1,4 +1,5 @@
 import type { SourceCitation } from "../../chat-api";
+import type { RequestLogger } from "../logger";
 import { embedText } from "./embeddings";
 import { matchUserChunks, type RetrievedChunk } from "./vector-store";
 import { getSupabaseServiceClient } from "../supabase";
@@ -105,9 +106,19 @@ export async function retrieveContext(
   question: string,
   userId: string,
   limit = DEFAULT_TOP_K,
+  log?: RequestLogger,
 ): Promise<RetrievedContext[]> {
-  const queryEmbedding = await embedText(question);
-  return matchUserChunks(userId, queryEmbedding, limit);
+  const startedAt = Date.now();
+  log?.info("retrieval.semantic.start", { userId, limit, questionLength: question.length });
+  const queryEmbedding = await embedText(question, log);
+  const context = await matchUserChunks(userId, queryEmbedding, limit, log);
+  log?.info("retrieval.semantic.complete", {
+    userId,
+    limit,
+    resultCount: context.length,
+    durationMs: Date.now() - startedAt,
+  });
+  return context;
 }
 
 export function isDocumentSummaryRequest(question: string) {
@@ -115,9 +126,12 @@ export function isDocumentSummaryRequest(question: string) {
   return SUMMARY_INTENT_PATTERN.test(normalized);
 }
 
-export async function hasIndexedDocuments(userId: string) {
+export async function hasIndexedDocuments(userId: string, log?: RequestLogger) {
   const supabase = getSupabaseServiceClient();
-  if (!supabase) return false;
+  if (!supabase) {
+    log?.error("retrieval.indexed_documents.client_unavailable", { errorCategory: "supabase_query", userId });
+    return false;
+  }
 
   const { data, error } = await supabase
     .from("documents")
@@ -126,19 +140,36 @@ export async function hasIndexedDocuments(userId: string) {
     .eq("processing_status", "indexed")
     .limit(1);
 
-  return !error && Boolean(data?.length);
+  if (error) {
+    log?.error("retrieval.indexed_documents.failed", { errorCategory: "supabase_query", userId, error });
+    return false;
+  }
+
+  const hasDocuments = Boolean(data?.length);
+  log?.info("retrieval.indexed_documents.complete", { userId, hasDocuments });
+  return hasDocuments;
 }
 
 export async function retrieveDocumentContextByIds(
   userId: string,
   documentIds: string[],
   limit = 10,
+  log?: RequestLogger,
 ): Promise<RetrievedContext[]> {
   const supabase = getSupabaseServiceClient();
-  if (!supabase) return [];
+  if (!supabase) {
+    log?.error("retrieval.documents.client_unavailable", { errorCategory: "supabase_query", userId });
+    return [];
+  }
 
   const uniqueDocumentIds = [...new Set(documentIds.map((id) => id.trim()).filter(Boolean))].slice(0, 4);
-  if (!uniqueDocumentIds.length) return [];
+  if (!uniqueDocumentIds.length) {
+    log?.warn("retrieval.documents.empty_ids", { errorCategory: "retrieval", userId, limit });
+    return [];
+  }
+
+  const startedAt = Date.now();
+  log?.info("retrieval.documents.start", { userId, documentCount: uniqueDocumentIds.length, limit });
 
   const { data: documents, error: documentsError } = await supabase
     .from("documents")
@@ -147,7 +178,15 @@ export async function retrieveDocumentContextByIds(
     .eq("processing_status", "indexed")
     .in("id", uniqueDocumentIds);
 
-  if (documentsError || !documents?.length) return [];
+  if (documentsError || !documents?.length) {
+    log?.error("retrieval.documents.lookup_failed", {
+      errorCategory: documentsError ? "supabase_query" : "retrieval",
+      userId,
+      documentCount: uniqueDocumentIds.length,
+      error: documentsError,
+    });
+    return [];
+  }
 
   const ownedDocumentIds = ((documents ?? []) as IndexedDocumentRow[]).map((document) => document.id);
   const { data, error } = await supabase
@@ -157,9 +196,12 @@ export async function retrieveDocumentContextByIds(
     .order("chunk_index", { ascending: true })
     .limit(Math.min(Math.max(limit, 1), 20));
 
-  if (error) return [];
+  if (error) {
+    log?.error("retrieval.documents.chunks_failed", { errorCategory: "supabase_query", userId, limit, error });
+    return [];
+  }
 
-  return ((data ?? []) as DocumentChunkRow[]).map((chunk) => ({
+  const context = ((data ?? []) as DocumentChunkRow[]).map((chunk) => ({
     chunk_id: chunk.id,
     document_id: chunk.document_id,
     filename: getJoinedDocument(chunk)?.filename ?? "Uploaded document",
@@ -167,15 +209,31 @@ export async function retrieveDocumentContextByIds(
     chunk_index: chunk.chunk_index,
     score: 1,
   }));
+
+  log?.info("retrieval.documents.complete", {
+    userId,
+    documentCount: ownedDocumentIds.length,
+    resultCount: context.length,
+    durationMs: Date.now() - startedAt,
+  });
+
+  return context;
 }
 
 export async function retrieveRepresentativeDocumentContext(
   userId: string,
   limit = 8,
   question = "",
+  log?: RequestLogger,
 ): Promise<RetrievedContext[]> {
   const supabase = getSupabaseServiceClient();
-  if (!supabase) return [];
+  if (!supabase) {
+    log?.error("retrieval.representative.client_unavailable", { errorCategory: "supabase_query", userId });
+    return [];
+  }
+
+  const startedAt = Date.now();
+  log?.info("retrieval.representative.start", { userId, limit, questionLength: question.length });
 
   const { data: documents, error: documentsError } = await supabase
     .from("documents")
@@ -185,7 +243,14 @@ export async function retrieveRepresentativeDocumentContext(
     .order("created_at", { ascending: false })
     .limit(12);
 
-  if (documentsError || !documents?.length) return [];
+  if (documentsError || !documents?.length) {
+    log?.error("retrieval.representative.documents_failed", {
+      errorCategory: documentsError ? "supabase_query" : "retrieval",
+      userId,
+      error: documentsError,
+    });
+    return [];
+  }
 
   const indexedDocuments = documents as IndexedDocumentRow[];
   const filenameMatches = question
@@ -202,7 +267,10 @@ export async function retrieveRepresentativeDocumentContext(
       ? indexedDocuments.slice(0, 4)
       : [];
 
-  if (!selectedDocuments.length) return [];
+  if (!selectedDocuments.length) {
+    log?.info("retrieval.representative.no_match", { userId, indexedDocumentCount: indexedDocuments.length });
+    return [];
+  }
 
   const documentIds = selectedDocuments.map((document) => document.id);
   const { data, error } = await supabase
@@ -212,9 +280,12 @@ export async function retrieveRepresentativeDocumentContext(
     .order("chunk_index", { ascending: true })
     .limit(Math.min(Math.max(limit, 1), 12));
 
-  if (error) return [];
+  if (error) {
+    log?.error("retrieval.representative.chunks_failed", { errorCategory: "supabase_query", userId, limit, error });
+    return [];
+  }
 
-  return ((data ?? []) as RepresentativeChunkRow[]).map((chunk) => ({
+  const context = ((data ?? []) as RepresentativeChunkRow[]).map((chunk) => ({
     chunk_id: chunk.id,
     document_id: chunk.document_id,
     filename: getJoinedDocument(chunk)?.filename ?? "Uploaded document",
@@ -222,15 +293,40 @@ export async function retrieveRepresentativeDocumentContext(
     chunk_index: chunk.chunk_index,
     score: 1,
   }));
+
+  log?.info("retrieval.representative.complete", {
+    userId,
+    selectedDocumentCount: selectedDocuments.length,
+    resultCount: context.length,
+    durationMs: Date.now() - startedAt,
+  });
+
+  return context;
 }
 
-export function filterRelevantContext(context: RetrievedContext[]): RetrievedContext[] {
+export function filterRelevantContext(context: RetrievedContext[], log?: RequestLogger): RetrievedContext[] {
   const strongMatches = context.filter((chunk) => chunk.score >= FILE_CONTEXT_MIN_SCORE);
-  if (strongMatches.length) return strongMatches;
+  if (strongMatches.length) {
+    log?.info("retrieval.filter.complete", {
+      beforeCount: context.length,
+      afterCount: strongMatches.length,
+      topScore: context[0]?.score ?? 0,
+    });
+    return strongMatches;
+  }
 
   const topScore = context[0]?.score ?? 0;
-  if (topScore >= FILE_CONTEXT_WEAK_SCORE) return context.slice(0, 3);
+  if (topScore >= FILE_CONTEXT_WEAK_SCORE) {
+    const filtered = context.slice(0, 3);
+    log?.info("retrieval.filter.complete", {
+      beforeCount: context.length,
+      afterCount: filtered.length,
+      topScore,
+    });
+    return filtered;
+  }
 
+  log?.info("retrieval.filter.complete", { beforeCount: context.length, afterCount: 0, topScore });
   return [];
 }
 

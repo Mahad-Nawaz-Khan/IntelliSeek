@@ -3,6 +3,7 @@ import JSZip from "jszip";
 
 import { getAuthenticatedUser } from "../../../lib/server/auth";
 import { inngest } from "../../../lib/server/inngest/client";
+import { createRequestLogger, type LogData, type RequestLogger } from "../../../lib/server/logger";
 import { checkRateLimit, getClientIp, rateLimitHeaders, rateLimitResponse } from "../../../lib/server/rate-limit";
 import { getSupabaseServiceClient } from "../../../lib/server/supabase";
 
@@ -24,7 +25,8 @@ type StorageObjectInfo = {
   } | null;
 };
 
-function failure(status: number, error: string) {
+function failure(status: number, error: string, log?: RequestLogger, data: LogData = {}) {
+  log?.warn("request.failed", { errorCategory: "unknown", status, error, ...data });
   return Response.json(
     { ok: false, status: "Document parsing failed", error },
     { status },
@@ -120,26 +122,39 @@ async function validateStoredObject(
   extension: AllowedExtension,
   expectedSize: number,
   expectedMime: string,
+  log?: RequestLogger,
 ) {
   const pathParts = splitStoragePath(storagePath);
-  if (!pathParts) return "Malformed storage path";
+  if (!pathParts) {
+    log?.warn("storage.verify.invalid_path", { errorCategory: "validation" });
+    return "Malformed storage path";
+  }
 
+  log?.info("storage.verify.start", { extension, expectedSize, expectedMime });
   const { data, error } = await supabase.storage
     .from(BUCKET_NAME)
     .list(pathParts.folder, { limit: 100, search: pathParts.name });
 
-  if (error) return "Uploaded file could not be verified";
+  if (error) {
+    log?.error("storage.verify.failed", { errorCategory: "storage_download", error });
+    return "Uploaded file could not be verified";
+  }
 
   const object = ((data ?? []) as StorageObjectInfo[]).find((item) => item.name === pathParts.name);
-  if (!object) return "Uploaded file was not found in storage";
+  if (!object) {
+    log?.warn("storage.verify.not_found", { errorCategory: "storage_download" });
+    return "Uploaded file was not found in storage";
+  }
 
   const storedSize = object.metadata?.size;
   if (typeof storedSize === "number" && storedSize !== expectedSize) {
+    log?.warn("storage.verify.size_mismatch", { errorCategory: "validation", expectedSize, storedSize });
     return "Uploaded file size does not match storage metadata";
   }
 
   const storedMime = object.metadata?.mimetype ?? object.metadata?.contentType;
   if (typeof storedMime === "string" && storedMime !== expectedMime) {
+    log?.warn("storage.verify.mime_mismatch", { errorCategory: "validation", expectedMime, storedMime });
     return "Uploaded file MIME type does not match storage metadata";
   }
 
@@ -147,43 +162,61 @@ async function validateStoredObject(
     .from(BUCKET_NAME)
     .download(storagePath);
 
-  if (downloadError || !fileData) return "Uploaded file could not be inspected";
+  if (downloadError || !fileData) {
+    log?.error("storage.download.failed", { errorCategory: "storage_download", error: downloadError });
+    return "Uploaded file could not be inspected";
+  }
 
   const bytes = new Uint8Array(await fileData.arrayBuffer());
   if (bytes.byteLength !== expectedSize) {
+    log?.warn("storage.verify.inspected_size_mismatch", { errorCategory: "validation", expectedSize, inspectedSize: bytes.byteLength });
     return "Uploaded file size does not match inspected content";
   }
 
   const hasExpectedContent = await validateFileContent(bytes, extension);
-  if (!hasExpectedContent) return "Uploaded file content does not match its extension";
+  if (!hasExpectedContent) {
+    log?.warn("storage.verify.content_mismatch", { errorCategory: "validation", extension });
+    return "Uploaded file content does not match its extension";
+  }
 
+  log?.info("storage.verify.complete", { inspectedSize: bytes.byteLength });
   return null;
 }
 
 export async function POST(request: Request) {
+  const log = createRequestLogger("api.parse");
   let body: ParseRequestBody;
 
   try {
     body = (await request.json()) as ParseRequestBody;
-  } catch {
-    return failure(400, "Invalid JSON request body");
+  } catch (error) {
+    return failure(400, "Invalid JSON request body", log, { errorCategory: "validation", error });
   }
 
+  log.info("request.start", {
+    filenamePresent: typeof body.filename === "string",
+    fileType: typeof body.file_type === "string" ? body.file_type : undefined,
+    fileSize: typeof body.file_size === "number" ? body.file_size : undefined,
+  });
+
   const validationError = validateBody(body);
-  if (validationError) return failure(400, validationError);
+  if (validationError) return failure(400, validationError, log, { errorCategory: "validation" });
 
   const supabase = getSupabaseServiceClient();
-  if (!supabase) return failure(500, "Supabase service client is not configured");
+  if (!supabase) return failure(500, "Supabase service client is not configured", log, { errorCategory: "supabase_query" });
 
-  const user = await getAuthenticatedUser();
-  if (!user) return failure(401, "Sign in is required");
+  const user = await getAuthenticatedUser(log);
+  if (!user) return failure(401, "Sign in is required", log, { errorCategory: "auth_failure" });
 
   const rateLimit = await checkRateLimit({
     key: `parse:${user.id}:${getClientIp(request)}`,
     limit: 10,
     windowMs: 60 * 60 * 1000,
   });
-  if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
+  if (!rateLimit.allowed) {
+    log.warn("rate_limit.exceeded", { errorCategory: "rate_limit", userId: user.id });
+    return rateLimitResponse(rateLimit);
+  }
 
   const storagePath = (body.storage_path as string).replace(/\\/g, "/");
   const filename = body.filename as string;
@@ -192,11 +225,11 @@ export async function POST(request: Request) {
   const extension = getExtension(filename) as AllowedExtension;
 
   if (!storagePath.startsWith(`${user.id}/`)) {
-    return failure(403, "Storage path does not belong to the signed-in user");
+    return failure(403, "Storage path does not belong to the signed-in user", log, { errorCategory: "auth_failure", userId: user.id });
   }
 
-  const storedObjectError = await validateStoredObject(supabase, storagePath, extension, fileSize, fileType);
-  if (storedObjectError) return failure(400, storedObjectError);
+  const storedObjectError = await validateStoredObject(supabase, storagePath, extension, fileSize, fileType, log);
+  if (storedObjectError) return failure(400, storedObjectError, log, { errorCategory: "storage_download", userId: user.id });
 
   const { data: documentRows, error: documentError } = await supabase
     .from("documents")
@@ -211,7 +244,12 @@ export async function POST(request: Request) {
     .select("id")
     .single();
 
-  if (documentError || !documentRows?.id) return failure(500, "Document metadata persistence failed");
+  if (documentError || !documentRows?.id) {
+    log.error("document.insert.failed", { errorCategory: "supabase_insert", userId: user.id, error: documentError });
+    return failure(500, "Document metadata persistence failed", log, { errorCategory: "supabase_insert", userId: user.id });
+  }
+
+  log.info("document.insert.complete", { userId: user.id, documentId: documentRows.id });
 
   try {
     await inngest.send({
@@ -225,7 +263,9 @@ export async function POST(request: Request) {
         fileType,
       },
     });
-  } catch {
+    log.info("inngest.enqueue.complete", { userId: user.id, documentId: documentRows.id });
+  } catch (error) {
+    log.error("inngest.enqueue.failed", { errorCategory: "inngest_enqueue", userId: user.id, documentId: documentRows.id, error });
     await supabase
       .from("documents")
       .update({
@@ -234,8 +274,10 @@ export async function POST(request: Request) {
       })
       .eq("id", documentRows.id)
       .eq("user_id", user.id);
-    return failure(500, "Indexing job could not be queued");
+    return failure(500, "Indexing job could not be queued", log, { errorCategory: "inngest_enqueue", userId: user.id, documentId: documentRows.id });
   }
+
+  log.info("request.complete", { userId: user.id, documentId: documentRows.id, status: 202 });
 
   return Response.json(
     {
