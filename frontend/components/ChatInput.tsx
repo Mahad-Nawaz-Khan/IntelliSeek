@@ -1,6 +1,6 @@
 "use client";
 
-import { GitBranch, Plus, Send } from "lucide-react";
+import { GitBranch, Plus, Send, Square } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { type AutocompleteSuggestion, TrieAutocomplete } from "../lib/trie-autocomplete";
@@ -8,14 +8,18 @@ import { type AutocompleteSuggestion, TrieAutocomplete } from "../lib/trie-autoc
 type ChatInputProps = {
   autocompleteSuggestions?: AutocompleteSuggestion[];
   disabled?: boolean;
-  onSubmit: (question: string, selectedSuggestion?: AutocompleteSuggestion) => void;
+  isResponding?: boolean;
+  onSubmit: (question: string, selectedSuggestion?: AutocompleteSuggestion) => boolean;
+  onStopResponse?: () => void;
   onOpenUpload?: () => void;
 };
 
 export function ChatInput({
   autocompleteSuggestions = [],
   disabled = false,
+  isResponding = false,
   onSubmit,
+  onStopResponse,
   onOpenUpload,
 }: ChatInputProps) {
   const [value, setValue] = useState("");
@@ -56,13 +60,15 @@ export function ChatInput({
 
   function submit() {
     const question = value.trim();
-    if (!question || disabled) return;
+    if (!question || disabled) return false;
 
-    onSubmit(question, selectedSuggestion?.value.trim() === question ? selectedSuggestion : undefined);
+    const accepted = onSubmit(question, selectedSuggestion?.value.trim() === question ? selectedSuggestion : undefined);
+    if (!accepted) return false;
     setValue("");
     setSelectedSuggestion(undefined);
     setIsAutocompleteDismissed(false);
     setHighlightedIndex(0);
+    return true;
   }
 
   return (
@@ -100,6 +106,7 @@ export function ChatInput({
           <button
             type="button"
             onClick={onOpenUpload}
+            disabled={disabled}
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/10 bg-transparent border-none text-slate-300 transition hover:bg-white/[0.12] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
             aria-label="Upload document"
           >
@@ -153,12 +160,19 @@ export function ChatInput({
         />
         <button
           type="button"
-          onClick={submit}
-          disabled={disabled || !value.trim()}
+          onClick={() => {
+            if (isResponding) {
+              onStopResponse?.();
+              return;
+            }
+
+            submit();
+          }}
+          disabled={disabled || (!isResponding && !value.trim())}
           className="flex h-11 w-11 items-center justify-center rounded-full bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-950/30 transition hover:bg-cyan-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
-          aria-label="Send question"
+          aria-label={isResponding ? "Stop response" : "Send question"}
         >
-          <Send className="h-5 w-5" />
+          {isResponding ? <Square className="h-4 w-4 fill-current" /> : <Send className="h-5 w-5" />}
         </button>
       </div>
     </div>

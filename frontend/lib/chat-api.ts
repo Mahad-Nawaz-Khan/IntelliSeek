@@ -28,6 +28,7 @@ export type ChatRequest = {
 type ChatRequestOptions = {
   retrievalHint?: ChatRetrievalHint;
   chatSessionId?: string | null;
+  signal?: AbortSignal;
 };
 
 export type ChatResponse = {
@@ -159,6 +160,7 @@ export async function streamChatQuestion(question: string, handlers: StreamChatH
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+    signal: options.signal,
   });
 
   if (!response.ok) throw new Error(await parseJsonError(response));

@@ -49,6 +49,15 @@ type DocumentsResponse = {
   documents?: SupabaseKnowledgeSource[];
 };
 
+type QueuedChatMessage = {
+  id: string;
+  question: string;
+  selectedSuggestion?: AutocompleteSuggestion;
+  createdAt: number;
+};
+
+const QUEUE_LIMIT = 3;
+
 function toAutocompleteId(input: string) {
   return input.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
@@ -94,6 +103,7 @@ export function ChatLayout() {
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingSession, setIsLoadingSession] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [queuedMessages, setQueuedMessages] = useState<QueuedChatMessage[]>([]);
   const [recentSessionRows, setRecentSessionRows] = useState<ChatSessionSummary[]>([]);
   const [sources, setSources] = useState<KnowledgeSource[]>([]);
   const [serverAutocompleteSuggestions, setServerAutocompleteSuggestions] = useState<AutocompleteSuggestion[]>([]);
@@ -106,6 +116,12 @@ export function ChatLayout() {
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [uploadToasts, setUploadToasts] = useState<UploadIndexingToast[]>([]);
   const loadedSessionRef = useRef<string | null>(null);
+  const activeSessionIdRef = useRef<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const queuedMessagesRef = useRef<QueuedChatMessage[]>([]);
+  const conversationRunRef = useRef(0);
+  const isLoadingRef = useRef(false);
+  const isLoadingSessionRef = useRef(false);
   const completedDocumentIds = useMemo(
     () => new Set(sources.filter((source) => source.status === "indexed").map((source) => source.id)),
     [sources],
@@ -116,6 +132,22 @@ export function ChatLayout() {
   );
   const bottomRef = useRef<HTMLDivElement>(null);
   const sessionParam = searchParams.get("session");
+
+  useEffect(() => {
+    activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    queuedMessagesRef.current = queuedMessages;
+  }, [queuedMessages]);
+
+  useEffect(() => {
+    isLoadingRef.current = isLoading;
+  }, [isLoading]);
+
+  useEffect(() => {
+    isLoadingSessionRef.current = isLoadingSession;
+  }, [isLoadingSession]);
 
   const sourceGroups = useMemo(() => createSourceGroups(sources), [sources]);
   const recentChats = useMemo(() => recentSessionRows.map((session) => ({
@@ -177,10 +209,16 @@ export function ChatLayout() {
   useEffect(() => {
     if (!isLoaded) return;
     if (!isSignedIn || !user) {
+      conversationRunRef.current += 1;
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
       setSources([]);
       setRecentSessionRows([]);
       setActiveSessionId(null);
+      activeSessionIdRef.current = null;
       setMessages([]);
+      setQueuedMessages([]);
+      queuedMessagesRef.current = [];
       loadedSessionRef.current = null;
       setSourceStatus("unavailable");
       router.replace("/sign-in?next=/chat");
@@ -236,8 +274,10 @@ export function ChatLayout() {
     const sessionId = sessionParam;
     if (!sessionId) {
       setActiveSessionId(null);
+      activeSessionIdRef.current = null;
       loadedSessionRef.current = null;
       setIsLoadingSession(false);
+      isLoadingSessionRef.current = false;
       return;
     }
 
@@ -248,6 +288,7 @@ export function ChatLayout() {
     const abortController = new AbortController();
     const timeout = window.setTimeout(() => abortController.abort(), 15000);
     setIsLoadingSession(true);
+    isLoadingSessionRef.current = true;
 
     async function loadSession() {
       try {
@@ -255,18 +296,24 @@ export function ChatLayout() {
         if (!active) return;
         loadedSessionRef.current = result.session.id;
         setActiveSessionId(result.session.id);
+        activeSessionIdRef.current = result.session.id;
         setMessages(result.messages);
         setIsLoadingSession(false);
+        isLoadingSessionRef.current = false;
         void refreshRecentChats();
       } catch {
         if (!active) return;
         setActiveSessionId(null);
+        activeSessionIdRef.current = null;
         setMessages([]);
         loadedSessionRef.current = null;
         window.history.replaceState(null, "", "/chat");
       } finally {
         window.clearTimeout(timeout);
-        if (active) setIsLoadingSession(false);
+        if (active) {
+          setIsLoadingSession(false);
+          isLoadingSessionRef.current = false;
+        }
       }
     }
 
@@ -358,10 +405,10 @@ export function ChatLayout() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleSubmit = useCallback(
-    async (question: string, selectedSuggestion?: AutocompleteSuggestion) => {
+  const runQuestion = useCallback(
+    async (question: string, selectedSuggestion?: AutocompleteSuggestion, runScope = conversationRunRef.current) => {
       const trimmedQuestion = question.trim();
-      if (!trimmedQuestion || isLoading || isLoadingSession) return;
+      if (!trimmedQuestion || isLoadingSessionRef.current) return;
 
       const now = Date.now();
       const userMessage: ChatMessageType = {
@@ -382,8 +429,11 @@ export function ChatLayout() {
 
       setMessages((current) => [...current, userMessage, assistantPlaceholder]);
       setIsLoading(true);
+      isLoadingRef.current = true;
 
       let streamedAnswer = "";
+      const abortController = new AbortController();
+      abortControllerRef.current = abortController;
 
       try {
         await streamChatQuestion(trimmedQuestion, {
@@ -413,6 +463,7 @@ export function ChatLayout() {
           },
           onDone: (response) => {
             if (response.chatSessionId) {
+              activeSessionIdRef.current = response.chatSessionId;
               setActiveSessionId(response.chatSessionId);
               loadedSessionRef.current = response.chatSessionId;
               window.history.replaceState(null, "", `/chat?session=${encodeURIComponent(response.chatSessionId)}`);
@@ -435,36 +486,107 @@ export function ChatLayout() {
           },
         }, {
           ...(selectedSuggestion?.metadata ? { retrievalHint: selectedSuggestion.metadata } : {}),
-          ...(activeSessionId ? { chatSessionId: activeSessionId } : {}),
+          ...(activeSessionIdRef.current ? { chatSessionId: activeSessionIdRef.current } : {}),
+          signal: abortController.signal,
         });
       } catch (error) {
+        const isAbort = error instanceof DOMException
+          ? error.name === "AbortError"
+          : error instanceof Error && error.name === "AbortError";
+
         setMessages((current) =>
           current.map((message) =>
             message.id === assistantId
-              ? {
-                  ...message,
-                  content:
-                    error instanceof Error
-                      ? error.message
-                      : "The assistant could not answer this question.",
-                  displayedContent: undefined,
-                  status: "error",
-                }
+              ? isAbort
+                ? {
+                    ...message,
+                    content: streamedAnswer,
+                    displayedContent: undefined,
+                    status: "complete",
+                  }
+                : {
+                    ...message,
+                    content:
+                      error instanceof Error
+                        ? error.message
+                        : "The assistant could not answer this question.",
+                    displayedContent: undefined,
+                    status: "error",
+                  }
               : message,
           ),
         );
       } finally {
+        if (abortControllerRef.current === abortController) abortControllerRef.current = null;
         setIsLoading(false);
+        isLoadingRef.current = false;
+
+        if (conversationRunRef.current !== runScope) return;
+
+        const [nextQueuedMessage, ...remainingQueuedMessages] = queuedMessagesRef.current;
+        if (!nextQueuedMessage) return;
+
+        queuedMessagesRef.current = remainingQueuedMessages;
+        setQueuedMessages(remainingQueuedMessages);
+        void runQuestion(nextQueuedMessage.question, nextQueuedMessage.selectedSuggestion, runScope);
       }
     },
-    [activeSessionId, isLoading, isLoadingSession, refreshRecentChats],
+    [refreshRecentChats],
   );
 
+  const handleSubmit = useCallback(
+    (question: string, selectedSuggestion?: AutocompleteSuggestion) => {
+      const trimmedQuestion = question.trim();
+      if (!trimmedQuestion || isLoadingSessionRef.current) return false;
+
+      if (!isLoadingRef.current) {
+        void runQuestion(trimmedQuestion, selectedSuggestion);
+        return true;
+      }
+
+      if (queuedMessagesRef.current.length >= QUEUE_LIMIT) return false;
+
+      const queuedMessage: QueuedChatMessage = {
+        id: `queued-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        question: trimmedQuestion,
+        selectedSuggestion,
+        createdAt: Date.now(),
+      };
+
+      const nextQueuedMessages = [...queuedMessagesRef.current, queuedMessage];
+      queuedMessagesRef.current = nextQueuedMessages;
+      setQueuedMessages(nextQueuedMessages);
+
+      return true;
+    },
+    [runQuestion],
+  );
+
+  const handleRemoveQueuedMessage = useCallback((queuedMessageId: string) => {
+    setQueuedMessages((current) => {
+      const next = current.filter((message) => message.id !== queuedMessageId);
+      queuedMessagesRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const handleStopResponse = useCallback(() => {
+    abortControllerRef.current?.abort();
+  }, []);
+
   const handleNewChat = useCallback(() => {
+    conversationRunRef.current += 1;
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
     setIsLoadingSession(false);
     setIsLoading(false);
+    isLoadingRef.current = false;
+    isLoadingSessionRef.current = false;
     setActiveSessionId(null);
+    activeSessionIdRef.current = null;
     setMessages([]);
+    setQueuedMessages([]);
+    queuedMessagesRef.current = [];
     loadedSessionRef.current = null;
     window.history.pushState(null, "", "/chat");
   }, []);
@@ -483,7 +605,10 @@ export function ChatLayout() {
       setRecentSessionRows((current) => current.filter((session) => session.id !== sessionId));
       if (sessionId === activeSessionId) {
         setActiveSessionId(null);
+        activeSessionIdRef.current = null;
         setMessages([]);
+        setQueuedMessages([]);
+        queuedMessagesRef.current = [];
         loadedSessionRef.current = null;
         router.push("/chat");
       }
@@ -559,8 +684,13 @@ export function ChatLayout() {
               <div className="sticky bottom-0 z-20 -mx-4 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent px-4 pb-6 pt-6 sm:-mx-6 sm:px-6">
                 <ChatComposer
                   autocompleteSuggestions={autocompleteSuggestions}
-                  disabled={isLoading || isLoadingSession}
+                  disabled={isLoadingSession}
+                  isResponding={isLoading}
+                  queuedMessages={queuedMessages}
+                  queueLimit={QUEUE_LIMIT}
                   onSubmit={handleSubmit}
+                  onRemoveQueuedMessage={handleRemoveQueuedMessage}
+                  onStopResponse={handleStopResponse}
                   onOpenUpload={() => setIsUploadOpen(true)}
                 />
               </div>
