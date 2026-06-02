@@ -26,15 +26,8 @@ npm run dev
 Documentation
 -------------
 
-- **Concepts**: [docs/CONCEPTS.md](docs/CONCEPTS.md)
-- **HNSW deep-dive**: [docs/HNSW.md](docs/HNSW.md)
-- **Vector search**: [docs/VECTOR_SEARCH.md](docs/VECTOR_SEARCH.md)
-- **Trie autocomplete**: [docs/TRIE_AUTOCOMPLETE.md](docs/TRIE_AUTOCOMPLETE.md)
-- **Chunking & vectorization**: [docs/CHUNKING.md](docs/CHUNKING.md)
-- **Developer guide**: [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md)
-- **API reference**: [docs/API.md](docs/API.md)
-- **Algorithms & math**: [docs/ALGORITHMS.md](docs/ALGORITHMS.md)
-- **Usage examples**: [docs/USAGE.md](docs/USAGE.md) and [docs/EXAMPLES.md](docs/EXAMPLES.md)
+- Read the consolidated documentation index: [docs/README.md](docs/README.md)
+
 
 Contributing
 ------------

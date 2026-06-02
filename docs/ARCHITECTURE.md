@@ -189,7 +189,7 @@ The app is model-configurable through environment variables.
 | OpenRouter base URL | `OPENROUTER_BASE_URL` | Defaults to OpenRouter's OpenAI-compatible API base URL in server code. |
 | Groq chat/title helper | `GROQ_CHAT_MODEL` | Used by Groq helper paths, including generated chat titles when available. |
 
-Recommended local values are documented in [Setup Guide](SETUP.md).
+Recommended local values are documented in [Dev & Deploy Guide](DEV_AND_DEPLOY.md).
 
 ## Data Access Model
 
