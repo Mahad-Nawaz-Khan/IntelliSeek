@@ -72,7 +72,7 @@ export function ChatInput({
   }
 
   return (
-    <div className="relative rounded-full place-self-center border border-white/10 bg-slate-950/70 p-2 w-full lg:w-200 h-16 shadow-2xl shadow-cyan-950/20 backdrop-blur-xl transition-colors focus-within:border-cyan-400/50">
+    <div className="relative min-h-16 w-full place-self-center rounded-full border border-white/10 bg-slate-950/70 p-2 shadow-[0_18px_45px_rgba(0,0,0,0.38)] backdrop-blur-xl transition-[border-color,box-shadow] focus-within:border-cyan-400/50 focus-within:shadow-[0_20px_55px_rgba(8,145,178,0.22)] lg:w-200">
       {isAutocompleteOpen && matches.length > 0 && (
         <div className="absolute inset-x-3 bottom-full z-20 mb-2 overflow-hidden rounded-2xl border border-cyan-300/20 bg-slate-950/95 shadow-2xl shadow-cyan-950/30 backdrop-blur-xl">
           <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2 text-xs font-medium uppercase tracking-[0.22em] text-cyan-200">
@@ -101,7 +101,7 @@ export function ChatInput({
           </div>
         </div>
       )}
-      <div className="flex items-center mx-0.5 ">
+      <div className="mx-0.5 flex items-end">
         {onOpenUpload && (
           <button
             type="button"

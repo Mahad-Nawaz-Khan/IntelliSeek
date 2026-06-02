@@ -766,7 +766,7 @@ export function ChatLayout() {
                 )}
               </div>
 
-              <div className="sticky bottom-0 z-20 -mx-4 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent px-4 pb-6 pt-6 sm:-mx-6 sm:px-6">
+              <div className="sticky bottom-0 z-20 -mx-4 px-4 pb-6 pt-6 sm:-mx-6 sm:px-6">
                 <ChatComposer
                   autocompleteSuggestions={autocompleteSuggestions}
                   disabled={isLoadingSession}
