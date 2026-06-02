@@ -174,11 +174,11 @@ export function FileUpload() {
             : "Drag and drop an academic file here, or click to browse"}
         </p>
         <p className="mt-2 text-sm text-slate-400">
-          Supported: PDF, DOCX, PPTX, TXT — Max 10 MB
+          Supported: PDF, DOCX, PPTX, TXT, MD — Max 10 MB
         </p>
         <input
           type="file"
-          accept=".pdf,.docx,.pptx,.txt"
+          accept=".pdf,.docx,.pptx,.txt,.md"
           onChange={handleChange}
           disabled={isWorking || !isLoaded || !isSignedIn}
           className="mx-auto mt-4 block text-sm text-slate-400 file:mr-4 file:rounded-lg file:border-0 file:bg-cyan-600 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-cyan-500 disabled:opacity-50"

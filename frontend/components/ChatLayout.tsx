@@ -741,7 +741,7 @@ export function ChatLayout() {
                 <UploadCloud className="h-7 w-7" />
               </span>
               <span className="text-base font-semibold">Drop files to upload</span>
-              <span className="text-xs text-slate-300">PDF, DOCX, PPTX, and TXT files upload directly into your sources.</span>
+              <span className="text-xs text-slate-300">PDF, DOCX, PPTX, TXT, and MD files upload directly into your sources.</span>
             </div>
           </div>
         )}

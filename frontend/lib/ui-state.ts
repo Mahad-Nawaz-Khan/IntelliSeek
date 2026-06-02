@@ -11,7 +11,7 @@ export type KnowledgeSource = {
   id: string;
   filename: string;
   sourceType: "built-in" | "uploaded";
-  fileType?: "pdf" | "docx" | "pptx" | "txt" | "unknown";
+  fileType?: "pdf" | "docx" | "pptx" | "txt" | "md" | "unknown";
   status: "available" | "indexing" | "indexed" | "failed";
   createdAt?: string;
   summary?: string;
@@ -43,7 +43,7 @@ export type Citation = {
 export type UploadItem = {
   id: string;
   filename: string;
-  fileType: "pdf" | "docx" | "pptx" | "txt" | "unknown";
+  fileType: "pdf" | "docx" | "pptx" | "txt" | "md" | "unknown";
   sizeLabel?: string;
   progress?: number;
   status: "idle" | "uploading" | "indexing" | "indexed" | "failed";
@@ -113,7 +113,7 @@ export const SAMPLE_UPLOAD_ITEMS: UploadItem[] = [
 
 export function getFileType(filename: string): KnowledgeSource["fileType"] {
   const extension = filename.split(".").pop()?.toLowerCase();
-  if (extension === "pdf" || extension === "docx" || extension === "pptx" || extension === "txt") {
+  if (extension === "pdf" || extension === "docx" || extension === "pptx" || extension === "txt" || extension === "md") {
     return extension;
   }
   return "unknown";

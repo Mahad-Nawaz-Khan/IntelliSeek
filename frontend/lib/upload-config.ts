@@ -1,4 +1,4 @@
-export const ALLOWED_EXTENSIONS = [".pdf", ".docx", ".pptx", ".txt"] as const;
+export const ALLOWED_EXTENSIONS = [".pdf", ".docx", ".pptx", ".txt", ".md"] as const;
 export type AllowedExtension = (typeof ALLOWED_EXTENSIONS)[number];
 
 export const ALLOWED_MIME_TYPES: Record<AllowedExtension, string> = {
@@ -8,6 +8,7 @@ export const ALLOWED_MIME_TYPES: Record<AllowedExtension, string> = {
   ".pptx":
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   ".txt": "text/plain",
+  ".md": "text/markdown",
 };
 
 export const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -39,7 +40,8 @@ export function isAllowedFile(file: File): {
   }
 
   const expectedMime = ALLOWED_MIME_TYPES[ext as AllowedExtension];
-  if (!file.type || file.type !== expectedMime) {
+  const isMarkdownMime = ext === ".md" && (!file.type || file.type === "text/plain" || file.type === "text/markdown");
+  if (!isMarkdownMime && (!file.type || file.type !== expectedMime)) {
     return {
       valid: false,
       error: `File MIME type does not match ${ext}`,

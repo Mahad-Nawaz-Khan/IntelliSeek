@@ -58,7 +58,7 @@ export async function extractTextFromBuffer(
   const extension = filename.slice(filename.lastIndexOf(".")).toLowerCase();
   const buffer = Buffer.from(arrayBuffer);
 
-  if (extension === ".txt" || mimeType === "text/plain") {
+  if (extension === ".txt" || extension === ".md" || mimeType === "text/plain" || mimeType === "text/markdown") {
     return new TextDecoder("utf-8").decode(arrayBuffer);
   }
 

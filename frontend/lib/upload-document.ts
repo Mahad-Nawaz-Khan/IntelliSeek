@@ -37,7 +37,7 @@ export function toSizeLabel(size: number) {
 
 export function toFileType(filename: string): UploadItem["fileType"] {
   const extension = filename.split(".").pop()?.toLowerCase();
-  if (extension === "pdf" || extension === "docx" || extension === "pptx" || extension === "txt") return extension;
+  if (extension === "pdf" || extension === "docx" || extension === "pptx" || extension === "txt" || extension === "md") return extension;
   return "unknown";
 }
 
@@ -84,6 +84,8 @@ export async function uploadDocumentFile({
   if (!supabase) return fail("Supabase client is not configured");
 
   const storagePath = `${userId}/${timestamp}-${safeName}`;
+  const ext = getExtension(file.name) as AllowedExtension;
+  const contentType = ALLOWED_MIME_TYPES[ext];
 
   onToast?.({ toastId, filename: file.name, status: "uploading", queuedAt: timestamp });
   onUploadStarted?.();
@@ -91,7 +93,7 @@ export async function uploadDocumentFile({
 
   const { error: uploadError } = await supabase.storage
     .from(BUCKET_NAME)
-    .upload(storagePath, file, { upsert: false });
+    .upload(storagePath, file, { upsert: false, contentType });
 
   if (uploadError) {
     const errorMessage = getStorageUploadErrorMessage(uploadError.message);
@@ -104,14 +106,13 @@ export async function uploadDocumentFile({
   onToast?.({ toastId, filename: file.name, status: "indexing" });
 
   try {
-    const ext = getExtension(file.name) as AllowedExtension;
     const response = await fetch("/api/parse", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         storage_path: storagePath,
         filename: file.name,
-        file_type: ALLOWED_MIME_TYPES[ext],
+        file_type: contentType,
         file_size: file.size,
       }),
     });

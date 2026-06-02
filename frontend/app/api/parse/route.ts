@@ -112,7 +112,7 @@ async function validateOfficeContainer(bytes: Uint8Array, extension: AllowedExte
 
 async function validateFileContent(bytes: Uint8Array, extension: AllowedExtension) {
   if (extension === ".pdf") return hasPdfSignature(bytes);
-  if (extension === ".txt") return isPlainText(bytes);
+  if (extension === ".txt" || extension === ".md") return isPlainText(bytes);
   return validateOfficeContainer(bytes, extension);
 }
 

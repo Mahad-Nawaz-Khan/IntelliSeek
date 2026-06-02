@@ -137,7 +137,7 @@ export default function SignUpPage() {
               Create an IntelliSeek account to keep your uploads, indexed chunks, chat history, and citations tied to your own source library.
             </p>
             <div className="mt-10 grid gap-3">
-              {["Upload PDF, DOCX, PPTX, and TXT notes into your account.", "Retrieve only your own chunks with cosine Top-K search.", "Ask academic questions and get source-grounded answers."].map((item) => (
+              {["Upload PDF, DOCX, PPTX, TXT, and MD notes into your account.", "Retrieve only your own chunks with cosine Top-K search.", "Ask academic questions and get source-grounded answers."].map((item) => (
                 <div key={item} className="rounded-3xl border border-white/10 bg-white/[0.05] px-4 py-4 text-sm text-slate-300">
                   {item}
                 </div>

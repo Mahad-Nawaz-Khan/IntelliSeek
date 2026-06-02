@@ -33,11 +33,11 @@ export function UploadDropzone({
         <UploadCloud className="h-7 w-7" />
       </span>
       <span className="text-lg font-semibold text-white">Drag & Drop Files Here</span>
-      <span className="mt-2 text-sm text-slate-400">PDF • DOCX • PPTX • TXT</span>
+      <span className="mt-2 text-sm text-slate-400">PDF • DOCX • PPTX • TXT • MD</span>
       <span className="mt-1 text-xs text-slate-500">Maximum 10 MB per file</span>
       <input
         type="file"
-        accept=".pdf,.docx,.pptx,.txt"
+        accept=".pdf,.docx,.pptx,.txt,.md"
         disabled={disabled}
         onChange={onChange}
         className="sr-only"
