@@ -4,16 +4,7 @@ import { X } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 
 import { useAuth } from "../../context/AuthContext";
-import { readParseResponse } from "../../lib/parse-response";
-import { supabase } from "../../lib/supabase";
-import {
-  ALLOWED_MIME_TYPES,
-  BUCKET_NAME,
-  getExtension,
-  getStorageUploadErrorMessage,
-  isAllowedFile,
-  type AllowedExtension,
-} from "../../lib/upload-config";
+import { uploadDocumentFile, type UploadToastPayload } from "../../lib/upload-document";
 import type { UploadItem } from "../../lib/ui-state";
 import { UploadDropzone } from "./UploadDropzone";
 import { UploadProgress } from "./UploadProgress";
@@ -21,21 +12,10 @@ import { UploadProgress } from "./UploadProgress";
 type UploadModalProps = {
   isOpen: boolean;
   onClose: () => void;
-  onUploadToast?: (payload: { toastId: string; documentId?: string; filename: string; status: "uploading" | "indexing" | "failed"; queuedAt?: number; errorMessage?: string }) => void;
+  onUploadToast?: (payload: UploadToastPayload) => void;
   completedDocumentIds?: Set<string>;
   failedDocuments?: Map<string, string>;
 };
-
-function toSizeLabel(size: number) {
-  if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function toFileType(filename: string): UploadItem["fileType"] {
-  const extension = filename.split(".").pop()?.toLowerCase();
-  if (extension === "pdf" || extension === "docx" || extension === "pptx" || extension === "txt") return extension;
-  return "unknown";
-}
 
 export function UploadModal({ isOpen, onClose, onUploadToast, completedDocumentIds, failedDocuments }: UploadModalProps) {
   const { isLoaded, isSignedIn, user } = useAuth();
@@ -61,95 +41,18 @@ export function UploadModal({ isOpen, onClose, onUploadToast, completedDocumentI
 
   const processFile = useCallback(async (file: File) => {
     setLastFile(file);
-    const baseItem: UploadItem = {
-      id: `${Date.now()}-${file.name}`,
-      filename: file.name,
-      fileType: toFileType(file.name),
-      sizeLabel: toSizeLabel(file.size),
-      progress: 0,
-      status: "idle",
-    };
-
-    const check = isAllowedFile(file);
-    if (!check.valid) {
-      setItem({ ...baseItem, status: "failed", errorMessage: check.error ?? "Invalid file" });
-      return;
-    }
-
-    if (!isLoaded) {
-      setItem({ ...baseItem, status: "failed", errorMessage: "Authentication is still loading" });
-      return;
-    }
-
-    if (!isSignedIn || !user) {
-      setItem({ ...baseItem, status: "failed", errorMessage: "Sign in before uploading notes" });
-      return;
-    }
-
-    if (!supabase) {
-      setItem({ ...baseItem, status: "failed", errorMessage: "Supabase client is not configured" });
-      return;
-    }
-
-    const userId = user.id;
-
-    const timestamp = Date.now();
-    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const toastId = `${timestamp}-${safeName}`;
-    const storagePath = `${userId}/${timestamp}-${safeName}`;
-
-    onUploadToast?.({ toastId, filename: file.name, status: "uploading", queuedAt: timestamp });
-    onClose();
-    setItem({ ...baseItem, progress: 35, status: "uploading" });
-    const { error: uploadError } = await supabase.storage
-      .from(BUCKET_NAME)
-      .upload(storagePath, file, { upsert: false });
-
-    if (uploadError) {
-      const errorMessage = getStorageUploadErrorMessage(uploadError.message);
-      setItem({ ...baseItem, status: "failed", errorMessage });
-      onUploadToast?.({ toastId, filename: file.name, status: "failed", errorMessage });
-      return;
-    }
-
-    setItem({ ...baseItem, progress: 78, status: "indexing" });
-    onUploadToast?.({ toastId, filename: file.name, status: "indexing" });
-    try {
-      const ext = getExtension(file.name) as AllowedExtension;
-      const response = await fetch("/api/parse", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          storage_path: storagePath,
-          filename: file.name,
-          file_type: ALLOWED_MIME_TYPES[ext],
-          file_size: file.size,
-        }),
-      });
-      const result = await readParseResponse(response);
-
-      if (!result.ok) {
-        const errorMessage = result.error ?? "Parsing failed";
-        setItem({ ...baseItem, status: "failed", errorMessage });
-        onUploadToast?.({ toastId, filename: file.name, status: "failed", errorMessage });
-        return;
-      }
-
-      if (!result.document_id) {
-        const errorMessage = "Queued document did not return an id";
-        setItem({ ...baseItem, status: "failed", errorMessage });
-        onUploadToast?.({ toastId, filename: file.name, status: "failed", errorMessage });
-        return;
-      }
-
-      setQueuedDocumentId(result.document_id);
-      setItem({ ...baseItem, progress: 88, status: "indexing" });
-      onUploadToast?.({ toastId, documentId: result.document_id, filename: file.name, status: "indexing" });
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Could not reach the parsing service";
-      setItem({ ...baseItem, status: "failed", errorMessage });
-      onUploadToast?.({ toastId, filename: file.name, status: "failed", errorMessage });
-    }
+    await uploadDocumentFile({
+      file,
+      userId: user?.id,
+      isAuthLoaded: isLoaded,
+      isSignedIn,
+      onToast: onUploadToast,
+      onUploadStarted: onClose,
+      onProgress: (nextItem, documentId) => {
+        setItem(nextItem);
+        if (documentId) setQueuedDocumentId(documentId);
+      },
+    });
   }, [isLoaded, isSignedIn, onClose, onUploadToast, user]);
 
   if (!isOpen) return null;

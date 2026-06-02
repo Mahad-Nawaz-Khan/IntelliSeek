@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import { UploadCloud } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { AcademicWorkspace } from "./chat/AcademicWorkspace";
@@ -22,6 +23,7 @@ import {
   type ChatSessionSummary,
 } from "../lib/chat-api";
 import type { AutocompleteSuggestion } from "../lib/trie-autocomplete";
+import { uploadDocumentFile, type UploadToastPayload } from "../lib/upload-document";
 import {
   createSourceGroups,
   getFileType,
@@ -115,6 +117,7 @@ export function ChatLayout() {
   const [deletingSourceId, setDeletingSourceId] = useState<string | null>(null);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [uploadToasts, setUploadToasts] = useState<UploadIndexingToast[]>([]);
+  const [isChatFileDragging, setIsChatFileDragging] = useState(false);
   const loadedSessionRef = useRef<string | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -122,6 +125,7 @@ export function ChatLayout() {
   const conversationRunRef = useRef(0);
   const isLoadingRef = useRef(false);
   const isLoadingSessionRef = useRef(false);
+  const chatDragDepthRef = useRef(0);
   const completedDocumentIds = useMemo(
     () => new Set(sources.filter((source) => source.status === "indexed").map((source) => source.id)),
     [sources],
@@ -401,6 +405,70 @@ export function ChatLayout() {
     setUploadToasts((current) => current.filter((t) => t.toastId !== toastId));
   }, []);
 
+  const handleUploadToast = useCallback(({ toastId, documentId, filename, status, queuedAt, errorMessage }: UploadToastPayload) => {
+    if (documentId) setPollDocuments(true);
+    setUploadToasts((current) => {
+      const existing = current.find((t) => t.toastId === toastId);
+      const nextToast: UploadIndexingToast = {
+        toastId,
+        documentId: documentId ?? existing?.documentId,
+        filename,
+        queuedAt: queuedAt ?? existing?.queuedAt ?? Date.now(),
+        status,
+        errorMessage,
+      };
+
+      return [...current.filter((t) => t.toastId !== toastId), nextToast];
+    });
+  }, []);
+
+  const uploadDroppedFiles = useCallback((files: File[]) => {
+    if (!files.length) return;
+
+    files.forEach((file) => {
+      void uploadDocumentFile({
+        file,
+        userId: user?.id,
+        isAuthLoaded: isLoaded,
+        isSignedIn,
+        toastValidationFailures: true,
+        onToast: handleUploadToast,
+      });
+    });
+  }, [handleUploadToast, isLoaded, isSignedIn, user]);
+
+  function hasDraggedFiles(event: DragEvent) {
+    return Array.from(event.dataTransfer.types).includes("Files");
+  }
+
+  const handleChatDragEnter = useCallback((event: DragEvent<HTMLDivElement>) => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    chatDragDepthRef.current += 1;
+    setIsChatFileDragging(true);
+  }, []);
+
+  const handleChatDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setIsChatFileDragging(true);
+  }, []);
+
+  const handleChatDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
+    if (!hasDraggedFiles(event)) return;
+    chatDragDepthRef.current = Math.max(0, chatDragDepthRef.current - 1);
+    if (chatDragDepthRef.current === 0) setIsChatFileDragging(false);
+  }, []);
+
+  const handleChatDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    chatDragDepthRef.current = 0;
+    setIsChatFileDragging(false);
+    uploadDroppedFiles(Array.from(event.dataTransfer.files));
+  }, [uploadDroppedFiles]);
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -659,7 +727,24 @@ export function ChatLayout() {
       onOpenUpload={() => setIsUploadOpen(true)}
     >
       <ChatHeader onOpenUpload={() => setIsUploadOpen(true)} />
-      <div className="flex min-h-0 flex-1">
+      <div
+        className="relative flex min-h-0 flex-1"
+        onDragEnter={handleChatDragEnter}
+        onDragLeave={handleChatDragLeave}
+        onDragOver={handleChatDragOver}
+        onDrop={handleChatDrop}
+      >
+        {isChatFileDragging && (
+          <div className="pointer-events-none absolute inset-3 z-30 flex items-center justify-center rounded-3xl border-2 border-dashed border-cyan-300/70 bg-slate-950/75 text-cyan-50 shadow-2xl shadow-cyan-950/30 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-3 text-center">
+              <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-cyan-300/15 text-cyan-100">
+                <UploadCloud className="h-7 w-7" />
+              </span>
+              <span className="text-base font-semibold">Drop files to upload</span>
+              <span className="text-xs text-slate-300">PDF, DOCX, PPTX, and TXT files upload directly into your sources.</span>
+            </div>
+          </div>
+        )}
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
             <div className="flex min-h-full flex-col">
@@ -701,22 +786,7 @@ export function ChatLayout() {
       <UploadModal
         isOpen={isUploadOpen}
         onClose={() => setIsUploadOpen(false)}
-        onUploadToast={({ toastId, documentId, filename, status, queuedAt, errorMessage }) => {
-          if (documentId) setPollDocuments(true);
-          setUploadToasts((current) => {
-            const existing = current.find((t) => t.toastId === toastId);
-            const nextToast: UploadIndexingToast = {
-              toastId,
-              documentId: documentId ?? existing?.documentId,
-              filename,
-              queuedAt: queuedAt ?? existing?.queuedAt ?? Date.now(),
-              status,
-              errorMessage,
-            };
-
-            return [...current.filter((t) => t.toastId !== toastId), nextToast];
-          });
-        }}
+        onUploadToast={handleUploadToast}
         completedDocumentIds={completedDocumentIds}
         failedDocuments={failedDocuments}
       />
