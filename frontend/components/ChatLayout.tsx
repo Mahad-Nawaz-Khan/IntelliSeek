@@ -235,7 +235,7 @@ export function ChatLayout() {
 
     const sessionId = sessionParam;
     if (!sessionId) {
-      if (activeSessionId) setActiveSessionId(null);
+      setActiveSessionId(null);
       loadedSessionRef.current = null;
       setIsLoadingSession(false);
       return;
@@ -253,10 +253,11 @@ export function ChatLayout() {
       try {
         const result = await fetchChatSessionMessages(requestedSessionId, abortController.signal);
         if (!active) return;
+        loadedSessionRef.current = result.session.id;
         setActiveSessionId(result.session.id);
         setMessages(result.messages);
-        loadedSessionRef.current = result.session.id;
-        await refreshRecentChats();
+        setIsLoadingSession(false);
+        void refreshRecentChats();
       } catch {
         if (!active) return;
         setActiveSessionId(null);
@@ -276,7 +277,7 @@ export function ChatLayout() {
       window.clearTimeout(timeout);
       abortController.abort();
     };
-  }, [activeSessionId, isLoaded, isSignedIn, refreshRecentChats, sessionParam, user]);
+  }, [isLoaded, isSignedIn, refreshRecentChats, sessionParam, user]);
 
   useEffect(() => {
     if (!pollDocuments) return;
