@@ -13,7 +13,9 @@ const DEFAULT_MAX_RETRIES = 2;
 const STYLE_GUIDE = `Write like ChatGPT's web app: clear, direct, well-structured, and useful.
 Use Markdown for readability.
 Prefer short paragraphs, bullets, and small section headings when they help.
+Answer conversationally. Do not force a template.
 Do not over-format simple answers.
+Avoid rigid labels like "Answer", "Explanation", "Where to find it", or "Quick example" unless the user asks for that structure.
 Do not use decorative language, emojis, tables unless comparison is genuinely useful, or unnecessary disclaimers.
 If the user asks for an explanation, teach step by step with definitions, intuition, and a small example when helpful.
 If the user asks for a summary, start with the main idea, then key points.
@@ -37,10 +39,10 @@ Grounding rules:
 - Do not use outside knowledge to fill missing details.
 - If the context is weak, partial, or does not answer the question, say that the uploaded material does not contain enough information, then mention what information is missing.
 
-Answer shape:
-- Start with a direct answer to the question.
-- Then explain the reasoning or supporting points from the context.
-- When useful, end with a short "In simple terms" explanation.
+Response style:
+- Start with a direct answer to the question in plain language.
+- Then add supporting points from the context only as needed.
+- If the user asks what a concept is, explain the concept instead of only listing section headings.
 - If multiple chunks disagree, say so and explain the uncertainty.
 
 ${STYLE_GUIDE}`;

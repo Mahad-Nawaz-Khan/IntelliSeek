@@ -121,6 +121,41 @@ export async function retrieveContext(
   return context;
 }
 
+export async function retrieveContextFromDocumentIds(
+  question: string,
+  userId: string,
+  documentIds: string[],
+  limit = DEFAULT_TOP_K,
+  log?: RequestLogger,
+): Promise<RetrievedContext[]> {
+  const uniqueDocumentIds = new Set(documentIds.map((id) => id.trim()).filter(Boolean));
+  if (!uniqueDocumentIds.size) return [];
+
+  const broadLimit = Math.min(Math.max(limit * 6, 20), 40);
+  log?.info("retrieval.semantic_documents.start", {
+    userId,
+    documentCount: uniqueDocumentIds.size,
+    limit,
+    broadLimit,
+    questionLength: question.length,
+  });
+
+  const context = await retrieveContext(question, userId, broadLimit, log);
+  const filtered = context
+    .filter((chunk) => uniqueDocumentIds.has(chunk.document_id))
+    .slice(0, limit);
+  const relevant = filterRelevantContext(filtered, log);
+
+  log?.info("retrieval.semantic_documents.complete", {
+    userId,
+    documentCount: uniqueDocumentIds.size,
+    beforeCount: context.length,
+    afterCount: relevant.length,
+  });
+
+  return relevant;
+}
+
 export function isDocumentSummaryRequest(question: string) {
   const normalized = question.toLocaleLowerCase();
   return SUMMARY_INTENT_PATTERN.test(normalized);

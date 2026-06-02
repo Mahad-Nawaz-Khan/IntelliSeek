@@ -9,6 +9,7 @@ import {
   hasIndexedDocuments,
   isDocumentSummaryRequest,
   retrieveContext,
+  retrieveContextFromDocumentIds,
   retrieveDocumentContextByIds,
   retrieveRepresentativeDocumentContext,
   validateQuestion,
@@ -318,12 +319,22 @@ export async function POST(request: Request) {
         let relevantContext = retrievalHint?.kind === "document"
           ? await retrieveDocumentContextByIds(user.id, [retrievalHint.documentId], 12, log)
           : retrievalHint?.kind === "topic"
-            ? await retrieveDocumentContextByIds(user.id, retrievalHint.documentIds, 10, log)
+            ? await retrieveContextFromDocumentIds(`${retrievalHint.topic}\n${question}`, user.id, retrievalHint.documentIds, 8, log)
             : [];
         if (retrievalHint) {
           log.info("retrieval.strategy.complete", {
             userId: user.id,
-            strategy: "hinted_documents",
+            strategy: retrievalHint.kind === "topic" ? "hinted_topic_semantic" : "hinted_documents",
+            contextCount: relevantContext.length,
+          });
+        }
+
+        if (!relevantContext.length && retrievalHint?.kind === "topic") {
+          log.info("retrieval.strategy.start", { userId: user.id, strategy: "hinted_topic_fallback_documents" });
+          relevantContext = await retrieveDocumentContextByIds(user.id, retrievalHint.documentIds, 10, log);
+          log.info("retrieval.strategy.complete", {
+            userId: user.id,
+            strategy: "hinted_topic_fallback_documents",
             contextCount: relevantContext.length,
           });
         }
