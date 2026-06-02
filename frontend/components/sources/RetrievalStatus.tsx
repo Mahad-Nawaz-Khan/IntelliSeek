@@ -14,7 +14,7 @@ export function RetrievalStatus({ status }: RetrievalStatusProps) {
   const isWorking = status.state === "analyzing" || status.state === "retrieving" || status.state === "answering";
 
   return (
-    <div className="mb-4 rounded-2xl border border-cyan-300/15 bg-cyan-300/8 p-4 text-sm text-cyan-50 backdrop-blur-md">
+    <div className="mb-4 rounded-xl border border-cyan-300/15 bg-cyan-300/8 p-4 text-sm text-cyan-50 shadow-xl shadow-cyan-950/10 backdrop-blur-md">
       <div className="flex items-center gap-2.5">
         {isWorking ? (
           <Loader2 className="h-4 w-4 animate-spin text-cyan-300" />
@@ -28,7 +28,7 @@ export function RetrievalStatus({ status }: RetrievalStatusProps) {
           {status.matches.map((match, index) => (
             <li
               key={match.id}
-              className="flex items-center gap-2.5 rounded-xl border border-white/5 bg-white/[0.04] px-3 py-2.5 text-xs backdrop-blur-sm"
+              className="flex items-center gap-2.5 rounded-lg border border-white/5 bg-white/[0.04] px-3 py-2.5 text-xs backdrop-blur-sm"
               style={{
                 animationDelay: `${index * STAGGER_BASE_MS}ms`,
                 animationFillMode: "both",

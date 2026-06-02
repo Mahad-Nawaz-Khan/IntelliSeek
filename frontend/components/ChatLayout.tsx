@@ -746,11 +746,11 @@ export function ChatLayout() {
           </div>
         )}
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
+          <div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
             <div className="flex min-h-full flex-col">
-              <div className="flex-1 pb-6">
+              <div className="flex-1 pb-8">
                 {isLoadingSession ? (
-                  <div className="mx-auto max-w-5xl py-10 text-sm text-slate-400">Loading conversation...</div>
+                  <div className="mx-auto max-w-5xl rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-slate-400">Loading conversation...</div>
                 ) : messages.length === 0 ? (
                   <ChatWelcome disabled={isLoading} onSelect={handleSubmit} />
                 ) : (
@@ -766,7 +766,7 @@ export function ChatLayout() {
                 )}
               </div>
 
-              <div className="sticky bottom-0 z-20 -mx-4 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent px-4 pb-6 pt-6 sm:-mx-6 sm:px-6">
+              <div className="sticky bottom-0 z-20 -mx-4 bg-gradient-to-t from-slate-950 via-slate-950/96 to-transparent px-4 pb-5 pt-8 sm:-mx-6 sm:px-6">
                 <ChatComposer
                   autocompleteSuggestions={autocompleteSuggestions}
                   disabled={isLoadingSession}

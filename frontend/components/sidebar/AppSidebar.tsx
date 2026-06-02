@@ -109,10 +109,11 @@ export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId
   }
 
   return (
-    <aside className="scrollbar-hidden flex h-full w-full flex-col gap-3 overflow-y-auto bg-slate-950/75 px-3 py-4 backdrop-blur-xl lg:w-[232px] lg:shrink-0">
-      <div className="flex items-start justify-between gap-2 px-1 py-1">
+    <aside className="scrollbar-hidden flex h-full w-full flex-col gap-3 overflow-y-auto border-r border-white/10 bg-slate-950/82 px-3 py-4 backdrop-blur-xl lg:w-[252px] lg:shrink-0">
+      <div className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-3">
+      <div className="flex items-start justify-between gap-2">
         <Link href="/chat" className="flex min-w-0 items-center gap-2.5">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-cyan-300 text-slate-950">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-cyan-300 text-slate-950 shadow-lg shadow-cyan-950/25">
             <GraduationCap className="h-4.5 w-4.5" />
           </span>
           <span className="min-w-0">
@@ -131,8 +132,13 @@ export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId
           </button>
         )}
       </div>
+      <div className="mt-3 grid grid-cols-2 gap-2 text-[0.68rem] text-slate-400">
+        <span className="rounded-lg border border-cyan-300/15 bg-cyan-300/8 px-2 py-1.5 text-cyan-100">Sources</span>
+        <span className="rounded-lg border border-emerald-300/15 bg-emerald-300/8 px-2 py-1.5 text-emerald-100">Sessions</span>
+      </div>
+      </div>
 
-      <PrimaryButton type="button" onClick={onNewChat} variant="secondary" className="h-9 w-full justify-start rounded-xl px-2.5 text-xs">
+      <PrimaryButton type="button" onClick={onNewChat} variant="secondary" className="h-10 w-full justify-start rounded-lg px-3 text-xs">
         <MessageSquarePlus className="h-3.5 w-3.5" />
         New Chat
       </PrimaryButton>
@@ -145,11 +151,11 @@ export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId
             <Link
               key={item.href}
               href={item.href}
-              className={`flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-medium transition ${
-                active
-                  ? "bg-cyan-300/12 text-cyan-50"
-                  : "text-slate-400 hover:bg-white/[0.06] hover:text-white"
-              }`}
+                className={`flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium transition ${
+                  active
+                    ? "bg-cyan-300/12 text-cyan-50 shadow-sm shadow-cyan-950/20"
+                    : "text-slate-400 hover:bg-white/[0.06] hover:text-white"
+                }`}
             >
               <Icon className="h-3.5 w-3.5" />
               {item.label}

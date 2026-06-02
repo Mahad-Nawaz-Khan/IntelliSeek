@@ -38,8 +38,8 @@ export function AcademicWorkspace({
   const [isDesktopSidebarCollapsed, setIsDesktopSidebarCollapsed] = useState(false);
 
   return (
-    <main className="academic-page-shell h-dvh overflow-hidden text-slate-100">
-      <div className="flex h-full items-stretch gap-px bg-white/10">
+    <main className="academic-page-shell h-dvh overflow-hidden p-0 text-slate-100 lg:p-3">
+      <div className="chat-shell-shadow flex h-full items-stretch overflow-hidden border-white/10 bg-white/10 lg:rounded-2xl lg:border">
         <div className="hidden min-h-0 lg:flex lg:shrink-0">
           <AppSidebar
             groups={groups}
@@ -78,12 +78,12 @@ export function AcademicWorkspace({
           </div>
         )}
 
-        <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-950/55 backdrop-blur-xl">
+        <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-950/62 backdrop-blur-xl">
           <div className="border-b border-white/10 p-3 lg:hidden">
             <button
               type="button"
               onClick={() => setIsSidebarOpen(true)}
-              className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200"
+              className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 transition hover:bg-white/10"
             >
               <Menu className="h-4 w-4" />
               Workspace

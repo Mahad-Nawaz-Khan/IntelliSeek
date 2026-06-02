@@ -19,12 +19,12 @@ export function RecentChats({ sessions, deletingSessionId, onOpenSession, onDele
       {sessions.length ? (
         <ul className="space-y-2">
           {sessions.map((session) => (
-            <li key={session.id} className="group flex items-start gap-1 rounded-xl transition hover:bg-violet-300/8">
+            <li key={session.id} className="group flex items-start gap-1 rounded-lg transition hover:bg-white/[0.05]">
               <button
                 type="button"
                 onClick={() => onOpenSession?.(session.id)}
-                className={`min-w-0 flex-1 rounded-xl px-2.5 py-2 text-left transition ${
-                  session.status === "active" ? "bg-cyan-300/10" : ""
+                className={`min-w-0 flex-1 rounded-lg px-2.5 py-2 text-left transition ${
+                  session.status === "active" ? "bg-cyan-300/10 text-cyan-50" : ""
                 }`}
                 aria-current={session.status === "active" ? "page" : undefined}
               >
@@ -36,7 +36,7 @@ export function RecentChats({ sessions, deletingSessionId, onOpenSession, onDele
                   type="button"
                   onClick={() => onDeleteSession(session.id)}
                   disabled={deletingSessionId === session.id}
-                  className="mt-1.5 rounded-xl border border-red-300/15 bg-red-400/10 p-1.5 text-red-200 opacity-0 transition hover:border-red-200/40 hover:bg-red-400/20 hover:text-red-100 disabled:cursor-not-allowed disabled:opacity-60 group-hover:opacity-100 focus:opacity-100"
+                  className="mt-1.5 rounded-lg border border-red-300/15 bg-red-400/10 p-1.5 text-red-200 opacity-0 transition hover:border-red-200/40 hover:bg-red-400/20 hover:text-red-100 disabled:cursor-not-allowed disabled:opacity-60 group-hover:opacity-100 focus:opacity-100"
                   aria-label={`Delete ${session.title}`}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -46,7 +46,7 @@ export function RecentChats({ sessions, deletingSessionId, onOpenSession, onDele
           ))}
         </ul>
       ) : (
-        <p className="rounded-xl px-2.5 py-2 text-xs leading-5 text-slate-500">Saved conversations appear here after you start chatting.</p>
+        <p className="rounded-lg px-2.5 py-2 text-xs leading-5 text-slate-500">Saved conversations appear here after you start chatting.</p>
       )}
     </section>
   );
