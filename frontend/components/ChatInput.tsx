@@ -25,7 +25,7 @@ export function ChatInput({
   const [value, setValue] = useState("");
   const [selectedSuggestion, setSelectedSuggestion] = useState<AutocompleteSuggestion | undefined>();
   const [isAutocompleteDismissed, setIsAutocompleteDismissed] = useState(false);
-  const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const trie = useMemo(
     () => TrieAutocomplete.fromSuggestions(autocompleteSuggestions),
@@ -36,9 +36,9 @@ export function ChatInput({
     if (query.length < 2 || disabled) return [];
     return trie.search(query, 6);
   }, [disabled, trie, value]);
-  const boundedHighlightedIndex = matches.length
-    ? Math.min(highlightedIndex, matches.length - 1)
-    : 0;
+  const boundedHighlightedIndex = highlightedIndex === null || !matches.length
+    ? null
+    : Math.min(highlightedIndex, matches.length - 1);
   const isAutocompleteOpen = !isAutocompleteDismissed && matches.length > 0;
 
   useEffect(() => {
@@ -54,7 +54,7 @@ export function ChatInput({
     setValue(suggestion.value);
     setSelectedSuggestion(suggestion);
     setIsAutocompleteDismissed(true);
-    setHighlightedIndex(0);
+    setHighlightedIndex(null);
     textareaRef.current?.focus();
   }
 
@@ -67,7 +67,7 @@ export function ChatInput({
     setValue("");
     setSelectedSuggestion(undefined);
     setIsAutocompleteDismissed(false);
-    setHighlightedIndex(0);
+    setHighlightedIndex(null);
     return true;
   }
 
@@ -87,7 +87,7 @@ export function ChatInput({
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => selectSuggestion(match)}
                 className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm transition ${
-                  index === boundedHighlightedIndex
+                  boundedHighlightedIndex === index
                     ? "bg-cyan-300/15 text-cyan-50"
                     : "text-slate-300 hover:bg-white/5 hover:text-white"
                 }`}
@@ -124,7 +124,7 @@ export function ChatInput({
             setValue(event.target.value);
             setSelectedSuggestion(undefined);
             setIsAutocompleteDismissed(false);
-            setHighlightedIndex(0);
+            setHighlightedIndex(null);
           }}
           onKeyDown={(event) => {
             if (event.key === "Escape" && isAutocompleteOpen) {
@@ -135,21 +135,21 @@ export function ChatInput({
 
             if (event.key === "ArrowDown" && isAutocompleteOpen && matches.length > 0) {
               event.preventDefault();
-              setHighlightedIndex((current) => (current + 1) % matches.length);
+              setHighlightedIndex((current) => current === null ? 0 : (current + 1) % matches.length);
               return;
             }
 
             if (event.key === "ArrowUp" && isAutocompleteOpen && matches.length > 0) {
               event.preventDefault();
               setHighlightedIndex((current) =>
-                current === 0 ? matches.length - 1 : current - 1,
+                current === null || current === 0 ? matches.length - 1 : current - 1,
               );
               return;
             }
 
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
-              if (isAutocompleteOpen && matches[boundedHighlightedIndex]) {
+              if (isAutocompleteOpen && boundedHighlightedIndex !== null && matches[boundedHighlightedIndex]) {
                 selectSuggestion(matches[boundedHighlightedIndex]);
                 return;
               }
