@@ -9,9 +9,11 @@ import {
   filterRelevantContext,
   hasIndexedDocuments,
   isDocumentSummaryRequest,
+  mergeRetrievedContext,
   retrieveContext,
   retrieveContextFromDocumentIds,
   retrieveDocumentContextByIds,
+  retrieveKeywordContext,
   retrieveRepresentativeDocumentContext,
   validateQuestion,
 } from "../../../lib/server/rag/retriever";
@@ -352,12 +354,15 @@ export async function POST(request: Request) {
         }
 
         if (!relevantContext.length) {
-          log.info("retrieval.strategy.start", { userId: user.id, strategy: "semantic_vector" });
-          const context = await retrieveContext(question, user.id, 8, log);
-          relevantContext = filterRelevantContext(context, log);
+          log.info("retrieval.strategy.start", { userId: user.id, strategy: "hybrid_vector_keyword" });
+          const [semanticContext, keywordContext] = await Promise.all([
+            retrieveContext(question, user.id, 10, log),
+            retrieveKeywordContext(question, user.id, 8, log),
+          ]);
+          relevantContext = filterRelevantContext(mergeRetrievedContext(semanticContext, keywordContext), log);
           log.info("retrieval.strategy.complete", {
             userId: user.id,
-            strategy: "semantic_vector",
+            strategy: "hybrid_vector_keyword",
             contextCount: relevantContext.length,
           });
         }

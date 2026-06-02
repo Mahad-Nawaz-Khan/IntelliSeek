@@ -113,51 +113,57 @@ export function ChatInput({
             <Plus className="h-6 w-6" strokeWidth={2.5} />
           </button>
         )}
-        <textarea
-          ref={textareaRef}
-          value={value}
-          rows={1}
-          disabled={disabled}
-          aria-label="Ask IntelliSeek about your uploaded material"
-          placeholder="Ask IntelliSeek about your uploaded material..."
-          onChange={(event) => {
-            setValue(event.target.value);
-            setSelectedSuggestion(undefined);
-            setIsAutocompleteDismissed(false);
-            setHighlightedIndex(null);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Escape" && isAutocompleteOpen) {
-              event.preventDefault();
-              setIsAutocompleteDismissed(true);
-              return;
-            }
-
-            if (event.key === "ArrowDown" && isAutocompleteOpen && matches.length > 0) {
-              event.preventDefault();
-              setHighlightedIndex((current) => current === null ? 0 : (current + 1) % matches.length);
-              return;
-            }
-
-            if (event.key === "ArrowUp" && isAutocompleteOpen && matches.length > 0) {
-              event.preventDefault();
-              setHighlightedIndex((current) =>
-                current === null || current === 0 ? matches.length - 1 : current - 1,
-              );
-              return;
-            }
-
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              if (isAutocompleteOpen && boundedHighlightedIndex !== null && matches[boundedHighlightedIndex]) {
-                selectSuggestion(matches[boundedHighlightedIndex]);
+        <div className="relative min-w-0 flex-1">
+          {!value && (
+            <span className="pointer-events-none absolute inset-x-3 top-3 truncate text-sm leading-6 text-slate-500">
+              Ask IntelliSeek about your uploaded material...
+            </span>
+          )}
+          <textarea
+            ref={textareaRef}
+            value={value}
+            rows={1}
+            disabled={disabled}
+            aria-label="Ask IntelliSeek about your uploaded material"
+            onChange={(event) => {
+              setValue(event.target.value);
+              setSelectedSuggestion(undefined);
+              setIsAutocompleteDismissed(false);
+              setHighlightedIndex(null);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && isAutocompleteOpen) {
+                event.preventDefault();
+                setIsAutocompleteDismissed(true);
                 return;
               }
-              submit();
-            }
-          }}
-          className="max-h-40 min-h-12 flex-1 resize-none bg-transparent px-3 py-3 text-sm leading-6 text-slate-100 outline-none placeholder:text-slate-500 disabled:cursor-not-allowed disabled:opacity-60"
-        />
+
+              if (event.key === "ArrowDown" && isAutocompleteOpen && matches.length > 0) {
+                event.preventDefault();
+                setHighlightedIndex((current) => current === null ? 0 : (current + 1) % matches.length);
+                return;
+              }
+
+              if (event.key === "ArrowUp" && isAutocompleteOpen && matches.length > 0) {
+                event.preventDefault();
+                setHighlightedIndex((current) =>
+                  current === null || current === 0 ? matches.length - 1 : current - 1,
+                );
+                return;
+              }
+
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                if (isAutocompleteOpen && boundedHighlightedIndex !== null && matches[boundedHighlightedIndex]) {
+                  selectSuggestion(matches[boundedHighlightedIndex]);
+                  return;
+                }
+                submit();
+              }
+            }}
+            className="max-h-40 min-h-12 w-full resize-none bg-transparent px-3 py-3 text-sm leading-6 text-slate-100 outline-none disabled:cursor-not-allowed disabled:opacity-60"
+          />
+        </div>
         <button
           type="button"
           onClick={() => {

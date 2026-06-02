@@ -1,17 +1,12 @@
 import { FileText, Library } from "lucide-react";
-import Link from "next/link";
 
-import { requireAuthenticatedUser } from "../../lib/server/require-auth";
-import { BUILT_IN_SOURCES, SAMPLE_UPLOAD_ITEMS } from "../../lib/ui-state";
+import { BUILT_IN_SOURCES, SAMPLE_UPLOAD_ITEMS } from "../../../lib/ui-state";
 
-export default async function LibraryPage() {
-  await requireAuthenticatedUser("/library");
-
+export default function LibraryPage() {
   return (
-    <main className="academic-page-shell min-h-screen px-4 py-8 text-slate-100 sm:px-6 lg:px-10">
+    <div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-4 py-6 text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-6xl">
-        <Link href="/chat" className="text-sm text-cyan-200 transition hover:text-cyan-100">← Back to assistant</Link>
-        <header className="mt-8 rounded-[2rem] border border-white/10 bg-white/[0.06] p-6 shadow-2xl shadow-slate-950/30 backdrop-blur-xl">
+        <header className="rounded-[2rem] border border-white/10 bg-white/[0.06] p-6 shadow-2xl shadow-slate-950/30 backdrop-blur-xl">
           <div className="flex items-center gap-3">
             <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-300/10 text-cyan-200">
               <Library className="h-6 w-6" />
@@ -29,7 +24,7 @@ export default async function LibraryPage() {
           <SourceSection title="Your Uploads" items={SAMPLE_UPLOAD_ITEMS.map((item) => ({ id: item.id, filename: item.filename, status: item.status, summary: item.sizeLabel }))} />
         </section>
       </div>
-    </main>
+    </div>
   );
 }
 

@@ -9,7 +9,7 @@ import type { SourceCitation } from "../../chat-api";
 import { getServerEnv } from "../env";
 import { streamGroqGeneralAnswer, streamGroqGroundedAnswer } from "../groq";
 import { embedText } from "../rag/embeddings";
-import { toSourceCitations, validateQuestion, type RetrievedContext } from "../rag/retriever";
+import { mergeRetrievedContext, retrieveKeywordContext, toSourceCitations, validateQuestion, type RetrievedContext } from "../rag/retriever";
 import { matchUserChunks, type RetrievedChunk } from "../rag/vector-store";
 import { getSupabaseServiceClient } from "../supabase";
 
@@ -237,7 +237,9 @@ function createAgentRun(userId: string) {
     execute: async ({ query, limit }) => {
       const validatedQuery = validateQuestion(query);
       const queryEmbedding = await embedText(validatedQuery);
-      const chunks = await matchUserChunks(userId, queryEmbedding, limit);
+      const semanticChunks = await matchUserChunks(userId, queryEmbedding, Math.min(Math.max(limit * 2, 10), 20));
+      const keywordChunks = await retrieveKeywordContext(validatedQuery, userId, limit);
+      const chunks = mergeRetrievedContext(semanticChunks, keywordChunks).slice(0, limit);
       usedChunks.push(...chunks);
       return JSON.stringify(chunks);
     },

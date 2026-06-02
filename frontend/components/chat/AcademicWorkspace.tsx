@@ -1,9 +1,10 @@
 "use client";
 
-import { Menu } from "lucide-react";
+import { Menu, Moon, Sun } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
 
+import { useTheme } from "../../context/ThemeContext";
 import type { ChatSession, KnowledgeSourceGroup } from "../../lib/ui-state";
 import { AppSidebar } from "../sidebar/AppSidebar";
 
@@ -34,8 +35,10 @@ export function AcademicWorkspace({
   onNewChat,
   onOpenUpload,
 }: AcademicWorkspaceProps) {
+  const { theme, toggleTheme } = useTheme();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isDesktopSidebarCollapsed, setIsDesktopSidebarCollapsed] = useState(false);
+  const isDark = theme === "dark";
 
   return (
     <main className="academic-page-shell h-dvh overflow-hidden text-slate-100">
@@ -79,14 +82,24 @@ export function AcademicWorkspace({
         )}
 
         <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-950/55 backdrop-blur-xl">
-          <div className="border-b border-white/10 p-3 lg:hidden">
+          <div className="relative flex h-14 items-center justify-center border-b border-white/10 px-3 lg:hidden">
             <button
               type="button"
               onClick={() => setIsSidebarOpen(true)}
-              className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200"
+              className="absolute left-3 inline-flex h-10 w-10 items-center justify-center text-slate-200 transition hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
+              aria-label="Open sidebar"
             >
-              <Menu className="h-4 w-4" />
-              Workspace
+              <Menu className="h-5 w-5" />
+            </button>
+            <span className="text-sm font-semibold tracking-[0.16em] text-cyan-100 uppercase">IntelliSeek</span>
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="absolute right-3 inline-flex h-10 w-10 items-center justify-center text-slate-200 transition hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
+              aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
+              title={isDark ? "Switch to light theme" : "Switch to dark theme"}
+            >
+              {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
             </button>
           </div>
           {children}

@@ -60,6 +60,10 @@ type QueuedChatMessage = {
 
 const QUEUE_LIMIT = 3;
 
+type ChatLayoutProps = {
+  embedded?: boolean;
+};
+
 function toAutocompleteId(input: string) {
   return input.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
@@ -97,7 +101,7 @@ function toRetrievalMatches(messages: ChatMessageType[]): RetrievalMatch[] {
   }));
 }
 
-export function ChatLayout() {
+export function ChatLayout({ embedded = false }: ChatLayoutProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { isLoaded, isSignedIn, user } = useAuth();
@@ -713,19 +717,8 @@ export function ChatLayout() {
     return null;
   }
 
-  return (
-    <AcademicWorkspace
-      groups={sourceGroups}
-      recentChats={recentChats}
-      sourceStatus={sourceStatus}
-      deletingSourceId={deletingSourceId}
-      deletingSessionId={deletingSessionId}
-      onDeleteSource={handleDeleteSource}
-      onDeleteSession={handleDeleteSession}
-      onOpenSession={handleOpenSession}
-      onNewChat={handleNewChat}
-      onOpenUpload={() => setIsUploadOpen(true)}
-    >
+  const chatContent = (
+    <>
       <ChatHeader onOpenUpload={() => setIsUploadOpen(true)} />
       <div
         className="relative flex min-h-0 flex-1"
@@ -791,6 +784,25 @@ export function ChatLayout() {
         failedDocuments={failedDocuments}
       />
       <IndexingToast toasts={uploadToasts} onDismiss={dismissToast} />
+    </>
+  );
+
+  if (embedded) return chatContent;
+
+  return (
+    <AcademicWorkspace
+      groups={sourceGroups}
+      recentChats={recentChats}
+      sourceStatus={sourceStatus}
+      deletingSourceId={deletingSourceId}
+      deletingSessionId={deletingSessionId}
+      onDeleteSource={handleDeleteSource}
+      onDeleteSession={handleDeleteSession}
+      onOpenSession={handleOpenSession}
+      onNewChat={handleNewChat}
+      onOpenUpload={() => setIsUploadOpen(true)}
+    >
+      {chatContent}
     </AcademicWorkspace>
   );
 }

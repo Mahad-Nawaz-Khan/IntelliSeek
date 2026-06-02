@@ -10,24 +10,15 @@ type SourceChipProps = {
   group?: GroupedSourceCitation;
 };
 
-function toChunkLabel(sources: SourceCitation[]) {
-  const chunkIndexes = [...new Set(sources.map((source) => source.chunk_index))]
-    .sort((a, b) => a - b)
-    .map((chunkIndex) => chunkIndex + 1);
-
-  return chunkIndexes.length === 1
-    ? `Chunk ${chunkIndexes[0]}`
-    : `Chunks ${chunkIndexes.join(", ")}`;
-}
-
 function formatGroup(group: GroupedSourceCitation): Citation {
   const chunkCount = group.sources.length;
+  const label = chunkCount === 1 ? group.filename : `${group.filename} (${group.chunkRanges})`;
   return {
     id: `${group.documentId}-${group.sources.map((source) => source.chunk_id).join("-")}`,
     sourceId: group.documentId,
-    label: chunkCount === 1 ? group.filename : `${group.filename} · ${chunkCount} chunks`,
+    label,
     filename: group.filename,
-    locator: toChunkLabel(group.sources),
+    locator: group.chunkRanges,
   };
 }
 
