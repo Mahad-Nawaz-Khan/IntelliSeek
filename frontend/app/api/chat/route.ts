@@ -1,4 +1,5 @@
 import type { ChatRetrievalHint, SourceCitation } from "../../../lib/chat-api";
+import { normalizeSourceCitations } from "../../../lib/source-citations";
 import { streamAgentAnswer, streamGeneralAgentAnswer, streamGroundedAgentAnswer, type AgentAnswerStreamEvent, type ConversationTurn } from "../../../lib/server/agents/chat-agent";
 import { getAuthenticatedUser } from "../../../lib/server/auth";
 import { generateGroqChatTitle } from "../../../lib/server/groq";
@@ -240,12 +241,13 @@ async function streamAnswer(
       continue;
     }
 
-    controller.enqueue(toSse("sources", { sources: event.sources }));
-    await saveChatHistory(question, event.answer, event.sources, userId, chatSessionId, log);
+    const sources = normalizeSourceCitations(event.sources);
+    controller.enqueue(toSse("sources", { sources }));
+    await saveChatHistory(question, event.answer, sources, userId, chatSessionId, log);
     await updateChatSessionTimestamp(userId, chatSessionId, log);
     if (shouldGenerateTitle) void generateAndStoreTitle(chatSessionId, userId, question, event.answer, log);
-    controller.enqueue(toSse("done", { answer: event.answer, sources: event.sources, chatSessionId }));
-    log?.info("stream.complete", { userId, sourceCount: event.sources.length, answerLength: event.answer.length });
+    controller.enqueue(toSse("done", { answer: event.answer, sources, chatSessionId }));
+    log?.info("stream.complete", { userId, sourceCount: sources.length, answerLength: event.answer.length });
     return;
   }
 

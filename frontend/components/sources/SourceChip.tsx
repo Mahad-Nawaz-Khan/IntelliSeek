@@ -1,26 +1,48 @@
 import { FileText } from "lucide-react";
 
 import type { SourceCitation } from "../../lib/chat-api";
+import type { GroupedSourceCitation } from "../../lib/source-citations";
 import type { Citation } from "../../lib/ui-state";
 
 type SourceChipProps = {
   citation?: Citation;
   source?: SourceCitation;
+  group?: GroupedSourceCitation;
 };
+
+function toChunkLabel(sources: SourceCitation[]) {
+  const chunkIndexes = [...new Set(sources.map((source) => source.chunk_index))]
+    .sort((a, b) => a - b)
+    .map((chunkIndex) => chunkIndex + 1);
+
+  return chunkIndexes.length === 1
+    ? `Chunk ${chunkIndexes[0]}`
+    : `Chunks ${chunkIndexes.join(", ")}`;
+}
+
+function formatGroup(group: GroupedSourceCitation): Citation {
+  const chunkCount = group.sources.length;
+  return {
+    id: `${group.documentId}-${group.sources.map((source) => source.chunk_id).join("-")}`,
+    sourceId: group.documentId,
+    label: chunkCount === 1 ? group.filename : `${group.filename} · ${chunkCount} chunks`,
+    filename: group.filename,
+    locator: toChunkLabel(group.sources),
+  };
+}
 
 function formatSource(source: SourceCitation): Citation {
   return {
     id: `${source.document_id}-${source.chunk_id}-${source.chunk_index}`,
     sourceId: source.document_id,
-    label: `${source.filename} c${source.chunk_index}`,
+    label: source.filename,
     filename: source.filename,
-    locator: `Chunk ${source.chunk_index}`,
-    preview: source.chunk_id,
+    locator: `Chunk ${source.chunk_index + 1}`,
   };
 }
 
-export function SourceChip({ citation, source }: SourceChipProps) {
-  const display = citation ?? (source ? formatSource(source) : undefined);
+export function SourceChip({ citation, source, group }: SourceChipProps) {
+  const display = citation ?? (group ? formatGroup(group) : source ? formatSource(source) : undefined);
   if (!display) return null;
 
   return (

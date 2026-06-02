@@ -1,6 +1,7 @@
 import { getAuthenticatedUser } from "../../../../../lib/server/auth";
 import { createRequestLogger } from "../../../../../lib/server/logger";
 import { getSupabaseServiceClient } from "../../../../../lib/server/supabase";
+import { normalizeSourceCitations } from "../../../../../lib/source-citations";
 
 export const runtime = "nodejs";
 
@@ -58,7 +59,7 @@ export async function GET(_request: Request, context: RouteContext) {
 
   const messages = ((rows ?? []) as ChatHistoryRow[]).flatMap((row) => {
     const createdAt = new Date(row.created_at).getTime();
-    const sources = Array.isArray(row.sources_cited) ? row.sources_cited : [];
+    const sources = Array.isArray(row.sources_cited) ? normalizeSourceCitations(row.sources_cited) : [];
     return [
       {
         id: `user-${row.id}`,

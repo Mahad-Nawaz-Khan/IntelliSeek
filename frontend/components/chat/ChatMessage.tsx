@@ -2,6 +2,7 @@ import { Bot, User } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 
 import type { ChatMessage as ChatMessageType } from "../../lib/chat-api";
+import { groupSourceCitations } from "../../lib/source-citations";
 import { SourceChip } from "../sources/SourceChip";
 
 type ChatMessageProps = {
@@ -11,6 +12,7 @@ type ChatMessageProps = {
 export function ChatMessage({ message }: ChatMessageProps) {
   const isUser = message.role === "user";
   const content = message.displayedContent ?? message.content;
+  const sourceGroups = message.sources?.length ? groupSourceCitations(message.sources) : [];
 
   return (
     <article className={`flex gap-3 ${isUser ? "ml-8 justify-end sm:ml-16" : "mr-8 justify-start sm:mr-16"}`}>
@@ -48,11 +50,11 @@ export function ChatMessage({ message }: ChatMessageProps) {
 
         {!isUser && message.status === "complete" && (
           <div className="mt-4 flex flex-wrap gap-2 border-t border-white/10 pt-3">
-            {message.sources?.length ? (
-              message.sources.map((source) => (
+            {sourceGroups.length ? (
+              sourceGroups.map((group) => (
                 <SourceChip
-                  key={`${source.document_id}-${source.chunk_id}-${source.chunk_index}`}
-                  source={source}
+                  key={group.documentId}
+                  group={group}
                 />
               ))
             ) : (
