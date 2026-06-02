@@ -239,8 +239,8 @@ export async function fetchChatSessions(): Promise<ChatSessionSummary[]> {
   return data.sessions ?? [];
 }
 
-export async function fetchChatSessionMessages(sessionId: string): Promise<ChatSessionMessagesResponse> {
-  const response = await fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}`);
+export async function fetchChatSessionMessages(sessionId: string, signal?: AbortSignal): Promise<ChatSessionMessagesResponse> {
+  const response = await fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}`, { signal });
   const data = (await response.json().catch(() => null)) as (ChatSessionMessagesResponse | ChatErrorResponse) | null;
   if (!response.ok || !data?.ok) {
     const error = data && "error" in data ? data.error : undefined;

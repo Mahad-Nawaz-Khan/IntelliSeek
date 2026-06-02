@@ -115,6 +115,7 @@ export function ChatLayout() {
     [sources],
   );
   const bottomRef = useRef<HTMLDivElement>(null);
+  const sessionParam = searchParams.get("session");
 
   const sourceGroups = useMemo(() => createSourceGroups(sources), [sources]);
   const recentChats = useMemo(() => recentSessionRows.map((session) => ({
@@ -232,10 +233,11 @@ export function ChatLayout() {
   useEffect(() => {
     if (!isLoaded || !isSignedIn || !user) return;
 
-    const sessionId = searchParams.get("session");
+    const sessionId = sessionParam;
     if (!sessionId) {
       if (activeSessionId) setActiveSessionId(null);
       loadedSessionRef.current = null;
+      setIsLoadingSession(false);
       return;
     }
 
@@ -243,11 +245,13 @@ export function ChatLayout() {
 
     const requestedSessionId = sessionId;
     let active = true;
+    const abortController = new AbortController();
+    const timeout = window.setTimeout(() => abortController.abort(), 15000);
     setIsLoadingSession(true);
 
     async function loadSession() {
       try {
-        const result = await fetchChatSessionMessages(requestedSessionId);
+        const result = await fetchChatSessionMessages(requestedSessionId, abortController.signal);
         if (!active) return;
         setActiveSessionId(result.session.id);
         setMessages(result.messages);
@@ -258,8 +262,9 @@ export function ChatLayout() {
         setActiveSessionId(null);
         setMessages([]);
         loadedSessionRef.current = null;
-        router.replace("/chat");
+        window.history.replaceState(null, "", "/chat");
       } finally {
+        window.clearTimeout(timeout);
         if (active) setIsLoadingSession(false);
       }
     }
@@ -268,8 +273,10 @@ export function ChatLayout() {
 
     return () => {
       active = false;
+      window.clearTimeout(timeout);
+      abortController.abort();
     };
-  }, [activeSessionId, isLoaded, isSignedIn, refreshRecentChats, router, searchParams, user]);
+  }, [activeSessionId, isLoaded, isSignedIn, refreshRecentChats, sessionParam, user]);
 
   useEffect(() => {
     if (!pollDocuments) return;
@@ -407,7 +414,7 @@ export function ChatLayout() {
             if (response.chatSessionId) {
               setActiveSessionId(response.chatSessionId);
               loadedSessionRef.current = response.chatSessionId;
-              router.replace(`/chat?session=${encodeURIComponent(response.chatSessionId)}`);
+              window.history.replaceState(null, "", `/chat?session=${encodeURIComponent(response.chatSessionId)}`);
             }
             setMessages((current) =>
               current.map((message) =>
@@ -449,15 +456,17 @@ export function ChatLayout() {
         setIsLoading(false);
       }
     },
-    [activeSessionId, isLoading, isLoadingSession, refreshRecentChats, router],
+    [activeSessionId, isLoading, isLoadingSession, refreshRecentChats],
   );
 
   const handleNewChat = useCallback(() => {
+    setIsLoadingSession(false);
+    setIsLoading(false);
     setActiveSessionId(null);
     setMessages([]);
     loadedSessionRef.current = null;
-    router.push("/chat");
-  }, [router]);
+    window.history.pushState(null, "", "/chat");
+  }, []);
 
   const handleOpenSession = useCallback((sessionId: string) => {
     if (isLoading) return;

@@ -66,7 +66,7 @@ export function ChatInput({
   }
 
   return (
-    <div className="relative rounded-full place-self-center border border-white/10 bg-slate-950/70 p-2 w-200 h-16 shadow-2xl shadow-cyan-950/20 backdrop-blur-xl transition-colors focus-within:border-cyan-400/50">
+    <div className="relative rounded-full place-self-center border border-white/10 bg-slate-950/70 p-2 w-full lg:w-200 h-16 shadow-2xl shadow-cyan-950/20 backdrop-blur-xl transition-colors focus-within:border-cyan-400/50">
       {isAutocompleteOpen && matches.length > 0 && (
         <div className="absolute inset-x-3 bottom-full z-20 mb-2 overflow-hidden rounded-2xl border border-cyan-300/20 bg-slate-950/95 shadow-2xl shadow-cyan-950/30 backdrop-blur-xl">
           <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2 text-xs font-medium uppercase tracking-[0.22em] text-cyan-200">
