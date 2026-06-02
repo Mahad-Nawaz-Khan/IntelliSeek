@@ -111,14 +111,8 @@ export function ChatLayout() {
     if (isLoading) {
       return {
         state: "retrieving",
-        message: "Retrieving relevant sources...",
-        matches: sources.slice(0, 3).map((source) => ({
-          id: source.id,
-          sourceId: source.id,
-          filename: source.filename,
-          locator: source.fileType?.toUpperCase(),
-          snippet: source.summary,
-        })),
+        message: "Searching your indexed documents...",
+        matches: [],
       };
     }
 
@@ -424,7 +418,7 @@ export function ChatLayout() {
                   <ChatWelcome disabled={isLoading} onSelect={handleSubmit} />
                 ) : (
                   <div className="mx-auto max-w-5xl space-y-5">
-                    {isLoading && retrievalStatus.matches?.length ? (
+                    {isLoading || retrievalStatus.matches?.length ? (
                       <RetrievalStatusBanner status={retrievalStatus} />
                     ) : null}
                     {messages.map((message) => (
