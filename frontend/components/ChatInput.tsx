@@ -72,10 +72,10 @@ export function ChatInput({
   }
 
   return (
-    <div className="relative w-full place-self-center rounded-2xl border border-white/10 bg-slate-950/85 p-2 shadow-2xl shadow-cyan-950/20 backdrop-blur-xl transition-colors focus-within:border-cyan-400/50 lg:max-w-4xl">
+    <div className="relative rounded-full place-self-center border border-white/10 bg-slate-950/70 p-2 w-full lg:w-200 h-16 shadow-2xl shadow-cyan-950/20 backdrop-blur-xl transition-colors focus-within:border-cyan-400/50">
       {isAutocompleteOpen && matches.length > 0 && (
-        <div className="absolute inset-x-0 bottom-full z-20 mb-2 overflow-hidden rounded-xl border border-cyan-300/20 bg-slate-950/95 shadow-2xl shadow-cyan-950/30 backdrop-blur-xl">
-          <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-cyan-200">
+        <div className="absolute inset-x-3 bottom-full z-20 mb-2 overflow-hidden rounded-2xl border border-cyan-300/20 bg-slate-950/95 shadow-2xl shadow-cyan-950/30 backdrop-blur-xl">
+          <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2 text-xs font-medium uppercase tracking-[0.22em] text-cyan-200">
             <GitBranch className="h-3.5 w-3.5" />
             Trie autocomplete
           </div>
@@ -86,7 +86,7 @@ export function ChatInput({
                 type="button"
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => selectSuggestion(match)}
-                className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm transition ${
+                className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm transition ${
                   boundedHighlightedIndex === index
                     ? "bg-cyan-300/15 text-cyan-50"
                     : "text-slate-300 hover:bg-white/5 hover:text-white"
@@ -101,13 +101,13 @@ export function ChatInput({
           </div>
         </div>
       )}
-      <div className="flex items-end gap-1">
+      <div className="flex items-center mx-0.5 ">
         {onOpenUpload && (
           <button
             type="button"
             onClick={onOpenUpload}
             disabled={disabled}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-slate-300 transition hover:bg-white/[0.12] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/10 bg-transparent border-none text-slate-300 transition hover:bg-white/[0.12] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
             aria-label="Upload document"
           >
             <Plus className="h-6 w-6" strokeWidth={2.5} />
@@ -156,7 +156,7 @@ export function ChatInput({
               submit();
             }
           }}
-          className="max-h-40 min-h-11 flex-1 resize-none bg-transparent px-3 py-2.5 text-sm leading-6 text-slate-100 outline-none placeholder:text-slate-500 disabled:cursor-not-allowed disabled:opacity-60"
+          className="max-h-40 min-h-12 flex-1 resize-none bg-transparent px-3 py-3 text-sm leading-6 text-slate-100 outline-none placeholder:text-slate-500 disabled:cursor-not-allowed disabled:opacity-60"
         />
         <button
           type="button"
@@ -169,11 +169,7 @@ export function ChatInput({
             submit();
           }}
           disabled={disabled || (!isResponding && !value.trim())}
-          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-slate-950 shadow-lg transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400 ${
-            isResponding
-              ? "bg-rose-300 shadow-rose-950/25 hover:bg-rose-200"
-              : "bg-cyan-300 shadow-cyan-950/30 hover:bg-cyan-200"
-          }`}
+          className="flex h-11 w-11 items-center justify-center rounded-full bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-950/30 transition hover:bg-cyan-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
           aria-label={isResponding ? "Stop response" : "Send question"}
         >
           {isResponding ? <Square className="h-4 w-4 fill-current" /> : <Send className="h-5 w-5" />}

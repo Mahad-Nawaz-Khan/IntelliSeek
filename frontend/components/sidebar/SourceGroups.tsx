@@ -39,7 +39,7 @@ export function SourceGroups({ groups, status, deletingSourceId, onDeleteSource,
             <button
               type="button"
               onClick={() => toggleGroup(group.id)}
-              className="group/header flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left transition hover:bg-white/[0.06] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
+              className="group/header flex w-full items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-left transition hover:bg-white/[0.06] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
               aria-expanded={isOpen}
             >
               <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden font-semibold uppercase text-slate-400">
@@ -62,20 +62,20 @@ export function SourceGroups({ groups, status, deletingSourceId, onDeleteSource,
                   <button
                     type="button"
                     onClick={onOpenUpload}
-                    className="mb-2 flex w-full items-center justify-center gap-2 rounded-lg bg-cyan-300/10 px-2.5 py-2 text-xs font-medium text-cyan-50 transition hover:bg-cyan-300/16 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
+                    className="mb-2 flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-300/10 px-2.5 py-2 text-xs font-medium text-cyan-50 transition hover:bg-cyan-300/16 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
                   >
                     <FileUp className="h-3.5 w-3.5" />
                     Upload document
                   </button>
                 ) : null}
                 {status === "loading" && group.id === "your-uploads" ? (
-                  <p className="rounded-lg bg-white/[0.04] px-2.5 py-2 text-xs text-slate-500">Loading sources...</p>
+                  <p className="rounded-xl bg-white/[0.04] px-2.5 py-2 text-xs text-slate-500">Loading sources...</p>
                 ) : status === "unavailable" && group.id === "your-uploads" ? (
-                  <p className="rounded-lg bg-amber-300/8 px-2.5 py-2 text-xs leading-5 text-amber-100/80">Source list unavailable. Chat remains available for indexed documents.</p>
+                  <p className="rounded-xl bg-amber-300/8 px-2.5 py-2 text-xs leading-5 text-amber-100/80">Source list unavailable. Chat remains available for indexed documents.</p>
                 ) : group.sources.length ? (
                   <ul className="space-y-2">
                     {group.sources.map((source) => (
-                      <li key={source.id} className="group rounded-lg px-2.5 py-2 transition hover:bg-cyan-300/8">
+                      <li key={source.id} className="group rounded-xl px-2.5 py-2 transition hover:bg-cyan-300/8">
                         <div className="flex min-w-0 items-start gap-2">
                           <FileText className="mt-0.5 h-4 w-4 shrink-0 text-cyan-200" />
                           <div className="min-w-0 flex-1">
@@ -87,7 +87,7 @@ export function SourceGroups({ groups, status, deletingSourceId, onDeleteSource,
                               type="button"
                               onClick={() => onDeleteSource(source.id)}
                               disabled={deletingSourceId === source.id}
-                              className="rounded-lg border border-red-300/15 bg-red-400/10 p-1.5 text-red-200 opacity-0 transition hover:border-red-200/40 hover:bg-red-400/20 hover:text-red-100 disabled:cursor-not-allowed disabled:opacity-60 group-hover:opacity-100 focus:opacity-100"
+                              className="rounded-xl border border-red-300/15 bg-red-400/10 p-1.5 text-red-200 opacity-0 transition hover:border-red-200/40 hover:bg-red-400/20 hover:text-red-100 disabled:cursor-not-allowed disabled:opacity-60 group-hover:opacity-100 focus:opacity-100"
                               aria-label={`Delete ${source.filename}`}
                             >
                               <Trash2 className="h-3.5 w-3.5" />
@@ -98,7 +98,7 @@ export function SourceGroups({ groups, status, deletingSourceId, onDeleteSource,
                     ))}
                   </ul>
                 ) : (
-                  <p className="rounded-lg bg-white/[0.04] px-2.5 py-2 text-xs leading-5 text-slate-500">{group.emptyMessage}</p>
+                  <p className="rounded-xl bg-white/[0.04] px-2.5 py-2 text-xs leading-5 text-slate-500">{group.emptyMessage}</p>
                 )}
               </div>
             ) : null}
