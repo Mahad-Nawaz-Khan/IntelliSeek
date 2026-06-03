@@ -9,16 +9,19 @@ import { ChatComposer } from "./chat/ChatComposer";
 import { ChatHeader } from "./chat/ChatHeader";
 import { ChatMessage } from "./chat/ChatMessage";
 import { ChatWelcome } from "./chat/ChatWelcome";
+import { DemoLimitModal } from "./demo/DemoSignupModal";
 import { SUGGESTIONS } from "./SuggestedQueries";
 import { RetrievalStatus as RetrievalStatusBanner } from "./sources/RetrievalStatus";
 import { IndexingToast, type UploadIndexingToast } from "./upload/IndexingToast";
 import { UploadModal } from "./upload/UploadModal";
 import { useAuth } from "../context/AuthContext";
+import { useDemo } from "../context/DemoContext";
 import {
   deleteChatSession,
   fetchChatSessionMessages,
   fetchChatSessions,
   streamChatQuestion,
+  streamChatQuestionDemo,
   type ChatMessage as ChatMessageType,
   type ChatSessionSummary,
 } from "../lib/chat-api";
@@ -63,6 +66,7 @@ const QUEUE_LIMIT = 3;
 
 type ChatLayoutProps = {
   embedded?: boolean;
+  demo?: boolean;
 };
 
 function toAutocompleteId(input: string) {
@@ -102,10 +106,11 @@ function toRetrievalMatches(messages: ChatMessageType[]): RetrievalMatch[] {
   }));
 }
 
-export function ChatLayout({ embedded = false }: ChatLayoutProps) {
+export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { isLoaded, isSignedIn, user } = useAuth();
+  const { hasReachedLimit, decrementQuestion, remaining } = useDemo();
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingSession, setIsLoadingSession] = useState(false);
@@ -123,6 +128,7 @@ export function ChatLayout({ embedded = false }: ChatLayoutProps) {
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [uploadToasts, setUploadToasts] = useState<UploadIndexingToast[]>([]);
   const [isChatFileDragging, setIsChatFileDragging] = useState(false);
+  const [showSignupModal, setShowSignupModal] = useState(false);
   const loadedSessionRef = useRef<string | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -216,6 +222,7 @@ export function ChatLayout({ embedded = false }: ChatLayoutProps) {
   }, []);
 
   useEffect(() => {
+    if (demo) return;
     if (!isLoaded) return;
     if (!isSignedIn || !user) {
       conversationRunRef.current += 1;
@@ -275,9 +282,10 @@ export function ChatLayout({ embedded = false }: ChatLayoutProps) {
     return () => {
       active = false;
     };
-  }, [isLoaded, isSignedIn, refreshRecentChats, router, user]);
+  }, [isLoaded, isSignedIn, refreshRecentChats, router, user, demo]);
 
   useEffect(() => {
+    if (demo) return;
     if (!isLoaded || !isSignedIn || !user) return;
 
     const sessionId = sessionParam;
@@ -333,9 +341,10 @@ export function ChatLayout({ embedded = false }: ChatLayoutProps) {
       window.clearTimeout(timeout);
       abortController.abort();
     };
-  }, [isLoaded, isSignedIn, refreshRecentChats, sessionParam, user]);
+  }, [isLoaded, isSignedIn, refreshRecentChats, sessionParam, user, demo]);
 
   useEffect(() => {
+    if (demo) return;
     if (!pollDocuments) return;
 
     let active = true;
@@ -367,7 +376,7 @@ export function ChatLayout({ embedded = false }: ChatLayoutProps) {
       active = false;
       window.clearInterval(interval);
     };
-  }, [pollDocuments]);
+  }, [pollDocuments, demo]);
 
   // Update toast status from polling results
   useEffect(() => {
@@ -428,7 +437,7 @@ export function ChatLayout({ embedded = false }: ChatLayoutProps) {
   }, []);
 
   const uploadDroppedFiles = useCallback((files: File[]) => {
-    if (!files.length) return;
+    if (!files.length || demo) return;
 
     files.forEach((file) => {
       void uploadDocumentFile({
@@ -440,7 +449,7 @@ export function ChatLayout({ embedded = false }: ChatLayoutProps) {
         onToast: handleUploadToast,
       });
     });
-  }, [handleUploadToast, isLoaded, isSignedIn, user]);
+  }, [demo, handleUploadToast, isLoaded, isSignedIn, user]);
 
   function hasDraggedFiles(event: DragEvent) {
     return Array.from(event.dataTransfer.types).includes("Files");
@@ -509,59 +518,103 @@ export function ChatLayout({ embedded = false }: ChatLayoutProps) {
       abortControllerRef.current = abortController;
 
       try {
-        await streamChatQuestion(trimmedQuestion, {
-          onDelta: (text) => {
-            streamedAnswer += text;
-            setMessages((current) =>
-              current.map((message) =>
-                message.id === assistantId
-                  ? {
-                      ...message,
-                      content: streamedAnswer,
-                      displayedContent: streamedAnswer,
-                      status: "complete",
-                    }
-                  : message,
-              ),
-            );
-          },
-          onSources: (sources) => {
-            setMessages((current) =>
-              current.map((message) =>
-                message.id === assistantId
-                  ? { ...message, sources }
-                  : message,
-              ),
-            );
-          },
-          onDone: (response) => {
-            if (response.chatSessionId) {
-              activeSessionIdRef.current = response.chatSessionId;
-              setActiveSessionId(response.chatSessionId);
-              loadedSessionRef.current = response.chatSessionId;
-              window.history.replaceState(null, "", `/chat?session=${encodeURIComponent(response.chatSessionId)}`);
-            }
-            setMessages((current) =>
-              current.map((message) =>
-                message.id === assistantId
-                  ? {
-                      ...message,
-                      content: response.answer,
-                      displayedContent: undefined,
-                      sources: response.sources,
-                      status: "complete",
-                    }
-                  : message,
-              ),
-            );
-            void refreshRecentChats();
-            window.setTimeout(() => void refreshRecentChats(), 2500);
-          },
-        }, {
-          ...(selectedSuggestion?.metadata ? { retrievalHint: selectedSuggestion.metadata } : {}),
-          ...(activeSessionIdRef.current ? { chatSessionId: activeSessionIdRef.current } : {}),
-          signal: abortController.signal,
-        });
+        if (demo) {
+          await streamChatQuestionDemo(trimmedQuestion, {
+            onDelta: (text) => {
+              streamedAnswer += text;
+              setMessages((current) =>
+                current.map((message) =>
+                  message.id === assistantId
+                    ? {
+                        ...message,
+                        content: streamedAnswer,
+                        displayedContent: streamedAnswer,
+                        status: "complete",
+                      }
+                    : message,
+                ),
+              );
+            },
+            onSources: (sources) => {
+              setMessages((current) =>
+                current.map((message) =>
+                  message.id === assistantId
+                    ? { ...message, sources }
+                    : message,
+                ),
+              );
+            },
+            onDone: (response) => {
+              setMessages((current) =>
+                current.map((message) =>
+                  message.id === assistantId
+                    ? {
+                        ...message,
+                        content: response.answer,
+                        displayedContent: undefined,
+                        sources: response.sources,
+                        status: "complete",
+                      }
+                    : message,
+                ),
+              );
+            },
+          }, abortController.signal);
+        } else {
+          await streamChatQuestion(trimmedQuestion, {
+            onDelta: (text) => {
+              streamedAnswer += text;
+              setMessages((current) =>
+                current.map((message) =>
+                  message.id === assistantId
+                    ? {
+                        ...message,
+                        content: streamedAnswer,
+                        displayedContent: streamedAnswer,
+                        status: "complete",
+                      }
+                    : message,
+                ),
+              );
+            },
+            onSources: (sources) => {
+              setMessages((current) =>
+                current.map((message) =>
+                  message.id === assistantId
+                    ? { ...message, sources }
+                    : message,
+                ),
+              );
+            },
+            onDone: (response) => {
+              if (response.chatSessionId) {
+                activeSessionIdRef.current = response.chatSessionId;
+                setActiveSessionId(response.chatSessionId);
+                loadedSessionRef.current = response.chatSessionId;
+                window.history.replaceState(null, "", `/chat?session=${encodeURIComponent(response.chatSessionId)}`);
+              }
+              setMessages((current) =>
+                current.map((message) =>
+                  message.id === assistantId
+                    ? {
+                        ...message,
+                        content: response.answer,
+                        displayedContent: undefined,
+                        sources: response.sources,
+                        status: "complete",
+                      }
+                    : message,
+                ),
+              );
+              void refreshRecentChats();
+              window.setTimeout(() => void refreshRecentChats(), 2500);
+            },
+          }, {
+            ...(selectedSuggestion?.metadata ? { retrievalHint: selectedSuggestion.metadata } : {}),
+            ...(activeSessionIdRef.current ? { chatSessionId: activeSessionIdRef.current } : {}),
+            signal: abortController.signal,
+          });
+        }
       } catch (error) {
         const isAbort = error instanceof DOMException
           ? error.name === "AbortError"
@@ -604,13 +657,25 @@ export function ChatLayout({ embedded = false }: ChatLayoutProps) {
         void runQuestion(nextQueuedMessage.question, nextQueuedMessage.selectedSuggestion, runScope);
       }
     },
-    [refreshRecentChats],
+    [demo, refreshRecentChats],
   );
 
   const handleSubmit = useCallback(
     (question: string, selectedSuggestion?: AutocompleteSuggestion) => {
       const trimmedQuestion = question.trim();
       if (!trimmedQuestion || isLoadingSessionRef.current) return false;
+
+      if (demo) {
+        if (hasReachedLimit) {
+          setShowSignupModal(true);
+          return false;
+        }
+        const accepted = decrementQuestion();
+        if (!accepted) {
+          setShowSignupModal(true);
+          return false;
+        }
+      }
 
       if (!isLoadingRef.current) {
         void runQuestion(trimmedQuestion, selectedSuggestion);
@@ -632,7 +697,7 @@ export function ChatLayout({ embedded = false }: ChatLayoutProps) {
 
       return true;
     },
-    [runQuestion],
+    [demo, hasReachedLimit, runQuestion, decrementQuestion],
   );
 
   const handleRemoveQueuedMessage = useCallback((queuedMessageId: string) => {
@@ -661,16 +726,16 @@ export function ChatLayout({ embedded = false }: ChatLayoutProps) {
     setQueuedMessages([]);
     queuedMessagesRef.current = [];
     loadedSessionRef.current = null;
-    window.history.pushState(null, "", "/chat");
-  }, []);
+    if (!demo) window.history.pushState(null, "", "/chat");
+  }, [demo]);
 
   const handleOpenSession = useCallback((sessionId: string) => {
-    if (isLoading) return;
+    if (isLoading || demo) return;
     router.push(`/chat?session=${encodeURIComponent(sessionId)}`);
-  }, [isLoading, router]);
+  }, [demo, isLoading, router]);
 
   const handleDeleteSession = useCallback(async (sessionId: string) => {
-    if (deletingSessionId) return;
+    if (deletingSessionId || demo) return;
 
     setDeletingSessionId(sessionId);
     try {
@@ -690,10 +755,10 @@ export function ChatLayout({ embedded = false }: ChatLayoutProps) {
     } finally {
       setDeletingSessionId(null);
     }
-  }, [activeSessionId, deletingSessionId, refreshRecentChats, router]);
+  }, [activeSessionId, demo, deletingSessionId, refreshRecentChats, router]);
 
   const handleDeleteSource = useCallback(async (sourceId: string) => {
-    if (deletingSourceId) return;
+    if (deletingSourceId || demo) return;
 
     setDeletingSourceId(sourceId);
     try {
@@ -712,21 +777,21 @@ export function ChatLayout({ embedded = false }: ChatLayoutProps) {
     } finally {
       setDeletingSourceId(null);
     }
-  }, [deletingSourceId]);
+  }, [demo, deletingSourceId]);
 
-  if (!isLoaded || !isSignedIn || !user) {
+  if (!isLoaded || (!demo && (!isSignedIn || !user))) {
     return null;
   }
 
   const chatContent = (
     <>
-      <ChatHeader onOpenUpload={() => setIsUploadOpen(true)} />
+      <ChatHeader onOpenUpload={demo ? () => setShowSignupModal(true) : () => setIsUploadOpen(true)} />
       <div
         className="relative flex min-h-0 flex-1"
-        onDragEnter={handleChatDragEnter}
-        onDragLeave={handleChatDragLeave}
-        onDragOver={handleChatDragOver}
-        onDrop={handleChatDrop}
+        onDragEnter={demo ? undefined : handleChatDragEnter}
+        onDragLeave={demo ? undefined : handleChatDragLeave}
+        onDragOver={demo ? undefined : handleChatDragOver}
+        onDrop={demo ? undefined : handleChatDrop}
       >
         {isChatFileDragging && (
           <div className="pointer-events-none absolute inset-3 z-30 flex items-center justify-center rounded-3xl border-2 border-dashed border-cyan-300/70 bg-slate-950/75 text-cyan-50 shadow-2xl shadow-cyan-950/30 backdrop-blur-sm">
@@ -761,17 +826,42 @@ export function ChatLayout({ embedded = false }: ChatLayoutProps) {
               </div>
 
               <div className="sticky bottom-0 z-20 -mx-4 px-4 pb-6 pt-6 sm:-mx-6 sm:px-6">
+                {demo && hasReachedLimit && (
+                  <div className="mx-auto mb-3 flex w-full max-w-5xl items-center gap-2 rounded-2xl border border-red-300/20 bg-red-400/10 px-4 py-2.5 text-sm text-red-100 shadow-lg">
+                    <span className="font-semibold">Demo limit reached.</span>
+                    <span>Sign up for free to continue chatting and unlock uploads.</span>
+                    <button
+                      type="button"
+                      onClick={() => setShowSignupModal(true)}
+                      className="ml-auto shrink-0 rounded-xl bg-red-300 px-3 py-1.5 text-xs font-semibold text-red-950 transition hover:bg-red-200"
+                    >
+                      Sign up
+                    </button>
+                  </div>
+                )}
                 <ChatComposer
                   autocompleteSuggestions={autocompleteSuggestions}
-                  disabled={isLoadingSession}
+                  disabled={isLoadingSession || (demo && hasReachedLimit)}
                   isResponding={isLoading}
                   queuedMessages={queuedMessages}
                   queueLimit={QUEUE_LIMIT}
                   onSubmit={handleSubmit}
                   onRemoveQueuedMessage={handleRemoveQueuedMessage}
                   onStopResponse={handleStopResponse}
-                  onOpenUpload={() => setIsUploadOpen(true)}
+                  onOpenUpload={demo ? undefined : () => setIsUploadOpen(true)}
                 />
+                {demo && !hasReachedLimit && (
+                  <div className="mx-auto mt-2 flex w-full max-w-5xl items-center justify-between text-xs text-slate-500">
+                    <span>Demo mode — {remaining} question{remaining !== 1 ? "s" : ""} remaining</span>
+                    <button
+                      type="button"
+                      onClick={() => setShowSignupModal(true)}
+                      className="text-cyan-200 underline transition hover:text-cyan-100"
+                    >
+                      Sign up for full access
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -785,10 +875,11 @@ export function ChatLayout({ embedded = false }: ChatLayoutProps) {
         failedDocuments={failedDocuments}
       />
       <IndexingToast toasts={uploadToasts} onDismiss={dismissToast} />
+      <DemoLimitModal isOpen={showSignupModal} onClose={() => setShowSignupModal(false)} />
     </>
   );
 
-  if (embedded) return chatContent;
+  if (embedded || demo) return chatContent;
 
   return (
     <AcademicWorkspace
@@ -801,7 +892,7 @@ export function ChatLayout({ embedded = false }: ChatLayoutProps) {
       onDeleteSession={handleDeleteSession}
       onOpenSession={handleOpenSession}
       onNewChat={handleNewChat}
-      onOpenUpload={() => setIsUploadOpen(true)}
+      onOpenUpload={demo ? () => setShowSignupModal(true) : () => setIsUploadOpen(true)}
     >
       {chatContent}
     </AcademicWorkspace>

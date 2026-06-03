@@ -106,6 +106,7 @@ export function AcademicWorkspace({
               className="absolute right-3 inline-flex h-10 w-10 items-center justify-center text-slate-200 transition hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
               aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
               title={isDark ? "Switch to light theme" : "Switch to dark theme"}
+              suppressHydrationWarning
             >
               {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
             </button>

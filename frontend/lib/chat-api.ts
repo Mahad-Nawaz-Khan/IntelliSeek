@@ -234,6 +234,81 @@ export async function streamChatQuestion(question: string, handlers: StreamChatH
   return { ok: true, answer: finalAnswer, sources: finalSources, chatSessionId: finalChatSessionId };
 }
 
+export async function streamChatQuestionDemo(question: string, handlers: StreamChatHandlers, signal?: AbortSignal): Promise<ChatResponse> {
+  const trimmedQuestion = requireQuestion(question);
+  const payload: ChatRequest = { question: trimmedQuestion };
+  const response = await fetch("/api/chat/demo", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal,
+  });
+
+  if (!response.ok) throw new Error(await parseJsonError(response));
+  if (!response.body) throw new Error("The chat service did not return a stream.");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let answer = "";
+  let sources: SourceCitation[] = [];
+  let finalAnswer = "";
+  let finalSources: SourceCitation[] = [];
+  let sawDone = false;
+
+  function handleEvent(streamEvent: StreamEvent) {
+    const data = streamEvent.data as Record<string, unknown>;
+
+    if (streamEvent.event === "delta") {
+      const text = typeof data.text === "string" ? data.text : "";
+      if (!text) return;
+      answer += text;
+      handlers.onDelta(text);
+      return;
+    }
+
+    if (streamEvent.event === "sources") {
+      sources = isSourceCitationArray(data.sources) ? data.sources : [];
+      handlers.onSources?.(sources);
+      return;
+    }
+
+    if (streamEvent.event === "done") {
+      finalAnswer = typeof data.answer === "string" ? data.answer : answer;
+      finalSources = isSourceCitationArray(data.sources) ? data.sources : sources;
+      sawDone = true;
+      handlers.onDone?.({ ok: true, answer: finalAnswer, sources: finalSources });
+      return;
+    }
+
+    if (streamEvent.event === "error") {
+      throw new Error(typeof data.error === "string" ? data.error : "The assistant could not answer this question.");
+    }
+  }
+
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value, { stream: !done });
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() ?? "";
+    for (const frame of frames) {
+      const streamEvent = parseSseFrame(frame.trim());
+      if (streamEvent) handleEvent(streamEvent);
+    }
+    if (done) break;
+  }
+
+  if (buffer.trim()) {
+    const streamEvent = parseSseFrame(buffer.trim());
+    if (streamEvent) handleEvent(streamEvent);
+  }
+
+  if (!sawDone) throw new Error("The assistant stream ended before completion.");
+  if (!finalAnswer.trim()) throw new Error("The assistant returned an empty answer.");
+
+  return { ok: true, answer: finalAnswer, sources: finalSources };
+}
+
 export async function fetchChatSessions(): Promise<ChatSessionSummary[]> {
   const response = await fetch("/api/chat/sessions");
   const data = (await response.json().catch(() => null)) as { ok?: boolean; sessions?: ChatSessionSummary[]; error?: string } | null;

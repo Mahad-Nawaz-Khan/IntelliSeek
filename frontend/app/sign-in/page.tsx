@@ -1,11 +1,12 @@
 "use client";
 
-import { ArrowLeft, Eye, EyeOff, GraduationCap, Sparkles } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, GraduationCap, Moon, Sparkles, Sun } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, Suspense, useEffect, useState } from "react";
 
+import { useTheme } from "../../context/ThemeContext";
 import { getSafeReturnPath } from "../../lib/safe-redirect";
 import { hasSupabasePublicConfig, supabase } from "../../lib/supabase";
 
@@ -21,6 +22,7 @@ function getErrorMessage(error: string | null) {
 function SignInForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { theme, toggleTheme } = useTheme();
   const next = getSafeReturnPath(searchParams.get("next"));
   const callbackError = getErrorMessage(searchParams.get("error"));
   const [email, setEmail] = useState("");
@@ -29,6 +31,7 @@ function SignInForm() {
   const [loading, setLoading] = useState(false);
   const [oauthProvider, setOauthProvider] = useState<"google" | "github" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const isDark = theme === "dark";
 
   useEffect(() => {
     if (!supabase) return;
@@ -95,13 +98,24 @@ function SignInForm() {
   }
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-slate-950 text-white">
+    <main className="auth-page relative min-h-screen overflow-hidden bg-slate-950 text-white">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(124,58,237,0.28),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(6,182,212,0.18),transparent_34%)]" />
       <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px)] bg-[size:56px_56px] opacity-30" />
 
+      <button
+        type="button"
+        onClick={toggleTheme}
+        className="absolute right-6 top-6 z-50 inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-slate-200 transition hover:border-cyan-300/30 hover:bg-white/[0.09] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
+        aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
+        title={isDark ? "Switch to light theme" : "Switch to dark theme"}
+        suppressHydrationWarning
+      >
+        {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+      </button>
+
       <div className="relative mx-auto flex min-h-screen max-w-7xl items-center px-4 py-6 sm:px-6 lg:px-10">
         <div className="grid w-full gap-5 lg:grid-cols-[0.95fr_1.05fr]">
-          <section className="order-2 rounded-[2rem] border border-white/10 bg-white/[0.04] p-6 shadow-2xl shadow-slate-950/40 backdrop-blur-xl sm:p-8 lg:order-1 lg:min-h-[680px]">
+          <section className="auth-card order-2 rounded-[2rem] border border-white/10 bg-white/[0.04] p-6 shadow-2xl shadow-slate-950/40 backdrop-blur-xl sm:p-8 lg:order-1 lg:min-h-[680px]">
             <Link href="/" className="inline-flex items-center gap-2 text-sm text-slate-400 transition hover:text-white">
               <ArrowLeft className="h-4 w-4" /> Back to home
             </Link>
@@ -123,7 +137,7 @@ function SignInForm() {
             </div>
           </section>
 
-          <section className="order-1 rounded-[2rem] border border-white/10 bg-slate-900/70 p-6 shadow-2xl shadow-slate-950/50 backdrop-blur-2xl sm:p-8 lg:order-2">
+          <section className="auth-card order-1 rounded-[2rem] border border-white/10 bg-slate-900/70 p-6 shadow-2xl shadow-slate-950/50 backdrop-blur-2xl sm:p-8 lg:order-2">
             <div className="mb-6">
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-300 text-slate-950">
                 <GraduationCap className="h-6 w-6" />

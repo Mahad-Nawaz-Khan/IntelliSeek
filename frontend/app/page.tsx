@@ -1,5 +1,10 @@
+"use client";
+
 import { ArrowRight, BookOpen, FileText, GraduationCap, Quote, Search, UploadCloud } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+
+import { useDemo } from "../context/DemoContext";
 
 const features = [
   {
@@ -25,6 +30,14 @@ const features = [
 ];
 
 export default function Home() {
+  const router = useRouter();
+  const { startDemo } = useDemo();
+
+  function handleTryDemo() {
+    startDemo();
+    router.push("/demo");
+  }
+
   return (
     <main className="academic-page-shell min-h-screen overflow-hidden text-slate-100">
       <section className="mx-auto grid min-h-screen w-full max-w-7xl items-center gap-12 px-6 py-12 lg:grid-cols-[1fr_0.9fr] lg:px-10">
@@ -44,9 +57,13 @@ export default function Home() {
               Get Started
               <ArrowRight className="h-4 w-4" />
             </Link>
-            <Link href="/chat" className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10">
+            <button
+              type="button"
+              onClick={handleTryDemo}
+              className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
+            >
               Try Demo
-            </Link>
+            </button>
           </div>
           <div className="mt-12 grid gap-3 sm:grid-cols-2">
             {features.map((feature) => {

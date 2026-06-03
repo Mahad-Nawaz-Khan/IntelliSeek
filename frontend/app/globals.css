@@ -132,6 +132,35 @@ body {
   --tw-gradient-stops: var(--tw-gradient-from), rgb(248 250 252 / 0.95) var(--tw-gradient-via-position), var(--tw-gradient-to);
 }
 
+/* Authentication pages light mode styles */
+:root[data-theme="light"] .auth-page,
+:root[data-theme="light"] .auth-page.bg-slate-950 {
+  background-color: #f8fafc;
+}
+
+:root[data-theme="light"] .auth-page .auth-card {
+  background-color: rgb(255 255 255 / 0.92);
+  border-color: rgb(15 23 42 / 0.12);
+  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.15);
+}
+
+:root[data-theme="light"] .auth-page .bg-slate-900\/70 {
+  background-color: rgb(255 255 255 / 0.95);
+  border-color: rgb(15 23 42 / 0.12);
+}
+
+:root[data-theme="light"] .auth-page .hover\:text-white:hover {
+  color: #0f172a;
+}
+
+:root[data-theme="light"] .auth-page [class*="text-red-"] {
+  color: #991b1b;
+}
+
+:root[data-theme="light"] .auth-page [class*="text-emerald-"] {
+  color: #047857;
+}
+
 .scrollbar-hidden {
   scrollbar-width: none;
   -ms-overflow-style: none;

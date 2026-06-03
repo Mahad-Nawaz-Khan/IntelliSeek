@@ -374,6 +374,38 @@ export async function retrieveContextFromDocumentIds(
   return relevant;
 }
 
+export async function retrieveDemoContext(
+  question: string,
+  limit = DEFAULT_TOP_K,
+  log?: RequestLogger,
+): Promise<RetrievedContext[]> {
+  const dummyUserId = "00000000-0000-0000-0000-000000000000";
+  return retrieveContext(question, dummyUserId, limit, log);
+}
+
+export async function retrieveDemoKeywordContext(
+  question: string,
+  limit = DEFAULT_TOP_K,
+  log?: RequestLogger,
+): Promise<RetrievedContext[]> {
+  const dummyUserId = "00000000-0000-0000-0000-000000000000";
+  return retrieveKeywordContext(question, dummyUserId, limit, log);
+}
+
+export async function retrieveDemoRepresentativeDocumentContext(
+  limit = 10,
+  question?: string,
+  log?: RequestLogger,
+): Promise<RetrievedContext[]> {
+  const dummyUserId = "00000000-0000-0000-0000-000000000000";
+  return retrieveRepresentativeDocumentContext(dummyUserId, limit, question, log);
+}
+
+export async function demoHasIndexedDocuments(log?: RequestLogger): Promise<boolean> {
+  const dummyUserId = "00000000-0000-0000-0000-000000000000";
+  return hasIndexedDocuments(dummyUserId, log);
+}
+
 export function isDocumentSummaryRequest(question: string) {
   const normalized = question.toLocaleLowerCase();
   return SUMMARY_INTENT_PATTERN.test(normalized);
