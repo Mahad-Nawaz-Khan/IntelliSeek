@@ -69,6 +69,7 @@ export async function embedTexts(texts: string[], log?: RequestLogger): Promise<
     body: JSON.stringify({
       model,
       input: inputs,
+      dimensions: EMBEDDING_DIMENSION,
     }),
   });
 
