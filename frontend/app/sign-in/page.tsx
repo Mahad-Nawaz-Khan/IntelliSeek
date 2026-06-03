@@ -217,7 +217,7 @@ function SignInForm() {
                 className="flex w-full items-center justify-center gap-3 rounded-[22px] border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-medium text-white transition hover:border-cyan-300/30 hover:bg-white/[0.09] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Image
-                  src="/icons/github.svg"
+                  src={isDark ? "/icons/github.svg" : "/icons/github-black.svg"}
                   alt=""
                   width={20}
                   height={20}
