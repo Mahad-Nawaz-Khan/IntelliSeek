@@ -161,6 +161,42 @@ body {
   color: #047857;
 }
 
+/* Landing page preview card light mode overrides */
+:root[data-theme="light"] .landing-preview-card,
+:root[data-theme="light"] .landing-preview-card .bg-slate-950\/60,
+:root[data-theme="light"] .landing-preview-card .bg-slate-950\/70 {
+  background-color: rgb(255 255 255 / 0.95);
+  border-color: rgb(15 23 42 / 0.12);
+}
+
+:root[data-theme="light"] .landing-preview-card .bg-white\/\[0\.04\],
+:root[data-theme="light"] .landing-preview-card .bg-white\/\[0\.07\] {
+  background-color: rgb(248 250 252 / 0.8);
+}
+
+:root[data-theme="light"] .landing-preview-card .text-white {
+  color: #0f172a;
+}
+
+:root[data-theme="light"] .landing-preview-card .text-slate-200,
+:root[data-theme="light"] .landing-preview-card .text-slate-300 {
+  color: #475569;
+}
+
+:root[data-theme="light"] .landing-preview-card .text-slate-400,
+:root[data-theme="light"] .landing-preview-card .text-slate-500 {
+  color: #64748b;
+}
+
+:root[data-theme="light"] .landing-preview-card .text-cyan-50,
+:root[data-theme="light"] .landing-preview-card .text-cyan-100 {
+  color: #0891b2;
+}
+
+:root[data-theme="light"] .landing-preview-card .border-white\/10 {
+  border-color: rgb(15 23 42 / 0.1);
+}
+
 .scrollbar-hidden {
   scrollbar-width: none;
   -ms-overflow-style: none;

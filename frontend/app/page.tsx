@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import { useDemo } from "../context/DemoContext";
+import Image from "next/image";
 
 const features = [
   {
@@ -42,10 +43,20 @@ export default function Home() {
     <main className="academic-page-shell min-h-screen overflow-hidden text-slate-100">
       <section className="mx-auto grid min-h-screen w-full max-w-7xl items-center gap-12 px-6 py-12 lg:grid-cols-[1fr_0.9fr] lg:px-10">
         <div>
-          <div className="mb-8 inline-flex items-center gap-3 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-4 py-2 text-sm text-cyan-100">
-            <GraduationCap className="h-4 w-4" />
-            ChatGPT + Notion + Semantic Search for students
+          <div className="flex items-center gap-4 mb-4">
+          <Image 
+            src={"/TOP Logo.png"}
+            height={100}
+            width={100}
+            alt="IntelliSeek"
+
+            />
+            <h1 className="text-5xl pt-3 font-semibold">
+              <span className="text-slate-900 dark:text-white">Intelli</span>
+              <span className="ml-1 bg-linear-to-br  from-purple-600 to-cyan-600 bg-clip-text text-transparent dark:from-purple-600 dark:to-sky-500">Seek</span>
+            </h1>
           </div>
+          
           <h1 className="max-w-4xl text-5xl font-semibold tracking-tight text-white sm:text-6xl lg:text-7xl">
             Understand Your Notes With AI
           </h1>
@@ -79,7 +90,7 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="rounded-[2rem] border border-white/10 bg-slate-950/60 p-4 shadow-2xl shadow-slate-950/50 backdrop-blur-xl">
+        <div className="landing-preview-card rounded-[2rem] border border-white/10 bg-slate-950/60 p-4 shadow-2xl shadow-slate-950/50 backdrop-blur-xl">
           <div className="rounded-[1.5rem] border border-white/10 bg-white/[0.04] p-4">
             <div className="mb-5 flex items-center justify-between border-b border-white/10 pb-4">
               <div>
