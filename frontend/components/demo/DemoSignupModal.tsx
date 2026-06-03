@@ -32,7 +32,18 @@ export function DemoSignupModal({ isOpen, onClose, title, message }: DemoSignupM
       aria-labelledby="demo-modal-title"
       className="fixed inset-0 z-[100] flex items-center justify-center"
     >
-      <div className="absolute inset-0 bg-slate-950/75 backdrop-blur-sm" onClick={onClose} />
+      <div
+        className="absolute inset-0 bg-slate-950/75 backdrop-blur-sm hover:cursor-pointer"
+        onClick={onClose}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            onClose();
+            e.stopPropagation();
+          }
+        }}
+      />
       <div
         className={`relative z-10 w-full max-w-md rounded-[2rem] border p-6 shadow-2xl sm:p-8 ${
           isDark
@@ -70,7 +81,7 @@ export function DemoSignupModal({ isOpen, onClose, title, message }: DemoSignupM
         <div className="mt-6 flex flex-col gap-3 sm:flex-row">
           <Link
             href="/sign-up"
-            className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200"
+            className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200 hover:cursor-pointer"
             onClick={onClose}
           >
             Get Started Free
@@ -81,7 +92,7 @@ export function DemoSignupModal({ isOpen, onClose, title, message }: DemoSignupM
               isDark
                 ? "border-white/10 bg-white/[0.06] text-slate-100 hover:bg-white/10"
                 : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-            }`}
+            } hover:cursor-pointer`}
             onClick={onClose}
           >
             Already have an account? Sign in

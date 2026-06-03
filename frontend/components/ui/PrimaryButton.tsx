@@ -14,7 +14,7 @@ const variants = {
 export function PrimaryButton({ children, variant = "primary", className = "", ...props }: PrimaryButtonProps) {
   return (
     <button
-      className={`inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 disabled:cursor-not-allowed disabled:opacity-50 ${variants[variant]} ${className}`}
+      className={`inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 disabled:cursor-not-allowed disabled:opacity-50 ${variants[variant]} ${className} hover:cursor-pointer`}
       {...props}
     >
       {children}

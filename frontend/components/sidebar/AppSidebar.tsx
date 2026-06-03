@@ -114,7 +114,7 @@ export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId
     <aside className="scrollbar-hidden flex h-full w-full flex-col gap-3 overflow-y-auto bg-slate-950/75 px-3 py-4 backdrop-blur-xl lg:w-[232px] lg:shrink-0">
       <div className="flex items-start justify-between gap-2 px-1 py-1">
         <Link href="/chat" className="flex min-w-0 items-center gap-2.5">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-cyan-300 text-slate-950">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-cyan-300 text-slate-950 hover:cursor-pointer">
             <GraduationCap className="h-4.5 w-4.5" />
           </span>
           <span className="min-w-0">
@@ -147,7 +147,7 @@ export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId
             <Link
               key={item.href}
               href={item.href}
-              className={`flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-medium transition ${
+                className={`flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-medium transition hover:cursor-pointer ${
                 active
                   ? "bg-cyan-300/12 text-cyan-50"
                   : "text-slate-400 hover:bg-white/[0.06] hover:text-white"

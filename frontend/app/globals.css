@@ -226,6 +226,13 @@ body {
   opacity: 1;
 }
 
+/* Ensure interactive elements show pointer on hover */
+a:hover,
+button:hover,
+[role="button"]:hover {
+  cursor: pointer;
+}
+
 @keyframes retrievalSlideIn {
   from {
     opacity: 0;

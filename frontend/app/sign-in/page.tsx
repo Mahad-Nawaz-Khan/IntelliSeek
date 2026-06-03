@@ -118,7 +118,7 @@ function SignInForm() {
       <button
         type="button"
         onClick={toggleTheme}
-        className="absolute right-6 top-6 z-50 inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-slate-200 transition hover:border-cyan-300/30 hover:bg-white/[0.09] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
+        className="absolute right-6 top-6 z-50 inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-slate-200 transition hover:border-cyan-300/30 hover:bg-white/[0.09] hover:cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
         aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
         title={isDark ? "Switch to light theme" : "Switch to dark theme"}
         suppressHydrationWarning
@@ -131,7 +131,7 @@ function SignInForm() {
           <section className="auth-card order-2 rounded-[2rem] border border-white/10 bg-white/[0.04] p-6 shadow-2xl shadow-slate-950/40 backdrop-blur-xl sm:p-8 lg:order-1 lg:min-h-[680px]">
             <Link
               href="/"
-              className="inline-flex items-center gap-2 text-sm text-slate-400 transition hover:text-white"
+              className="inline-flex items-center gap-2 text-sm text-slate-400 transition hover:text-white hover:cursor-pointer"
             >
               <ArrowLeft className="h-4 w-4" /> Back to home
             </Link>
@@ -197,7 +197,7 @@ function SignInForm() {
                 type="button"
                 onClick={() => handleProvider("google")}
                 disabled={Boolean(oauthProvider)}
-                className="flex w-full items-center justify-center gap-3 rounded-[22px] border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-medium text-white transition hover:border-cyan-300/30 hover:bg-white/[0.09] disabled:cursor-not-allowed disabled:opacity-60"
+                  className="flex w-full items-center justify-center gap-3 rounded-[22px] border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-medium text-white transition hover:border-cyan-300/30 hover:bg-white/[0.09] hover:cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Image
                   src="/icons/google.svg"
@@ -214,7 +214,7 @@ function SignInForm() {
                 type="button"
                 onClick={() => handleProvider("github")}
                 disabled={Boolean(oauthProvider)}
-                className="flex w-full items-center justify-center gap-3 rounded-[22px] border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-medium text-white transition hover:border-cyan-300/30 hover:bg-white/[0.09] disabled:cursor-not-allowed disabled:opacity-60"
+                className="flex w-full items-center justify-center gap-3 rounded-[22px] border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-medium text-white transition hover:border-cyan-300/30 hover:bg-white/[0.09] hover:cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Image
                   src={isDark ? "/icons/github.svg" : "/icons/github-black.svg"}
@@ -275,7 +275,7 @@ function SignInForm() {
                   <button
                     type="button"
                     onClick={() => setShowPassword((value) => !value)}
-                    className="text-slate-500 transition hover:text-white"
+                    className="text-slate-500 transition hover:text-white hover:cursor-pointer"
                     aria-label="Toggle password visibility"
                   >
                     {showPassword ? (
@@ -289,7 +289,7 @@ function SignInForm() {
               <button
                 type="submit"
                 disabled={loading}
-                className="flex w-full items-center justify-center rounded-[22px] bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-60"
+                className="flex w-full items-center justify-center rounded-[22px] bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200 hover:cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {loading ? "Signing in..." : "Sign in with email"}
               </button>
@@ -297,7 +297,7 @@ function SignInForm() {
 
             <p className="mt-6 text-center text-sm text-slate-400">
               Need an account?{" "}
-              <Link href="/sign-up" className="text-cyan-200 underline">
+              <Link href="/sign-up" className="text-cyan-200 underline hover:cursor-pointer">
                 Create one
               </Link>
             </p>

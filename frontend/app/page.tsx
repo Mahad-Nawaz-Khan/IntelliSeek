@@ -64,7 +64,7 @@ export default function Home() {
             Semantic academic search powered by AI. Upload lecture notes, ask natural questions, and review source-grounded answers in one clean workspace.
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <Link href="/chat" className="inline-flex items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-semibold text-slate-950 shadow-xl shadow-cyan-950/30 transition hover:bg-cyan-200">
+            <Link href="/chat" className="inline-flex items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-5 py-3 text-sm font-semibold text-slate-950 shadow-xl shadow-cyan-950/30 transition hover:bg-cyan-200 hover:cursor-pointer">
               Get Started
               <ArrowRight className="h-4 w-4" />
             </Link>
