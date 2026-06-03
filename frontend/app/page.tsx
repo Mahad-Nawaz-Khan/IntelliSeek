@@ -49,11 +49,11 @@ export default function Home() {
             height={100}
             width={100}
             alt="IntelliSeek"
-
+            className="w-12 h-12 sm:w-20 sm:h-20 lg:w-24 lg:h-24 object-contain"
             />
-            <h1 className="text-5xl pt-3 font-semibold">
+            <h1 className="w-full text-2xl sm:text-4xl lg:text-5xl pt-3 font-semibold">
               <span className="text-slate-900 dark:text-white">Intelli</span>
-              <span className="ml-1 bg-linear-to-br  from-purple-600 to-cyan-600 bg-clip-text text-transparent dark:from-purple-600 dark:to-sky-500">Seek</span>
+              <span className="ml-1 bg-gradient-to-br from-purple-600 to-cyan-600 bg-clip-text text-transparent dark:from-purple-600 dark:to-sky-500">Seek</span>
             </h1>
           </div>
           
