@@ -162,9 +162,6 @@ export default function SignUpPage() {
             >
               <ArrowLeft className="h-4 w-4" /> Back to home
             </Link>
-            <div className="mt-8 inline-flex items-center gap-2 rounded-full border border-violet-300/20 bg-violet-300/10 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.28em] text-violet-100">
-              <Sparkles className="h-3.5 w-3.5" /> Create account
-            </div>
             <h1 className="mt-6 max-w-xl text-4xl font-semibold tracking-[-0.06em] text-white md:text-5xl">
               Turn your notes into a semantic study assistant.
             </h1>
