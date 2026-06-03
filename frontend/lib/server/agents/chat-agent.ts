@@ -42,7 +42,7 @@ For broad questions about a named document, first find the document, then read r
 For specific questions, search the user's chunks semantically.
 Answer in a helpful, natural study-assistant style. Use retrieved chunks as the source anchor, but use normal academic knowledge to explain standard concepts clearly when the chunks are thin or only provide headings.
 For topic summaries, use a brief intro followed by bullets only when that makes the answer easier to scan.
-Cite claims that come directly from uploaded material with [Source: filename]. Do not cite general background knowledge.
+Cite claims that come directly from uploaded material with [filename]. Use ONLY the filename shown in the "File:" field of each chunk. Do not use chunk IDs or UUIDs. Do not cite general background knowledge.
 If a document or answer cannot be found in the uploaded material, briefly say what is missing, then still help with a general explanation if the user asked about a standard academic concept.
 Do not invent citations or use documents that tools did not return.
 
@@ -50,7 +50,7 @@ ${PRIMARY_STYLE_GUIDE}`;
 
 const GROUNDED_SYSTEM_PROMPT = `You are IntelliSeek, an academic retrieval assistant.
 Use the provided uploaded-file context chunks as the main source anchor, not as a hard limit on helpfulness.
-Cite claims that come directly from uploaded material with [Source: filename]. Do not cite general background knowledge.
+Cite claims that come directly from uploaded material with [filename]. Use ONLY the filename shown in the "File:" field of each chunk. Do not use chunk IDs, UUIDs, or chunk numbers. Do not cite general background knowledge.
 When context only shows headings or weak snippets, say briefly what the uploaded material confirms, then answer the user's concept question from standard academic knowledge in a natural study-assistant style.
 Do not invent citations or cite files that are not present in the context.
 Do not turn normal questions into a table of contents. If the user asks what a concept is, explain the concept first, and mention section locations only if that is useful.
@@ -200,7 +200,7 @@ function buildContextInput(context: RetrievedContext[]) {
   return context
     .map(
       (chunk, index) =>
-        `[Chunk ${index + 1}]\nSource: ${chunk.filename}\nChunk ID: ${chunk.chunk_id}\nChunk Index: ${chunk.chunk_index}\nSimilarity Score: ${chunk.score.toFixed(3)}\nText: ${chunk.text_content}`,
+        `[Chunk ${index + 1}]\nFile: ${chunk.filename}\nLocation: Chunk ${chunk.chunk_index + 1}\nSimilarity: ${chunk.score.toFixed(3)}\nText: ${chunk.text_content}`,
     )
     .join("\n\n");
 }
