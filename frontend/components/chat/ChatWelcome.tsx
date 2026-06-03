@@ -28,7 +28,7 @@ export function ChatWelcome({ disabled = false, onSelect }: ChatWelcomeProps) {
             type="button"
             disabled={disabled}
             onClick={() => onSelect(suggestion)}
-            className="glow-border group relative z-0 flex w-full min-w-0 items-center justify-between gap-3 rounded-3xl border border-white/10 bg-white/[0.06] p-4 text-left text-sm text-slate-200 shadow-xl shadow-slate-950/20 backdrop-blur-xl transition hover:-translate-y-0.5 hover:bg-white/[0.09] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 disabled:cursor-not-allowed disabled:opacity-50 lg:gap-4"
+            className="glow-border group relative z-0 flex w-full min-w-0 items-center justify-between gap-3 rounded-3xl border border-white/10 bg-white/5 p-4 text-left text-sm text-slate-200 shadow-xl shadow-slate-950/20 backdrop-blur-xl transition hover:-translate-y-0.5 hover:bg-white/10 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 disabled:cursor-not-allowed disabled:opacity-50 lg:gap-4"
           >
             <span className="flex min-w-0 flex-1 items-center gap-3">
               <BookOpen className="h-4 w-4 shrink-0 text-cyan-200" />

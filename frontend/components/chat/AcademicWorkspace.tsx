@@ -94,7 +94,7 @@ export function AcademicWorkspace({
             <button
               type="button"
               onClick={() => setIsSidebarOpen(true)}
-              className="absolute left-3 inline-flex h-10 w-10 items-center justify-center text-slate-200 transition hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
+              className="absolute left-3 inline-flex h-10 w-10 items-center justify-center text-slate-200 transition hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
               aria-label="Open sidebar"
             >
               <Menu className="h-5 w-5" />
@@ -103,7 +103,7 @@ export function AcademicWorkspace({
             <button
               type="button"
               onClick={toggleTheme}
-              className="absolute right-3 inline-flex h-10 w-10 items-center justify-center text-slate-200 transition hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
+              className="absolute right-3 inline-flex h-10 w-10 items-center justify-center text-slate-200 transition hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
               aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
               title={isDark ? "Switch to light theme" : "Switch to dark theme"}
               suppressHydrationWarning

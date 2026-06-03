@@ -30,7 +30,7 @@ export function DemoSignupModal({ isOpen, onClose, title, message }: DemoSignupM
       role="dialog"
       aria-modal="true"
       aria-labelledby="demo-modal-title"
-      className="fixed inset-0 z-[100] flex items-center justify-center"
+      className="fixed inset-0 z-100 flex items-center justify-center"
     >
       <div
         className="absolute inset-0 bg-slate-950/75 backdrop-blur-sm hover:cursor-pointer"
@@ -45,7 +45,7 @@ export function DemoSignupModal({ isOpen, onClose, title, message }: DemoSignupM
         }}
       />
       <div
-        className={`relative z-10 w-full max-w-md rounded-[2rem] border p-6 shadow-2xl sm:p-8 ${
+        className={`relative z-10 w-full max-w-md rounded-4xl border p-6 shadow-2xl sm:p-8 ${
           isDark
             ? "border-white/10 bg-slate-900/95 shadow-slate-950/50"
             : "border-slate-200 bg-white/95 shadow-slate-950/10"
@@ -90,7 +90,7 @@ export function DemoSignupModal({ isOpen, onClose, title, message }: DemoSignupM
             href="/sign-in"
             className={`inline-flex flex-1 items-center justify-center gap-2 rounded-2xl border px-5 py-3 text-sm font-semibold transition ${
               isDark
-                ? "border-white/10 bg-white/[0.06] text-slate-100 hover:bg-white/10"
+                ? "border-white/10 bg-white/5 text-slate-100 hover:bg-white/10"
                 : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
             } hover:cursor-pointer`}
             onClick={onClose}

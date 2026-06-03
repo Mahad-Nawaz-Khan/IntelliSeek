@@ -53,7 +53,7 @@ export default function Home() {
             />
             <h1 className="w-full text-2xl sm:text-4xl lg:text-5xl pt-3 font-semibold">
               <span className="text-slate-900 dark:text-white">Intelli</span>
-              <span className="ml-1 bg-gradient-to-br from-purple-600 to-cyan-600 bg-clip-text text-transparent dark:from-purple-600 dark:to-sky-500">Seek</span>
+              <span className="ml-1 bg-linear-to-br from-purple-600 to-cyan-600 bg-clip-text text-transparent dark:from-purple-600 dark:to-sky-500">Seek</span>
             </h1>
           </div>
           
@@ -80,7 +80,7 @@ export default function Home() {
             {features.map((feature) => {
               const Icon = feature.icon;
               return (
-                <article key={feature.title} className="glow-border rounded-3xl border border-white/10 bg-white/[0.06] p-5 shadow-xl shadow-slate-950/20 backdrop-blur-xl transition hover:-translate-y-0.5 hover:bg-white/[0.08]">
+                <article key={feature.title} className="glow-border rounded-3xl border border-white/10 bg-white/5 p-5 shadow-xl shadow-slate-950/20 backdrop-blur-xl transition hover:-translate-y-0.5 hover:bg-white/10">
                   <Icon className="mb-4 h-5 w-5 text-cyan-200" />
                   <h2 className="font-semibold text-white">{feature.title}</h2>
                   <p className="mt-2 text-sm leading-6 text-slate-400">{feature.description}</p>
@@ -90,8 +90,8 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="landing-preview-card rounded-[2rem] border border-white/10 bg-slate-950/60 p-4 shadow-2xl shadow-slate-950/50 backdrop-blur-xl">
-          <div className="rounded-[1.5rem] border border-white/10 bg-white/[0.04] p-4">
+        <div className="landing-preview-card rounded-4xl border border-white/10 bg-slate-950/60 p-4 shadow-2xl shadow-slate-950/50 backdrop-blur-xl">
+          <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
             <div className="mb-5 flex items-center justify-between border-b border-white/10 pb-4">
               <div>
                 <p className="text-xs uppercase tracking-[0.28em] text-cyan-200">IntelliSeek AI</p>
@@ -103,7 +103,7 @@ export default function Home() {
               <div className="ml-auto max-w-[80%] rounded-3xl border border-cyan-300/20 bg-cyan-300/12 px-4 py-3 text-sm text-cyan-50">
                 Explain dynamic programming from my DSA notes.
               </div>
-              <div className="max-w-[88%] rounded-3xl border border-white/10 bg-white/[0.07] px-4 py-3 text-sm leading-6 text-slate-200">
+              <div className="max-w-[88%] rounded-3xl border border-white/10 bg-white/5 px-4 py-3 text-sm leading-6 text-slate-200">
                 Dynamic programming solves overlapping subproblems by storing results and reusing them instead of recomputing.
                 <div className="mt-4 flex flex-wrap gap-2 border-t border-white/10 pt-3">
                   <span className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-xs text-cyan-100">DSA.pdf p12</span>
@@ -117,7 +117,7 @@ export default function Home() {
           </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             {['DSA.pdf', 'AI_Notes.pdf', 'Assignment.pdf'].map((source) => (
-              <div key={source} className="rounded-2xl border border-white/10 bg-white/[0.04] p-3">
+              <div key={source} className="rounded-2xl border border-white/10 bg-white/5 p-3">
                 <FileText className="mb-2 h-4 w-4 text-cyan-200" />
                 <p className="truncate text-xs font-medium text-slate-200">{source}</p>
               </div>

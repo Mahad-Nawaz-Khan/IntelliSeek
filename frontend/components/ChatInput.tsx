@@ -107,7 +107,7 @@ export function ChatInput({
             type="button"
             onClick={onOpenUpload}
             disabled={disabled}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-transparent text-slate-300 transition hover:bg-white/[0.12] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-transparent text-slate-300 transition hover:bg-white/10 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
             aria-label="Upload document"
           >
             <Plus className="h-6 w-6" strokeWidth={2.5} />
@@ -161,7 +161,7 @@ export function ChatInput({
                 submit();
               }
             }}
-            className="max-h-40 min-h-11 w-full resize-none bg-transparent px-3 pb-2 pt-3 text-sm leading-6 text-slate-100 outline-none disabled:cursor-not-allowed disabled:opacity-60"
+            className="max-h-40 min-h-11 w-full resize-none bg-transparent px-3 pb-2 pt-3 text-sm leading-6 text-slate-100 outline-hidden disabled:cursor-not-allowed disabled:opacity-60"
           />
         </div>
         <button
@@ -175,7 +175,7 @@ export function ChatInput({
             submit();
           }}
           disabled={disabled || (!isResponding && !value.trim())}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-950/30 transition hover:bg-cyan-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-950/30 transition hover:bg-cyan-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
           aria-label={isResponding ? "Stop response" : "Send question"}
         >
           {isResponding ? <Square className="h-4 w-4 fill-current" /> : <Send className="h-5 w-5 translate-x-px" />}

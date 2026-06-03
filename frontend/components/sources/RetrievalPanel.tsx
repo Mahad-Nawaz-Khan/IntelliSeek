@@ -16,7 +16,7 @@ export function RetrievalPanel({ matches }: RetrievalPanelProps) {
       {matches.length ? (
         <div className="space-y-3">
           {matches.map((match) => (
-            <article key={match.id} className="rounded-2xl border border-white/10 bg-white/[0.05] p-3">
+            <article key={match.id} className="rounded-2xl border border-white/10 bg-white/5 p-3">
               <p className="truncate text-sm font-medium text-slate-100">{match.filename}</p>
               {match.locator && <p className="mt-1 text-xs text-cyan-200">{match.locator}</p>}
               {match.snippet && <p className="mt-2 line-clamp-3 text-xs leading-5 text-slate-400">{match.snippet}</p>}

@@ -82,12 +82,12 @@ function ToastCard({ toast, onDismiss }: { toast: UploadIndexingToast; onDismiss
 
       {/* Bottom progress bar */}
       {isWorking && (
-        <div className="absolute bottom-0 left-0 right-0 h-[3px] overflow-hidden bg-slate-800/60">
-          <div className="indexing-toast-progress h-full w-1/3 rounded-full bg-gradient-to-r from-cyan-400 to-violet-400" />
+        <div className="absolute bottom-0 left-0 right-0 h-0.75 overflow-hidden bg-slate-800/60">
+          <div className="indexing-toast-progress h-full w-1/3 rounded-full bg-linear-to-r from-cyan-400 to-violet-400" />
         </div>
       )}
       {isComplete && (
-        <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-emerald-400/70" />
+        <div className="absolute bottom-0 left-0 right-0 h-0.75 bg-emerald-400/70" />
       )}
     </div>
   );

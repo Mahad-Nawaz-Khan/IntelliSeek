@@ -28,7 +28,7 @@ export function RetrievalStatus({ status }: RetrievalStatusProps) {
           {status.matches.map((match, index) => (
             <li
               key={match.id}
-              className="flex items-center gap-2.5 rounded-xl border border-white/5 bg-white/[0.04] px-3 py-2.5 text-xs backdrop-blur-sm"
+              className="flex items-center gap-2.5 rounded-xl border border-white/5 bg-white/5 px-3 py-2.5 text-xs backdrop-blur-sm"
               style={{
                 animationDelay: `${index * STAGGER_BASE_MS}ms`,
                 animationFillMode: "both",

@@ -140,12 +140,12 @@ export default function SignUpPage() {
   return (
     <main className="auth-page relative min-h-screen overflow-hidden bg-slate-950 text-white">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(124,58,237,0.28),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(6,182,212,0.18),transparent_34%)]" />
-      <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px)] bg-[size:56px_56px] opacity-30" />
+      <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px)] bg-size-[56px_56px] opacity-30" />
 
       <button
         type="button"
         onClick={toggleTheme}
-        className="absolute right-6 top-6 z-50 inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-slate-200 transition hover:border-cyan-300/30 hover:bg-white/[0.09] hover:cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
+        className="absolute right-6 top-6 z-50 inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-slate-200 transition hover:border-cyan-300/30 hover:bg-white/10 hover:cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
         aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
         title={isDark ? "Switch to light theme" : "Switch to dark theme"}
         suppressHydrationWarning
@@ -155,7 +155,7 @@ export default function SignUpPage() {
 
       <div className="relative mx-auto flex min-h-screen max-w-7xl items-center px-4 py-6 sm:px-6 lg:px-10">
         <div className="grid w-full gap-5 lg:grid-cols-[1fr_1fr]">
-          <section className="auth-card order-2 rounded-[2rem] border border-white/10 bg-white/[0.04] p-6 shadow-2xl shadow-slate-950/40 backdrop-blur-xl sm:p-8 lg:order-1 lg:min-h-[720px]">
+          <section className="auth-card order-2 rounded-4xl border border-white/10 bg-white/5 p-6 shadow-2xl shadow-slate-950/40 backdrop-blur-xl sm:p-8 lg:order-1 lg:min-h-180">
             <Link
               href="/"
               className="inline-flex items-center gap-2 text-sm text-slate-400 transition hover:text-white hover:cursor-pointer"
@@ -178,7 +178,7 @@ export default function SignUpPage() {
               ].map((item) => (
                 <div
                   key={item}
-                  className="rounded-3xl border border-white/10 bg-white/[0.05] px-4 py-4 text-sm text-slate-300"
+                  className="rounded-3xl border border-white/10 bg-white/5 px-4 py-4 text-sm text-slate-300"
                 >
                   {item}
                 </div>
@@ -186,7 +186,7 @@ export default function SignUpPage() {
             </div>
           </section>
 
-          <section className="auth-card order-1 rounded-[2rem] border border-white/10 bg-slate-900/70 p-6 shadow-2xl shadow-slate-950/50 backdrop-blur-2xl sm:p-8 lg:order-2">
+          <section className="auth-card order-1 rounded-4xl border border-white/10 bg-slate-900/70 p-6 shadow-2xl shadow-slate-950/50 backdrop-blur-2xl sm:p-8 lg:order-2">
             <div className="mb-6">
               <div className="flex items-center gap-4 mb-4">
                 <Image
@@ -200,12 +200,12 @@ export default function SignUpPage() {
                   <span className="text-slate-900 dark:text-white">
                     Intelli
                   </span>
-                  <span className="ml-1 bg-gradient-to-br from-purple-600 to-cyan-600 bg-clip-text text-transparent dark:from-purple-600 dark:to-sky-500">
+                  <span className="ml-1 bg-linear-to-br from-purple-600 to-cyan-600 bg-clip-text text-transparent dark:from-purple-600 dark:to-sky-500">
                     Seek
                   </span>
                 </h1>
               </div>
-              <h2 className="mt-2 text-3xl font-semibold tracking-[-0.05em] text-white">
+              <h2 className="mt-2 text-3xl font-semibold tracking-tighter text-white">
                 Create your account
               </h2>
               <p className="mt-2 text-sm text-slate-400">
@@ -229,7 +229,7 @@ export default function SignUpPage() {
                 type="button"
                 onClick={() => handleProvider("google")}
                 disabled={Boolean(oauthProvider)}
-                className="flex w-full items-center justify-center gap-3 rounded-[22px] border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-medium text-white transition hover:border-cyan-300/30 hover:bg-white/[0.09] hover:cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+                className="flex w-full items-center justify-center gap-3 rounded-[22px] border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white transition hover:border-cyan-300/30 hover:bg-white/10 hover:cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Image
                   src="/icons/google.svg"
@@ -246,7 +246,7 @@ export default function SignUpPage() {
                 type="button"
                 onClick={() => handleProvider("github")}
                 disabled={Boolean(oauthProvider)}
-                className="flex w-full items-center justify-center gap-3 rounded-[22px] border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-medium text-white transition hover:border-cyan-300/30 hover:bg-white/[0.09] hover:cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+                className="flex w-full items-center justify-center gap-3 rounded-[22px] border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white transition hover:border-cyan-300/30 hover:bg-white/10 hover:cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Image
                   src={isDark ? "/icons/github.svg" : "/icons/github-black.svg"}
@@ -284,7 +284,7 @@ export default function SignUpPage() {
                     value={firstName}
                     onChange={(event) => setFirstName(event.target.value)}
                     placeholder="First"
-                    className="w-full rounded-[22px] border border-white/10 bg-white/[0.06] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-300/50"
+                    className="w-full rounded-[22px] border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-hidden transition placeholder:text-slate-500 focus:border-cyan-300/50"
                   />
                 </div>
                 <div>
@@ -300,7 +300,7 @@ export default function SignUpPage() {
                     value={lastName}
                     onChange={(event) => setLastName(event.target.value)}
                     placeholder="Last"
-                    className="w-full rounded-[22px] border border-white/10 bg-white/[0.06] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-300/50"
+                    className="w-full rounded-[22px] border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-hidden transition placeholder:text-slate-500 focus:border-cyan-300/50"
                   />
                 </div>
               </div>
@@ -318,7 +318,7 @@ export default function SignUpPage() {
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
                   placeholder="you@example.com"
-                  className="w-full rounded-[22px] border border-white/10 bg-white/[0.06] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-300/50"
+                  className="w-full rounded-[22px] border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-hidden transition placeholder:text-slate-500 focus:border-cyan-300/50"
                 />
               </div>
               <div>
@@ -328,7 +328,7 @@ export default function SignUpPage() {
                 >
                   Password
                 </label>
-                <div className="flex items-center rounded-[22px] border border-white/10 bg-white/[0.06] px-4 py-3 transition focus-within:border-cyan-300/50">
+                <div className="flex items-center rounded-[22px] border border-white/10 bg-white/5 px-4 py-3 transition focus-within:border-cyan-300/50">
                   <input
                     id="password"
                     type={showPassword ? "text" : "password"}
@@ -336,7 +336,7 @@ export default function SignUpPage() {
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
                     placeholder="At least 8 characters"
-                    className="w-full bg-transparent text-sm text-white outline-none placeholder:text-slate-500"
+                    className="w-full bg-transparent text-sm text-white outline-hidden placeholder:text-slate-500"
                   />
                   <button
                     type="button"
@@ -359,7 +359,7 @@ export default function SignUpPage() {
                 >
                   Confirm password
                 </label>
-                <div className="flex items-center rounded-[22px] border border-white/10 bg-white/[0.06] px-4 py-3 transition focus-within:border-cyan-300/50">
+                <div className="flex items-center rounded-[22px] border border-white/10 bg-white/5 px-4 py-3 transition focus-within:border-cyan-300/50">
                   <input
                     id="confirmPassword"
                     type={showConfirm ? "text" : "password"}
@@ -367,7 +367,7 @@ export default function SignUpPage() {
                     value={confirmPassword}
                     onChange={(event) => setConfirmPassword(event.target.value)}
                     placeholder="Repeat your password"
-                    className="w-full bg-transparent text-sm text-white outline-none placeholder:text-slate-500"
+                    className="w-full bg-transparent text-sm text-white outline-hidden placeholder:text-slate-500"
                   />
                   <button
                     type="button"

@@ -40,7 +40,7 @@ export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId
 
   if (isCollapsed) {
     return (
-      <aside className="flex h-full w-[64px] shrink-0 flex-col items-center gap-2 overflow-hidden bg-slate-950/75 px-1.5 py-4 backdrop-blur-xl">
+      <aside className="flex h-full w-16 shrink-0 flex-col items-center gap-2 overflow-hidden bg-slate-950/75 px-1.5 py-4 backdrop-blur-xl">
         <button
           type="button"
           onClick={onToggleCollapsed}
@@ -57,7 +57,7 @@ export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId
           <button
             type="button"
             onClick={onNewChat}
-            className="flex h-10 w-10 items-center justify-center rounded-2xl text-slate-400 transition hover:bg-white/[0.06] hover:text-white"
+            className="flex h-10 w-10 items-center justify-center rounded-2xl text-slate-400 transition hover:bg-white/5 hover:text-white"
             aria-label="New chat"
             title="New chat"
           >
@@ -76,7 +76,7 @@ export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId
                 className={`flex h-10 w-10 items-center justify-center rounded-2xl transition ${
                   active
                     ? "bg-cyan-300/12 text-cyan-50"
-                    : "text-slate-400 hover:bg-white/[0.06] hover:text-white"
+                    : "text-slate-400 hover:bg-white/5 hover:text-white"
                 }`}
                 aria-label={item.label}
                 title={item.label}
@@ -111,7 +111,7 @@ export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId
   }
 
   return (
-    <aside className="scrollbar-hidden flex h-full w-full flex-col gap-3 overflow-y-auto bg-slate-950/75 px-3 py-4 backdrop-blur-xl lg:w-[232px] lg:shrink-0">
+    <aside className="scrollbar-hidden flex h-full w-full flex-col gap-3 overflow-y-auto bg-slate-950/75 px-3 py-4 backdrop-blur-xl lg:w-58 lg:shrink-0">
       <div className="flex items-start justify-between gap-2 px-1 py-1">
         <Link href="/chat" className="flex min-w-0 items-center gap-2.5">
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-cyan-300 text-slate-950 hover:cursor-pointer">
@@ -150,7 +150,7 @@ export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId
                 className={`flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-medium transition hover:cursor-pointer ${
                 active
                   ? "bg-cyan-300/12 text-cyan-50"
-                  : "text-slate-400 hover:bg-white/[0.06] hover:text-white"
+                  : "text-slate-400 hover:bg-white/5 hover:text-white"
               }`}
             >
               <Icon className="h-3.5 w-3.5" />
