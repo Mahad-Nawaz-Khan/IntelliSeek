@@ -726,8 +726,8 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
     setQueuedMessages([]);
     queuedMessagesRef.current = [];
     loadedSessionRef.current = null;
-    if (!demo) window.history.pushState(null, "", "/chat");
-  }, [demo]);
+    if (!demo) void router.push("/chat");
+  }, [demo, router]);
 
   const handleOpenSession = useCallback((sessionId: string) => {
     if (isLoading || demo) return;
