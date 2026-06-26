@@ -3,7 +3,9 @@
 import { ArrowRight, BookOpen, FileText, GraduationCap, Quote, Search, UploadCloud } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 
+import { useAuth } from "../context/AuthContext";
 import { useDemo } from "../context/DemoContext";
 import Image from "next/image";
 
@@ -33,6 +35,15 @@ const features = [
 export default function Home() {
   const router = useRouter();
   const { startDemo } = useDemo();
+  const { isLoaded, isSignedIn } = useAuth();
+
+  // If a user lands here while already authenticated (e.g. Supabase fell back
+  // to the Site URL instead of honoring the OAuth redirectTo and dropped them
+  // on "/"), send them straight to the workspace instead of showing the
+  // marketing page and forcing another manual click.
+  useEffect(() => {
+    if (isLoaded && isSignedIn) router.replace("/chat");
+  }, [isLoaded, isSignedIn, router]);
 
   function handleTryDemo() {
     startDemo();
