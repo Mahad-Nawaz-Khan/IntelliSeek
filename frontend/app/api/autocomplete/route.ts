@@ -1,6 +1,7 @@
 import { SUGGESTIONS } from "../../../components/SuggestedQueries";
 import { getAuthenticatedUser } from "../../../lib/server/auth";
 import { checkRateLimit, getClientIp, rateLimitHeaders, rateLimitResponse } from "../../../lib/server/rate-limit";
+import { accessibleDocumentFilter } from "../../../lib/server/postgrest-safe";
 import { extractTopicsFromChunks } from "../../../lib/server/rag/topics";
 import { getSupabaseServiceClient } from "../../../lib/server/supabase";
 import type { AutocompleteSuggestionMetadata, AutocompleteSuggestionType } from "../../../lib/trie-autocomplete";
@@ -54,7 +55,7 @@ type ChunkRow = {
 
 function applyAccessibleDocumentFilter<T>(query: T, userId: string): T {
   return (query as { or: (filters: string, options?: { foreignTable?: string }) => T })
-    .or(`user_id.eq.${userId},source_scope.eq.knowledge_base`, { foreignTable: "documents" });
+    .or(accessibleDocumentFilter(userId), { foreignTable: "documents" });
 }
 
 type HistoryRow = {
@@ -225,10 +226,12 @@ export async function GET(request: Request) {
   const documentsQuery = supabase
       .from("documents")
       .select("id, filename, source_scope")
-      .or(`user_id.eq.${user.id},source_scope.eq.knowledge_base`)
+      .or(accessibleDocumentFilter(user.id))
       .eq("processing_status", "indexed")
       .order("created_at", { ascending: false })
       .limit(8);
+  // `user_id` is selected only because the join filters on it; it is never
+  // returned to the client.
   const topicsQuery = applyAccessibleDocumentFilter(
     supabase
       .from("document_topics")

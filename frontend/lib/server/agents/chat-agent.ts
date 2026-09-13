@@ -11,6 +11,7 @@ import { streamGroqGeneralAnswer, streamGroqGroundedAnswer } from "../groq";
 import { embedText } from "../rag/embeddings";
 import { mergeRetrievedContext, retrieveKeywordContext, toSourceCitations, validateQuestion, type RetrievedContext } from "../rag/retriever";
 import { matchUserChunks, type RetrievedChunk } from "../rag/vector-store";
+import { accessibleDocumentFilter, toSafeLikeTerm } from "../postgrest-safe";
 import { getSupabaseServiceClient } from "../supabase";
 
 const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
@@ -101,7 +102,7 @@ type ChunkRow = {
 
 function applyAccessibleDocumentFilter<T>(query: T, userId: string): T {
   return (query as { or: (filters: string, options?: { foreignTable?: string }) => T })
-    .or(`user_id.eq.${userId},source_scope.eq.knowledge_base`, { foreignTable: "documents" });
+    .or(accessibleDocumentFilter(userId), { foreignTable: "documents" });
 }
 
 function getOpenRouterBaseUrl() {
@@ -153,14 +154,20 @@ async function findUserDocuments(userId: string, query: string, limit: number): 
   const supabase = getSupabaseServiceClient();
   if (!supabase) throw new Error("Supabase service client is not configured");
 
-  const { data, error } = await supabase
+  // The filename fragment comes from a model-authored tool call, so `%`/`_` are
+  // stripped rather than escaped: a pattern of `%` would match every document.
+  const safeQuery = toSafeLikeTerm(query);
+
+  let request = supabase
     .from("documents")
     .select("id, filename, created_at, source_scope")
-    .or(`user_id.eq.${userId},source_scope.eq.knowledge_base`)
-    .ilike("filename", `%${query}%`)
+    .or(accessibleDocumentFilter(userId))
     .order("created_at", { ascending: false })
     .limit(Math.min(Math.max(limit, 1), 10));
 
+  if (safeQuery) request = request.ilike("filename", `%${safeQuery}%`);
+
+  const { data, error } = await request;
   if (error) throw new Error("Could not find documents");
   return (data ?? []) as DocumentRow[];
 }

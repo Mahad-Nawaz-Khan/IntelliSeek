@@ -90,7 +90,10 @@ export const indexDocument = inngest.createFunction(
       });
 
       const chunks = await step.run("Chunk document", async () => {
-        const parsedChunks = chunkText(extracted);
+        // Blank chunks are dropped here rather than downstream: the embedder
+        // returns one vector per input, so filtering after embedding would shift
+        // vectors onto the wrong chunks.
+        const parsedChunks = chunkText(extracted).map((chunk) => chunk.trim()).filter(Boolean);
         if (!parsedChunks.length) throw new Error("Extracted text has no indexable content");
         log.info("indexing.chunk.complete", { userId, documentId, textLength: extracted.length, chunkCount: parsedChunks.length });
         return parsedChunks;
@@ -98,15 +101,45 @@ export const indexDocument = inngest.createFunction(
 
       const embeddings = await step.run("Generate embeddings", async () => {
         const generated = await embedTexts(chunks, log);
+        if (generated.length !== chunks.length) {
+          log.error("indexing.embeddings.count_mismatch", {
+            errorCategory: "embedding_failure",
+            userId,
+            documentId,
+            chunkCount: chunks.length,
+            embeddingCount: generated.length,
+          });
+          throw new Error("Embedding count does not match chunk count");
+        }
         log.info("indexing.embeddings.complete", { userId, documentId, chunkCount: chunks.length, embeddingCount: generated.length });
         return generated;
       });
 
-      const insertedChunks = await step.run("Persist chunks", async () => {
+      const topics = await step.run("Extract topics", async () => {
+        const extractedTopics = extractTopicsFromChunks(chunks, filename);
+        log.info("indexing.topics.extract.complete", { userId, documentId, topicCount: extractedTopics.length });
+        return extractedTopics;
+      });
+
+      // Chunks and topics are replaced in one step. Previously topics were
+      // persisted after chunks were already committed, so a topic failure left a
+      // document with chunks but no topics and no way to tell from its status.
+      const insertedChunks = await step.run("Persist chunks and topics", async () => {
         const { error: topicDeleteError } = await supabase.from("document_topics").delete().eq("document_id", documentId);
-        if (topicDeleteError) log.error("indexing.topics.delete_failed", { errorCategory: "supabase_delete", userId, documentId, error: topicDeleteError });
+        if (topicDeleteError) {
+          log.error("indexing.topics.delete_failed", { errorCategory: "supabase_delete", userId, documentId, error: topicDeleteError });
+          // Stale rows would otherwise survive alongside the new ones and the
+          // unique (document_id, topic) constraint would reject the insert.
+          throw new Error("Could not clear previous topics");
+        }
+
         const { error: chunkDeleteError } = await supabase.from("chunks").delete().eq("document_id", documentId);
-        if (chunkDeleteError) log.error("indexing.chunks.delete_failed", { errorCategory: "supabase_delete", userId, documentId, error: chunkDeleteError });
+        if (chunkDeleteError) {
+          log.error("indexing.chunks.delete_failed", { errorCategory: "supabase_delete", userId, documentId, error: chunkDeleteError });
+          // Keeping stale chunks would leave the document indexed against a mix
+          // of old and new text.
+          throw new Error("Could not clear previous chunks");
+        }
 
         const rows = chunks.map((chunk, index) => ({
           document_id: documentId,
@@ -116,41 +149,41 @@ export const indexDocument = inngest.createFunction(
         }));
 
         const { data, error } = await supabase.from("chunks").insert(rows).select("id, chunk_index");
-        if (error) throw new Error("Chunk persistence failed");
+        if (error) {
+          log.error("indexing.chunks.insert_failed", { errorCategory: "supabase_insert", userId, documentId, error });
+          throw new Error("Chunk persistence failed");
+        }
+
+        const persistedChunks = (data ?? []) as Array<{ id: string; chunk_index: number }>;
         log.info("indexing.chunks.persist.complete", {
           userId,
           documentId,
           chunkCount: chunks.length,
-          insertedChunkCount: data?.length ?? 0,
+          insertedChunkCount: persistedChunks.length,
         });
-        return (data ?? []) as Array<{ id: string; chunk_index: number }>;
-      });
 
-      const topics = await step.run("Extract topics", async () => {
-        const extractedTopics = extractTopicsFromChunks(chunks, filename);
-        log.info("indexing.topics.extract.complete", { userId, documentId, topicCount: extractedTopics.length });
-        return extractedTopics;
-      });
+        if (topics.length) {
+          const chunkIdByIndex = new Map(persistedChunks.map((chunk) => [chunk.chunk_index, chunk.id]));
+          const topicRows = topics.map((topic) => ({
+            user_id: userId,
+            document_id: documentId,
+            topic: topic.topic,
+            frequency: topic.frequency,
+            score: topic.score,
+            source_chunk_id: topic.sourceChunkIndex === undefined ? null : chunkIdByIndex.get(topic.sourceChunkIndex) ?? null,
+          }));
 
-      await step.run("Persist topics", async () => {
-        if (!topics.length) {
+          const { error: topicError } = await supabase.from("document_topics").insert(topicRows);
+          if (topicError) {
+            log.error("indexing.topics.insert_failed", { errorCategory: "supabase_insert", userId, documentId, error: topicError });
+            throw new Error("Topic persistence failed");
+          }
+          log.info("indexing.topics.persist.complete", { userId, documentId, topicCount: topics.length });
+        } else {
           log.info("indexing.topics.persist.skipped", { userId, documentId, topicCount: 0 });
-          return;
         }
 
-        const chunkIdByIndex = new Map(insertedChunks.map((chunk) => [chunk.chunk_index, chunk.id]));
-        const rows = topics.map((topic) => ({
-          user_id: userId,
-          document_id: documentId,
-          topic: topic.topic,
-          frequency: topic.frequency,
-          score: topic.score,
-          source_chunk_id: topic.sourceChunkIndex === undefined ? null : chunkIdByIndex.get(topic.sourceChunkIndex) ?? null,
-        }));
-
-        const { error } = await supabase.from("document_topics").insert(rows);
-        if (error) throw new Error("Topic persistence failed");
-        log.info("indexing.topics.persist.complete", { userId, documentId, topicCount: topics.length });
+        return persistedChunks;
       });
 
       await step.run("Mark indexed", async () => {

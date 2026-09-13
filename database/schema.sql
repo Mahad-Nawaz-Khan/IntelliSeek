@@ -123,10 +123,15 @@ create index if not exists document_topics_document_id_idx on public.document_to
 create index if not exists document_topics_topic_lower_idx on public.document_topics(lower(topic));
 create index if not exists document_topics_user_score_idx on public.document_topics(user_id, score desc);
 
+-- Older deployments have the 3-argument signature; `create or replace` cannot add
+-- a parameter, so the previous overload is dropped first.
+drop function if exists public.match_user_chunks(extensions.vector(1024), uuid, int);
+
 create or replace function public.match_user_chunks(
   query_embedding extensions.vector(1024),
   match_user_id uuid,
-  match_count int default 5
+  match_count int default 5,
+  match_document_ids uuid[] default null
 )
 returns table (
   chunk_id uuid,
@@ -138,6 +143,9 @@ returns table (
 )
 language sql
 stable
+-- Pinned so the unqualified `least`/operator lookups cannot be shadowed by a
+-- schema earlier on a caller's search_path.
+set search_path = public, extensions, pg_temp
 as $$
   select
     chunks.id as chunk_id,
@@ -149,9 +157,13 @@ as $$
   from public.chunks
   join public.documents on documents.id = chunks.document_id
   where (documents.user_id = match_user_id or documents.source_scope = 'knowledge_base')
+    -- A document that is still parsing has partial chunks; including it would
+    -- ground answers in half a file. The keyword path filters the same way.
+    and documents.processing_status = 'indexed'
     and chunks.embedding is not null
+    and (match_document_ids is null or chunks.document_id = any(match_document_ids))
   order by chunks.embedding <=> query_embedding
-  limit least(match_count, 20);
+  limit least(greatest(match_count, 1), 100);
 $$;
 
 alter table public.documents enable row level security;

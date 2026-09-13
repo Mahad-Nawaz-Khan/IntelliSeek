@@ -23,11 +23,21 @@ function toVectorLiteral(embedding: number[]) {
   return `[${embedding.join(",")}]`;
 }
 
+export type MatchUserChunksOptions = {
+  /**
+   * Restricts the search to these documents inside the RPC. Filtering in the
+   * database (rather than discarding rows afterwards) is what makes a scoped
+   * search return `limit` rows instead of whatever survives a global Top-K.
+   */
+  documentIds?: string[];
+};
+
 export async function matchUserChunks(
   userId: string,
   queryEmbedding: number[],
   limit: number,
   log?: RequestLogger,
+  options: MatchUserChunksOptions = {},
 ): Promise<RetrievedChunk[]> {
   const supabase = getSupabaseServiceClient();
   if (!supabase) {
@@ -35,17 +45,20 @@ export async function matchUserChunks(
     return [];
   }
 
+  const documentIds = options.documentIds?.length ? options.documentIds : null;
   const startedAt = Date.now();
   log?.info("vector.rpc.start", {
     userId,
     limit,
     embeddingDimension: queryEmbedding.length,
+    documentCount: documentIds?.length ?? 0,
   });
 
   const { data, error } = await supabase.rpc("match_user_chunks", {
     query_embedding: toVectorLiteral(queryEmbedding),
     match_user_id: userId,
     match_count: limit,
+    match_document_ids: documentIds,
   });
 
   if (error) {
@@ -54,6 +67,7 @@ export async function matchUserChunks(
       userId,
       limit,
       embeddingDimension: queryEmbedding.length,
+      documentCount: documentIds?.length ?? 0,
       durationMs: Date.now() - startedAt,
       error,
     });

@@ -1,6 +1,7 @@
 import { BUCKET_NAME } from "../../../lib/upload-config";
 import { getAuthenticatedUser } from "../../../lib/server/auth";
 import { checkRateLimit, getClientIp, rateLimitHeaders, rateLimitResponse } from "../../../lib/server/rate-limit";
+import { accessibleDocumentFilter, isUuid } from "../../../lib/server/postgrest-safe";
 import { isAdminUser } from "../../../lib/server/roles";
 import { getSupabaseServiceClient } from "../../../lib/server/supabase";
 
@@ -24,10 +25,13 @@ export async function GET(request: Request) {
     return Response.json({ ok: false, error: "Supabase service client is not configured" }, { status: 500 });
   }
 
+  // `user_id` is deliberately not selected: knowledge-base rows are visible to
+  // every signed-in user, so returning it would disclose the uploader's id to
+  // people who cannot otherwise see it. Nothing in the UI reads it.
   const { data, error } = await supabase
     .from("documents")
-    .select("id, user_id, filename, created_at, processing_status, processing_error, indexed_at, source_scope")
-    .or(`user_id.eq.${user.id},source_scope.eq.knowledge_base`)
+    .select("id, filename, created_at, processing_status, processing_error, indexed_at, source_scope")
+    .or(accessibleDocumentFilter(user.id))
     .order("created_at", { ascending: false })
     .limit(100);
 
@@ -57,9 +61,9 @@ export async function DELETE(request: Request) {
   }
 
   const body = (await request.json().catch(() => null)) as { document_id?: unknown } | null;
-  const documentId = typeof body?.document_id === "string" ? body.document_id : "";
-  if (!documentId) {
-    return Response.json({ ok: false, error: "Document id is required" }, { status: 400 });
+  const documentId = typeof body?.document_id === "string" ? body.document_id.trim() : "";
+  if (!isUuid(documentId)) {
+    return Response.json({ ok: false, error: "A valid document id is required" }, { status: 400 });
   }
 
   const { data: document, error: lookupError } = await supabase

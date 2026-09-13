@@ -3,14 +3,43 @@ import type { RequestLogger } from "../logger";
 import { embedText } from "./embeddings";
 import { matchUserChunks, type RetrievedChunk } from "./vector-store";
 import { getSupabaseServiceClient } from "../supabase";
+import { DEMO_USER_ID } from "../env";
+import { accessibleDocumentFilter, filterUuids, toSafeLikeTerm } from "../postgrest-safe";
 
 const DEFAULT_TOP_K = 10;
-const SEMANTIC_CANDIDATE_LIMIT = 20;
+/** Floor for how many rows the vector search returns before re-ranking. */
+const SEMANTIC_CANDIDATE_FLOOR = 20;
+/** Ceiling, so an oversized `limit` cannot turn one question into a table scan. */
+const SEMANTIC_CANDIDATE_CEILING = 60;
 const MAX_CONTEXT_CHUNKS = 12;
 const NEIGHBOR_WINDOW = 1;
 const MAX_QUESTION_LENGTH = 1000;
 export const FILE_CONTEXT_MIN_SCORE = 0.55;
 export const FILE_CONTEXT_WEAK_SCORE = 0.45;
+
+/**
+ * Keyword hits have no cosine similarity, so they get a score derived from how
+ * much of the query they cover. Coverage-proportional (rather than
+ * count-proportional) scoring means a chunk matching 1 of 10 terms lands below
+ * FILE_CONTEXT_MIN_SCORE and is treated as weak, while a chunk matching every
+ * term ranks alongside a strong vector match.
+ */
+const KEYWORD_SCORE_FLOOR = 0.5;
+const KEYWORD_SCORE_CEILING = 0.9;
+
+/**
+ * Chunks pulled to describe a whole document carry no relevance signal at all.
+ * They sit just above FILE_CONTEXT_MIN_SCORE so they survive filtering, but
+ * below a genuinely strong vector match so they never outrank one.
+ */
+const DOCUMENT_OVERVIEW_SCORE = 0.6;
+
+/** Per-document chunk budget when reading documents rather than searching them. */
+const PER_DOCUMENT_CHUNK_LIMIT = 6;
+
+/** How far a neighbour sits below the seed it was pulled in for. */
+const NEIGHBOR_SCORE_PENALTY = 0.04;
+const NEIGHBOR_SCORE_FLOOR = 0.5;
 
 export type RetrievedContext = RetrievedChunk;
 
@@ -52,7 +81,7 @@ type NeighborChunkRow = DocumentChunkRow;
 
 function applyAccessibleDocumentFilter<T>(query: T, userId: string): T {
   return (query as { or: (filters: string, options?: { foreignTable?: string }) => T })
-    .or(`user_id.eq.${userId},source_scope.eq.knowledge_base`, { foreignTable: "documents" });
+    .or(accessibleDocumentFilter(userId), { foreignTable: "documents" });
 }
 
 const SUMMARY_INTENT_PATTERN = /\b(summarize|summerize|summarise|summary|summery|overview|outline|key points|main points|topics covered)\b/i;
@@ -119,6 +148,12 @@ function tokenizeContentQuery(input: string) {
     .filter((token) => token.length >= 3 && !CONTENT_STOP_WORDS.has(token));
 }
 
+/**
+ * Terms are interpolated into a PostgREST `ilike` filter, so each one is run
+ * through `toSafeLikeTerm`: anything that could start a new filter or alter
+ * pattern matching is stripped rather than escaped, and terms left too short to
+ * be useful are dropped.
+ */
 function extractKeywordTerms(question: string) {
   const quoted = [...question.matchAll(/["']([^"']{3,80})["']/g)].map((match) => match[1]);
   const tokens = [...new Set(tokenizeContentQuery(question))]
@@ -127,10 +162,11 @@ function extractKeywordTerms(question: string) {
   const compactQuestion = question.replace(/\s+/g, " ").trim();
   const phrases = compactQuestion.length >= 3 && compactQuestion.length <= 80 ? [compactQuestion] : [];
 
-  return [...new Set([...quoted, ...phrases, ...tokens])]
-    .map((term) => term.replace(/[%_,()]/g, " ").replace(/\s+/g, " ").trim())
-    .filter((term) => term.length >= 3)
-    .slice(0, 10);
+  const safeTerms = [...new Set([...quoted, ...phrases, ...tokens])]
+    .map(toSafeLikeTerm)
+    .filter(Boolean);
+
+  return [...new Set(safeTerms)].slice(0, 10);
 }
 
 function getJoinedChunkDocument(row: DocumentChunkRow | NeighborChunkRow | RepresentativeChunkRow) {
@@ -169,6 +205,27 @@ export function mergeRetrievedContext(...groups: RetrievedContext[][]): Retrieve
     .slice(0, MAX_CONTEXT_CHUNKS);
 }
 
+/**
+ * A neighbour is included for continuity, not because it matched, so it inherits
+ * its seed's score minus a small penalty — close enough to survive alongside its
+ * seed, but never able to outrank it.
+ */
+function neighborScore(seedScore: number | undefined): number {
+  return Math.max(NEIGHBOR_SCORE_FLOOR, (seedScore ?? FILE_CONTEXT_MIN_SCORE) - NEIGHBOR_SCORE_PENALTY);
+}
+
+/**
+ * Maps keyword coverage onto the same 0..1 scale the vector search reports, so
+ * `mergeRetrievedContext` and `filterRelevantContext` can rank both kinds of
+ * hit against each other. A chunk matching every term reaches the ceiling; one
+ * matching a single term out of many stays below FILE_CONTEXT_MIN_SCORE.
+ */
+export function keywordScore(matchCount: number, termCount: number): number {
+  if (matchCount <= 0 || termCount <= 0) return KEYWORD_SCORE_FLOOR;
+  const coverage = Math.min(matchCount / termCount, 1);
+  return KEYWORD_SCORE_FLOOR + coverage * (KEYWORD_SCORE_CEILING - KEYWORD_SCORE_FLOOR);
+}
+
 function scoreFilenameMatch(question: string, filename: string) {
   const questionTokens = new Set(tokenizeSearchText(question));
   const filenameTokens = tokenizeSearchText(filename);
@@ -194,12 +251,25 @@ export async function retrieveContext(
   userId: string,
   limit = DEFAULT_TOP_K,
   log?: RequestLogger,
+  documentIds: string[] = [],
 ): Promise<RetrievedContext[]> {
   const startedAt = Date.now();
-  const candidateLimit = Math.min(Math.max(limit * 3, SEMANTIC_CANDIDATE_LIMIT), SEMANTIC_CANDIDATE_LIMIT);
-  log?.info("retrieval.semantic.start", { userId, limit, candidateLimit, questionLength: question.length });
+  const candidateLimit = Math.min(
+    Math.max(limit * 3, SEMANTIC_CANDIDATE_FLOOR),
+    SEMANTIC_CANDIDATE_CEILING,
+  );
+  const scopedDocumentIds = filterUuids(documentIds);
+  log?.info("retrieval.semantic.start", {
+    userId,
+    limit,
+    candidateLimit,
+    documentCount: scopedDocumentIds.length,
+    questionLength: question.length,
+  });
   const queryEmbedding = await embedText(question, log);
-  const candidates = await matchUserChunks(userId, queryEmbedding, candidateLimit, log);
+  const candidates = await matchUserChunks(userId, queryEmbedding, candidateLimit, log, {
+    documentIds: scopedDocumentIds,
+  });
   const context = await expandContextWithNeighbors(userId, candidates.slice(0, limit), Math.min(limit + 4, MAX_CONTEXT_CHUNKS), log);
   log?.info("retrieval.semantic.complete", {
     userId,
@@ -228,7 +298,7 @@ export async function retrieveKeywordContext(
   if (!terms.length) return [];
 
   const startedAt = Date.now();
-  const uniqueDocumentIds = [...new Set(documentIds.map((id) => id.trim()).filter(Boolean))].slice(0, 8);
+  const uniqueDocumentIds = filterUuids(documentIds).slice(0, 8);
   const orFilter = terms.map((term) => `text_content.ilike.%${term}%`).join(",");
   log?.info("retrieval.keyword.start", {
     userId,
@@ -255,11 +325,12 @@ export async function retrieveKeywordContext(
     return [];
   }
 
+  const lowerTerms = terms.map((term) => term.toLocaleLowerCase());
   const scored = ((data ?? []) as DocumentChunkRow[])
     .map((chunk) => {
       const lowerText = chunk.text_content.toLocaleLowerCase();
-      const matchCount = terms.reduce((count, term) => count + (lowerText.includes(term.toLocaleLowerCase()) ? 1 : 0), 0);
-      return rowToContext(chunk, Math.min(0.9, 0.62 + matchCount * 0.06));
+      const matchCount = lowerTerms.reduce((count, term) => count + (lowerText.includes(term) ? 1 : 0), 0);
+      return rowToContext(chunk, keywordScore(matchCount, lowerTerms.length));
     })
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
@@ -320,8 +391,7 @@ export async function expandContextWithNeighbors(
     const nearestSeed = seeds
       .filter((chunk) => chunk.document_id === row.document_id)
       .sort((a, b) => Math.abs(a.chunk_index - row.chunk_index) - Math.abs(b.chunk_index - row.chunk_index))[0];
-    const score = seedScore ?? Math.max(0.5, (nearestSeed?.score ?? 0.55) - 0.04);
-    byKey.set(`${row.document_id}:${row.id}`, rowToContext(row, score));
+    byKey.set(`${row.document_id}:${row.id}`, rowToContext(row, seedScore ?? neighborScore(nearestSeed?.score)));
   });
 
   seeds.forEach((chunk) => byKey.set(`${chunk.document_id}:${chunk.chunk_id}`, chunk));
@@ -344,29 +414,28 @@ export async function retrieveContextFromDocumentIds(
   limit = DEFAULT_TOP_K,
   log?: RequestLogger,
 ): Promise<RetrievedContext[]> {
-  const uniqueDocumentIds = new Set(documentIds.map((id) => id.trim()).filter(Boolean));
-  if (!uniqueDocumentIds.size) return [];
+  const uniqueDocumentIds = filterUuids(documentIds);
+  if (!uniqueDocumentIds.length) return [];
 
-  const broadLimit = Math.min(Math.max(limit * 6, 20), 40);
   log?.info("retrieval.semantic_documents.start", {
     userId,
-    documentCount: uniqueDocumentIds.size,
+    documentCount: uniqueDocumentIds.length,
     limit,
-    broadLimit,
     questionLength: question.length,
   });
 
-  const semanticContext = await retrieveContext(question, userId, broadLimit, log);
-  const keywordContext = await retrieveKeywordContext(question, userId, limit, log, [...uniqueDocumentIds]);
-  const context = mergeRetrievedContext(semanticContext, keywordContext);
-  const filtered = context
-    .filter((chunk) => uniqueDocumentIds.has(chunk.document_id))
-    .slice(0, limit);
-  const relevant = filterRelevantContext(filtered, log);
+  // Both searches are scoped to the requested documents in the database, so the
+  // whole `limit` budget is spent on rows that can actually be returned.
+  const [semanticContext, keywordContext] = await Promise.all([
+    retrieveContext(question, userId, limit, log, uniqueDocumentIds),
+    retrieveKeywordContext(question, userId, limit, log, uniqueDocumentIds),
+  ]);
+  const context = mergeRetrievedContext(semanticContext, keywordContext).slice(0, limit);
+  const relevant = filterRelevantContext(context, log);
 
   log?.info("retrieval.semantic_documents.complete", {
     userId,
-    documentCount: uniqueDocumentIds.size,
+    documentCount: uniqueDocumentIds.length,
     beforeCount: context.length,
     afterCount: relevant.length,
   });
@@ -379,8 +448,7 @@ export async function retrieveDemoContext(
   limit = DEFAULT_TOP_K,
   log?: RequestLogger,
 ): Promise<RetrievedContext[]> {
-  const dummyUserId = "00000000-0000-0000-0000-000000000000";
-  return retrieveContext(question, dummyUserId, limit, log);
+  return retrieveContext(question, DEMO_USER_ID, limit, log);
 }
 
 export async function retrieveDemoKeywordContext(
@@ -388,8 +456,7 @@ export async function retrieveDemoKeywordContext(
   limit = DEFAULT_TOP_K,
   log?: RequestLogger,
 ): Promise<RetrievedContext[]> {
-  const dummyUserId = "00000000-0000-0000-0000-000000000000";
-  return retrieveKeywordContext(question, dummyUserId, limit, log);
+  return retrieveKeywordContext(question, DEMO_USER_ID, limit, log);
 }
 
 export async function retrieveDemoRepresentativeDocumentContext(
@@ -397,13 +464,11 @@ export async function retrieveDemoRepresentativeDocumentContext(
   question?: string,
   log?: RequestLogger,
 ): Promise<RetrievedContext[]> {
-  const dummyUserId = "00000000-0000-0000-0000-000000000000";
-  return retrieveRepresentativeDocumentContext(dummyUserId, limit, question, log);
+  return retrieveRepresentativeDocumentContext(DEMO_USER_ID, limit, question, log);
 }
 
 export async function demoHasIndexedDocuments(log?: RequestLogger): Promise<boolean> {
-  const dummyUserId = "00000000-0000-0000-0000-000000000000";
-  return hasIndexedDocuments(dummyUserId, log);
+  return hasIndexedDocuments(DEMO_USER_ID, log);
 }
 
 export function isDocumentSummaryRequest(question: string) {
@@ -421,7 +486,7 @@ export async function hasIndexedDocuments(userId: string, log?: RequestLogger) {
   const { data, error } = await supabase
     .from("documents")
     .select("id")
-    .or(`user_id.eq.${userId},source_scope.eq.knowledge_base`)
+    .or(accessibleDocumentFilter(userId))
     .eq("processing_status", "indexed")
     .limit(1);
 
@@ -447,7 +512,7 @@ export async function retrieveDocumentContextByIds(
     return [];
   }
 
-  const uniqueDocumentIds = [...new Set(documentIds.map((id) => id.trim()).filter(Boolean))].slice(0, 4);
+  const uniqueDocumentIds = filterUuids(documentIds).slice(0, 4);
   if (!uniqueDocumentIds.length) {
     log?.warn("retrieval.documents.empty_ids", { errorCategory: "retrieval", userId, limit });
     return [];
@@ -459,7 +524,7 @@ export async function retrieveDocumentContextByIds(
   const { data: documents, error: documentsError } = await supabase
     .from("documents")
     .select("id, filename, source_scope")
-    .or(`user_id.eq.${userId},source_scope.eq.knowledge_base`)
+    .or(accessibleDocumentFilter(userId))
     .eq("processing_status", "indexed")
     .in("id", uniqueDocumentIds);
 
@@ -474,19 +539,7 @@ export async function retrieveDocumentContextByIds(
   }
 
   const ownedDocumentIds = ((documents ?? []) as IndexedDocumentRow[]).map((document) => document.id);
-  const { data, error } = await supabase
-    .from("chunks")
-    .select("id, document_id, text_content, chunk_index, documents!inner(filename, source_scope)")
-    .in("document_id", ownedDocumentIds)
-    .order("chunk_index", { ascending: true })
-    .limit(Math.min(Math.max(limit, 1), 20));
-
-  if (error) {
-    log?.error("retrieval.documents.chunks_failed", { errorCategory: "supabase_query", userId, limit, error });
-    return [];
-  }
-
-  const context = ((data ?? []) as DocumentChunkRow[]).map((chunk) => rowToContext(chunk, 1));
+  const context = await fetchLeadingChunksPerDocument(ownedDocumentIds, limit, "retrieval.documents", userId, log);
 
   log?.info("retrieval.documents.complete", {
     userId,
@@ -496,6 +549,58 @@ export async function retrieveDocumentContextByIds(
   });
 
   return context;
+}
+
+/**
+ * Reads the opening chunks of each document, giving every document its own share
+ * of the budget. A single `.limit()` across all documents would spend the whole
+ * budget on whichever document PostgREST happened to return first, so asking
+ * about four files could yield chunks from only one.
+ */
+async function fetchLeadingChunksPerDocument(
+  documentIds: string[],
+  limit: number,
+  logPrefix: string,
+  userId: string,
+  log?: RequestLogger,
+): Promise<RetrievedContext[]> {
+  const supabase = getSupabaseServiceClient();
+  if (!supabase || !documentIds.length) return [];
+
+  const totalBudget = Math.min(Math.max(limit, 1), MAX_CONTEXT_CHUNKS);
+  const perDocument = Math.min(
+    Math.max(Math.ceil(totalBudget / documentIds.length), 1),
+    PER_DOCUMENT_CHUNK_LIMIT,
+  );
+
+  const groups = await Promise.all(documentIds.map(async (documentId) => {
+    const { data, error } = await supabase
+      .from("chunks")
+      .select("id, document_id, text_content, chunk_index, documents!inner(filename, source_scope)")
+      .eq("document_id", documentId)
+      .order("chunk_index", { ascending: true })
+      .limit(perDocument);
+
+    if (error) {
+      log?.error(`${logPrefix}.chunks_failed`, { errorCategory: "supabase_query", userId, documentId, error });
+      return [] as RetrievedContext[];
+    }
+
+    return ((data ?? []) as DocumentChunkRow[]).map((chunk) => rowToContext(chunk, DOCUMENT_OVERVIEW_SCORE));
+  }));
+
+  // Round-robin across documents so truncating to the budget still leaves every
+  // document represented.
+  const interleaved: RetrievedContext[] = [];
+  const deepest = Math.max(...groups.map((group) => group.length), 0);
+  for (let position = 0; position < deepest; position += 1) {
+    for (const group of groups) {
+      const chunk = group[position];
+      if (chunk) interleaved.push(chunk);
+    }
+  }
+
+  return interleaved.slice(0, totalBudget);
 }
 
 export async function retrieveRepresentativeDocumentContext(
@@ -516,7 +621,7 @@ export async function retrieveRepresentativeDocumentContext(
   const { data: documents, error: documentsError } = await supabase
     .from("documents")
     .select("id, filename, source_scope")
-    .or(`user_id.eq.${userId},source_scope.eq.knowledge_base`)
+    .or(accessibleDocumentFilter(userId))
     .eq("processing_status", "indexed")
     .order("created_at", { ascending: false })
     .limit(12);
@@ -551,19 +656,13 @@ export async function retrieveRepresentativeDocumentContext(
   }
 
   const documentIds = selectedDocuments.map((document) => document.id);
-  const { data, error } = await supabase
-    .from("chunks")
-    .select("id, document_id, text_content, chunk_index, documents!inner(filename, source_scope)")
-    .in("document_id", documentIds)
-    .order("chunk_index", { ascending: true })
-    .limit(Math.min(Math.max(limit, 1), 12));
-
-  if (error) {
-    log?.error("retrieval.representative.chunks_failed", { errorCategory: "supabase_query", userId, limit, error });
-    return [];
-  }
-
-  const context = ((data ?? []) as RepresentativeChunkRow[]).map((chunk) => rowToContext(chunk, 1));
+  const context = await fetchLeadingChunksPerDocument(
+    documentIds,
+    limit,
+    "retrieval.representative",
+    userId,
+    log,
+  );
 
   log?.info("retrieval.representative.complete", {
     userId,
