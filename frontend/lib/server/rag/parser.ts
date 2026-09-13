@@ -1,5 +1,8 @@
+import { pathToFileURL } from "node:url";
 import JSZip from "jszip";
 import mammoth from "mammoth";
+
+import { extractScannedPdfText, isScannedPdfText } from "./ocr";
 
 function decodeXmlText(value: string): string {
   return value
@@ -14,18 +17,25 @@ async function extractPdfText(buffer: Buffer): Promise<string> {
   const worker = await import("pdf-parse/worker");
   const { PDFParse } = await import("pdf-parse");
 
-  PDFParse.setWorker(worker.getPath());
+  PDFParse.setWorker(pathToFileURL(worker.getPath()).href);
 
   const parser = new PDFParse({
     data: buffer,
     CanvasFactory: worker.CanvasFactory,
   });
+  let text = "";
   try {
     const result = await parser.getText();
-    return result.text;
+    text = result.text ?? "";
   } finally {
     await parser.destroy();
   }
+
+  if (isScannedPdfText(text)) {
+    return extractScannedPdfText(buffer);
+  }
+
+  return text;
 }
 
 async function extractDocxText(buffer: Buffer): Promise<string> {
@@ -39,15 +49,20 @@ async function extractPptxText(buffer: Buffer): Promise<string> {
     .filter((file) => /^ppt\/slides\/slide\d+\.xml$/.test(file.name))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
 
-  const slides = await Promise.all(
-    slideFiles.map(async (file) => {
-      const xml = await file.async("string");
-      const matches = [...xml.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)];
-      return matches.map((match) => decodeXmlText(match[1])).join(" ");
-    }),
-  );
+  // Limit processing to 250 slides to prevent zip bomb resource exhaustion
+  const targetSlides = slideFiles.slice(0, 250);
+  const slides: string[] = [];
 
-  return slides.filter(Boolean).join("\n\n");
+  for (const file of targetSlides) {
+    const xml = await file.async("string");
+    // Cap individual slide XML to 2MB to prevent decompression memory spikes
+    if (xml.length > 2_000_000) continue;
+    const matches = [...xml.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)];
+    const text = matches.map((match) => decodeXmlText(match[1])).join(" ").trim();
+    if (text) slides.push(text);
+  }
+
+  return slides.join("\n\n");
 }
 
 export async function extractTextFromBuffer(

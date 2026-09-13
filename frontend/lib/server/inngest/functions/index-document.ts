@@ -100,7 +100,7 @@ export const indexDocument = inngest.createFunction(
           // do rather than describe the pipeline.
           if (fileType === "application/pdf") {
             throw new Error(
-              "This PDF has no selectable text, which usually means it is a scan. Upload a text-based PDF, or run OCR on the scan first.",
+              "No text could be extracted from this PDF even after OCR. Please check that the document is legible.",
             );
           }
           throw new Error("No text could be extracted from this file");
@@ -112,7 +112,7 @@ export const indexDocument = inngest.createFunction(
           const withoutPageMarkers = extracted.replace(/--\s*\d+\s+of\s+\d+\s*--/gi, "").trim();
           if (!withoutPageMarkers) {
             throw new Error(
-              "This PDF has no selectable text, which usually means it is a scan. Upload a text-based PDF, or run OCR on the scan first.",
+              "No text could be extracted from this PDF even after OCR. Please check that the document is legible.",
             );
           }
         }
