@@ -38,20 +38,21 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/**
- * Filenames are matched on a word boundary so that `notes.pdf` is not reported
- * as cited by an answer that merely mentions `lecture-notes.pdf`.
- */
+// `-` and `_` are filename-internal connectors, not boundaries: an answer that
+// cites `lecture-notes.pdf` has not cited `notes.pdf`, and `notes` has not
+// cited `notes-v2`.
+const NOT_BOUNDARY = "[\\p{L}\\p{N}_-]";
+
 function mentionsFilename(answer: string, filename: string) {
   const trimmed = filename.trim();
   if (!trimmed) return false;
-  if (new RegExp(`(^|[^\\p{L}\\p{N}])${escapeRegExp(trimmed)}`, "iu").test(answer)) return true;
+  if (new RegExp(`(?<!${NOT_BOUNDARY})${escapeRegExp(trimmed)}(?![\\p{L}\\p{N}])`, "iu").test(answer)) return true;
 
   // Models routinely cite `[Chapter 3]` for `Chapter 3.pdf`, so the extension is
   // optional. Short stems are skipped because they collide with ordinary prose.
   const stem = trimmed.replace(/\.[^.]+$/, "").trim();
   if (stem.length < 4 || stem === trimmed) return false;
-  return new RegExp(`(^|[^\\p{L}\\p{N}])${escapeRegExp(stem)}([^\\p{L}\\p{N}]|$)`, "iu").test(answer);
+  return new RegExp(`(?<!${NOT_BOUNDARY})${escapeRegExp(stem)}(?!${NOT_BOUNDARY})`, "iu").test(answer);
 }
 
 /**
