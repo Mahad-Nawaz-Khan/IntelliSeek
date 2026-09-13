@@ -4,9 +4,7 @@ import {
   ArrowLeft,
   Eye,
   EyeOff,
-  GraduationCap,
   Moon,
-  Sparkles,
   Sun,
 } from "lucide-react";
 import Image from "next/image";

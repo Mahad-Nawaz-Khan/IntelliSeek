@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, BookOpen, FileText, GraduationCap, Quote, Search, UploadCloud } from "lucide-react";
+import { ArrowRight, BookOpen, FileText, Quote, Search, UploadCloud } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";

@@ -1,12 +1,13 @@
 "use client";
 
-import { BookOpen, GraduationCap, Library, LogOut, Menu, MessageSquarePlus, Settings, UserCircle, X } from "lucide-react";
+import { BookOpen, Library, LogOut, Menu, MessageSquarePlus, Settings, UserCircle, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { useAuth } from "../../context/AuthContext";
 import type { ChatSession, KnowledgeSourceGroup } from "../../lib/ui-state";
 import { PrimaryButton } from "../ui/PrimaryButton";
+import { BrandMark } from "../ui/BrandMark";
 import { RecentChats } from "./RecentChats";
 import { SourceGroups } from "./SourceGroups";
 
@@ -114,9 +115,7 @@ export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId
     <aside className="scrollbar-hidden flex h-full w-full flex-col gap-3 overflow-y-auto bg-slate-950/75 px-3 py-4 backdrop-blur-xl lg:w-58 lg:shrink-0">
       <div className="flex items-start justify-between gap-2 px-1 py-1">
         <Link href="/chat" className="flex min-w-0 items-center gap-2.5">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-cyan-300 text-slate-950 hover:cursor-pointer">
-            <GraduationCap className="h-4.5 w-4.5" />
-          </span>
+          <BrandMark />
           <span className="min-w-0">
             <span className="block text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-cyan-100">IntelliSeek</span>
             <span className="block truncate text-sm font-semibold text-white">Academic AI</span>
