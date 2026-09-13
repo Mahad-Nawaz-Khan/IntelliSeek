@@ -34,9 +34,15 @@ export async function proxy(request: NextRequest) {
     },
   });
 
-  const { data } = await supabase.auth.getUser();
+  // `getUser()` verified the JWT with a round-trip to the Auth server on every
+  // navigation. `getClaims()` verifies the signature locally against the
+  // project's cached JWKS and only falls back to the network when the key is
+  // unknown or the project still signs with a legacy symmetric secret. This
+  // check is a redirect convenience; route handlers and layouts re-verify the
+  // session server-side.
+  const { data } = await supabase.auth.getClaims();
 
-  if (!data.user && isProtected) return redirectToSignIn(request);
+  if (!data?.claims && isProtected) return redirectToSignIn(request);
 
   return response;
 }
