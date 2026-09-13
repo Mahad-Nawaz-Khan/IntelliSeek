@@ -60,33 +60,10 @@ begin
   end if;
 end $$;
 
-insert into public.chat_sessions (id, user_id, title, title_status, created_at, updated_at)
-select
-  gen_random_uuid(),
-  chat_history.user_id,
-  left(regexp_replace(chat_history.question, '\s+', ' ', 'g'), 80),
-  'fallback',
-  chat_history.created_at,
-  chat_history.created_at
-from public.chat_history
-where chat_history.chat_session_id is null
-  and chat_history.user_id is not null;
-
-update public.chat_history
-set chat_session_id = legacy_sessions.id
-from (
-  select distinct on (chat_history.id)
-    chat_history.id as history_id,
-    chat_sessions.id
-  from public.chat_history
-  join public.chat_sessions
-    on chat_sessions.user_id = chat_history.user_id
-   and chat_sessions.created_at = chat_history.created_at
-   and chat_sessions.title = left(regexp_replace(chat_history.question, '\s+', ' ', 'g'), 80)
-  where chat_history.chat_session_id is null
-  order by chat_history.id, chat_sessions.id
-) as legacy_sessions
-where chat_history.id = legacy_sessions.history_id;
+-- Databases created before chat sessions existed still need the one-time
+-- backfill of chat_session_id; it lives in
+-- migrations/001-legacy-chat-session-backfill.sql because re-running a data
+-- backfill inside this schema file risks a second session per history row.
 
 create table if not exists public.document_topics (
   id uuid primary key default gen_random_uuid(),
@@ -100,6 +77,9 @@ create table if not exists public.document_topics (
   unique (document_id, topic)
 );
 
+-- documents.user_id deliberately carries no foreign key: the fixed demo user
+-- may not exist in auth.users, and an FK would reject its uploads. The drop
+-- keeps an older deployment's key from coming back on re-run.
 alter table public.documents drop constraint if exists documents_user_id_fkey;
 alter table public.documents add column if not exists source_scope text not null default 'personal';
 alter table public.documents add column if not exists processing_status text not null default 'uploaded';
@@ -342,8 +322,6 @@ create policy "document_topics_delete_own_document"
         and documents.user_id = auth.uid()
     )
   );
-
-drop policy if exists "chat_history_select_own" on public.chat_history;
 
 drop policy if exists "chat_sessions_select_own" on public.chat_sessions;
 create policy "chat_sessions_select_own"
