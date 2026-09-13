@@ -214,6 +214,7 @@ export async function POST(request: Request) {
     key: `parse:${user.id}:${getClientIp(request)}`,
     limit: 10,
     windowMs: 60 * 60 * 1000,
+    log,
   });
   if (!rateLimit.allowed) {
     log.warn("rate_limit.exceeded", { errorCategory: "rate_limit", userId: user.id });

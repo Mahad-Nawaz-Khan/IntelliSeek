@@ -320,6 +320,7 @@ export async function POST(request: Request) {
     key: `chat:${user.id}:${getClientIp(request)}`,
     limit: 20,
     windowMs: 60 * 1000,
+    log,
   });
   if (!rateLimit.allowed) {
     log.warn("rate_limit.exceeded", { errorCategory: "rate_limit", userId: user.id });

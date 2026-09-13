@@ -29,9 +29,18 @@ npm run dev
 - `OPENROUTER_BASE_URL` — OpenRouter base URL
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` — Supabase client
 - `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` — optional Upstash rate-limiter
+- `RATE_LIMIT_TRUSTED_PROXY_HOPS` — proxies in front of the app (default `1`)
 - `INNGEST_CLIENT_KEY` / `INNGEST_CLIENT_SECRET` — optional Inngest config
 
-If Upstash variables are missing the app falls back to an in-memory rate limiter for local development.
+If Upstash variables are missing the app falls back to an in-memory rate limiter. It is
+per-instance and reset by every cold start, so treat it as a best-effort bound rather than
+an enforced limit; the same fallback is used when an Upstash request fails, which is logged
+as `rate_limit.upstash_failed`.
+
+`RATE_LIMIT_TRUSTED_PROXY_HOPS` controls how far from the right of `x-forwarded-for` the
+client address is read. The default of `1` is correct for Vercel, and for Cloudflare in
+front of Vercel. Raising it past your actual proxy count lets a caller forge a fresh
+rate-limit bucket per request.
 
 Key code mappings
 -----------------

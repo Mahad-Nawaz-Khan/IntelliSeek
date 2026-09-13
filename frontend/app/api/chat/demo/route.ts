@@ -77,6 +77,7 @@ export async function POST(request: Request) {
     key: `demo-chat:${getClientIp(request)}`,
     limit: 5,
     windowMs: 5 * 60 * 1000,
+    log,
   });
   if (!rateLimit.allowed) {
     log.warn("demo.rate_limit.exceeded", { errorCategory: "rate_limit" });

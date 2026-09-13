@@ -11,7 +11,21 @@ UPSTASH_REDIS_REST_URL="https://...upstash.io"
 UPSTASH_REDIS_REST_TOKEN="..."
 ```
 
-When these variables are missing, the app falls back to an in-memory limiter for local development.
+When these variables are missing, the app falls back to an in-memory limiter. That
+limiter is per-instance and forgotten on every cold start, so it is only a
+best-effort bound — set the Upstash variables for any deployment where the limit
+needs to actually hold.
+
+```bash
+# Proxies between the internet and this app. Defaults to 1, which is correct for
+# Vercel and for Cloudflare in front of Vercel.
+RATE_LIMIT_TRUSTED_PROXY_HOPS="1"
+```
+
+`x-forwarded-for` is appendable by the client, so the chain is read from the
+right (the nearest proxy) rather than the left. Setting this too high lets a
+caller forge its own rate-limit bucket; too low buckets every user behind your
+own proxy together.
 
 First, run the development server:
 
