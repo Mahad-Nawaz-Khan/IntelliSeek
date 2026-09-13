@@ -197,64 +197,84 @@ export async function extractScannedPdfText(
     return "";
   }
 
-  log?.info("ocr.pipeline.pages_detected", { totalPages });
+const OCR_BATCH_SIZE = 25;
+
+  log?.info("ocr.pipeline.pages_detected", { totalPages, batchSize: OCR_BATCH_SIZE });
 
   const pageTexts: string[] = [];
 
   try {
-    for (let pageNumber = 1; pageNumber <= totalPages; pageNumber++) {
-      // 1. Render ONLY this single page in memory
-      let pageBuffer: Buffer | null = null;
+    for (let startPage = 1; startPage <= totalPages; startPage += OCR_BATCH_SIZE) {
+      const endPage = Math.min(startPage + OCR_BATCH_SIZE - 1, totalPages);
+      const batchPages: number[] = [];
+      for (let p = startPage; p <= endPage; p++) {
+        batchPages.push(p);
+      }
+
+      log?.info("ocr.pipeline.batch_start", { startPage, endPage, count: batchPages.length });
+
+      let screenshot: Awaited<ReturnType<InstanceType<typeof PDFParseType>["getScreenshot"]>> | null = null;
       try {
-        const screenshot = await parser.getScreenshot({
-          partial: [pageNumber],
+        screenshot = await parser.getScreenshot({
+          partial: batchPages,
           imageBuffer: true,
           scale: 2.0, // High resolution for sharp OCR
         });
-        const rawData = screenshot.pages?.[0]?.data;
-        if (rawData && rawData.length > 0) {
-          pageBuffer = Buffer.from(rawData);
-        }
       } catch (renderError) {
-        log?.error("ocr.page_render.failed", {
-          pageNumber,
+        log?.error("ocr.batch_render.failed", {
+          startPage,
+          endPage,
           error: renderError instanceof Error ? renderError.message : String(renderError),
         });
       }
 
-      if (!pageBuffer) continue;
+      if (!screenshot?.pages?.length) continue;
 
-      // 2. Try Groq Vision first for this page
-      let pageText = await ocrWithGroqVision(pageBuffer, pageNumber, log);
+      // 1. Concurrently transcribe the batch via Groq Vision
+      const groqResults = await Promise.all(
+        screenshot.pages.map(async (page) => {
+          if (!page.data || page.data.length === 0) {
+            return { pageNumber: page.pageNumber, buffer: null, text: null };
+          }
+          const pageBuffer = Buffer.from(page.data);
+          const text = await ocrWithGroqVision(pageBuffer, page.pageNumber, log);
+          return { pageNumber: page.pageNumber, buffer: pageBuffer, text };
+        }),
+      );
 
-      // 3. If Groq Vision fails or is unavailable, fall back to Tesseract
-      if (!pageText) {
-        log?.info("ocr.pipeline.falling_back_to_tesseract", { pageNumber });
-        if (!sharedTesseractWorker) {
-          const { createWorker } = await import("tesseract.js");
-          sharedTesseractWorker = await createWorker("eng");
+      // 2. For any pages in the batch where Groq Vision failed or returned empty, run Tesseract fallback
+      for (const item of groqResults) {
+        if (!item.buffer) continue;
+        let pageText = item.text;
+
+        if (!pageText) {
+          log?.info("ocr.pipeline.falling_back_to_tesseract", { pageNumber: item.pageNumber });
+          if (!sharedTesseractWorker) {
+            const { createWorker } = await import("tesseract.js");
+            sharedTesseractWorker = await createWorker("eng");
+          }
+
+          try {
+            const result = await sharedTesseractWorker.recognize(item.buffer);
+            const tesseractText = (result.data?.text ?? "").trim();
+            pageText = tesseractText;
+            log?.info("ocr.tesseract.success", { pageNumber: item.pageNumber, textLength: pageText.length });
+          } catch (tessError) {
+            log?.error("ocr.tesseract.failed", {
+              pageNumber: item.pageNumber,
+              error: tessError instanceof Error ? tessError.message : String(tessError),
+            });
+            pageText = "";
+          }
         }
 
-        try {
-          const result = await sharedTesseractWorker.recognize(pageBuffer);
-          const tesseractText = (result.data?.text ?? "").trim();
-          pageText = tesseractText;
-          log?.info("ocr.tesseract.success", { pageNumber, textLength: tesseractText.length });
-        } catch (tessError) {
-          log?.error("ocr.tesseract.failed", {
-            pageNumber,
-            error: tessError instanceof Error ? tessError.message : String(tessError),
-          });
-          pageText = "";
+        if (pageText) {
+          pageTexts.push(pageText);
         }
       }
 
-      if (pageText) {
-        pageTexts.push(pageText);
-      }
-
-      // Explicitly dereference the buffer so memory is immediately reclaimed by GC
-      pageBuffer = null;
+      // Explicitly dereference screenshot so the ~200MB of image buffers for this batch are freed before the next batch
+      screenshot = null;
     }
   } finally {
     if (parser) {
