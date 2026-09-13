@@ -1,3 +1,4 @@
+import { NonRetriableError } from "inngest";
 import { BUCKET_NAME } from "../../../upload-config";
 import { chunkText } from "../../rag/chunker";
 import { EMBEDDING_DIMENSION, embedTexts } from "../../rag/embeddings";
@@ -15,6 +16,7 @@ function toVectorLiteral(embedding: number[]) {
 }
 
 function safeErrorMessage(error: unknown) {
+  if (typeof error === "string") return error.slice(0, 500);
   return error instanceof Error ? error.message.slice(0, 500) : "Document indexing failed";
 }
 
@@ -40,7 +42,19 @@ async function markDocumentFailed(documentId: string, error: unknown, log?: Requ
 }
 
 export const indexDocument = inngest.createFunction(
-  { id: "index-document", triggers: [{ event: "document/index.requested" }] },
+  {
+    id: "index-document",
+    triggers: [{ event: "document/index.requested" }],
+    retries: 2,
+    onFailure: async ({ event, error }) => {
+      const originalEvent = (event.data as { event?: { data?: { documentId?: string } } })?.event;
+      const documentId = originalEvent?.data?.documentId;
+      if (documentId) {
+        const log = createRequestLogger("inngest.index-document.onFailure", `idx_${documentId}`);
+        await markDocumentFailed(documentId, error, log);
+      }
+    },
+  },
   async ({ event, step }) => {
     const { userId, documentId, storagePath, filename, fileType } = event.data;
     const log = createRequestLogger("inngest.index-document", `idx_${documentId}`);
@@ -60,7 +74,9 @@ export const indexDocument = inngest.createFunction(
           .eq("user_id", userId)
           .single();
 
-        if (error || !data) throw new Error("Document not found");
+        if (error || !data) {
+          throw new NonRetriableError("Document not found");
+        }
         log.info("indexing.load_document.complete", { userId, documentId, processingStatus: data.processing_status });
         return data as { id: string; user_id: string; processing_status: string };
       });
@@ -82,7 +98,23 @@ export const indexDocument = inngest.createFunction(
 
       const extracted = await step.run("Parse document", async () => {
         const { data, error } = await supabase.storage.from(BUCKET_NAME).download(storagePath);
-        if (error || !data) throw new Error(error?.message ?? "Stored file not found");
+        if (error || !data) {
+          const rawMessage = error?.message ?? "Stored file not found";
+          const isNotFound =
+            rawMessage.toLowerCase().includes("not found") ||
+            (error as { statusCode?: string })?.statusCode === "404";
+
+          const userFacingError = isNotFound
+            ? "Uploaded file was not found in storage. Please upload the document again."
+            : `Storage download failed: ${rawMessage}`;
+
+          await markDocumentFailed(documentId, userFacingError, log);
+
+          if (isNotFound) {
+            throw new NonRetriableError(userFacingError);
+          }
+          throw new Error(userFacingError);
+        }
         log.info("indexing.storage_download.complete", { userId, documentId });
         const text = await extractTextFromBuffer(await data.arrayBuffer(), filename, fileType);
         log.info("indexing.parse.complete", { userId, documentId, textLength: text.length });
@@ -94,32 +126,23 @@ export const indexDocument = inngest.createFunction(
         // returns one vector per input, so filtering after embedding would shift
         // vectors onto the wrong chunks.
         const parsedChunks = chunkText(extracted).map((chunk) => chunk.trim()).filter(Boolean);
-        if (!parsedChunks.length) {
-          // This message becomes `processing_error`, which the upload toast and
-          // the sources panel show verbatim, so it has to tell the user what to
-          // do rather than describe the pipeline.
-          if (fileType === "application/pdf") {
-            throw new Error(
-              "No text could be extracted from this PDF even after OCR. Please check that the document is legible.",
-            );
-          }
-          throw new Error("No text could be extracted from this file");
+        const withoutPageMarkers =
+          fileType === "application/pdf"
+            ? extracted.replace(/--\s*\d+\s+of\s+\d+\s*--/gi, "").trim()
+            : extracted.trim();
+
+        if (!parsedChunks.length || (fileType === "application/pdf" && !withoutPageMarkers)) {
+          const errorMsg =
+            fileType === "application/pdf"
+              ? "No text could be extracted from this PDF even after OCR. Please check that the document is legible."
+              : "No text could be extracted from this file";
+          await markDocumentFailed(documentId, errorMsg, log);
+          throw new NonRetriableError(errorMsg);
         }
-        // Scanned PDFs often produce only page separator markers from pdf-parse
-        // (e.g. "-- 1 of 11 --\n-- 2 of 11 --\n...") with no real content.
-        // Detect this by stripping the markers and checking if anything remains.
-        if (fileType === "application/pdf") {
-          const withoutPageMarkers = extracted.replace(/--\s*\d+\s+of\s+\d+\s*--/gi, "").trim();
-          if (!withoutPageMarkers) {
-            throw new Error(
-              "No text could be extracted from this PDF even after OCR. Please check that the document is legible.",
-            );
-          }
-        }
+
         log.info("indexing.chunk.complete", { userId, documentId, textLength: extracted.length, chunkCount: parsedChunks.length });
         return parsedChunks;
       });
-
 
       const embeddings = await step.run("Generate embeddings", async () => {
         const generated = await embedTexts(chunks, log);
@@ -131,7 +154,9 @@ export const indexDocument = inngest.createFunction(
             chunkCount: chunks.length,
             embeddingCount: generated.length,
           });
-          throw new Error("Embedding count does not match chunk count");
+          const errorMsg = "Embedding count does not match chunk count";
+          await markDocumentFailed(documentId, errorMsg, log);
+          throw new NonRetriableError(errorMsg);
         }
         log.info("indexing.embeddings.complete", { userId, documentId, chunkCount: chunks.length, embeddingCount: generated.length });
         return generated;

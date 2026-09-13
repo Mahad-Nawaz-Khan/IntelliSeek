@@ -39,7 +39,35 @@ export async function GET(request: Request) {
     return Response.json({ ok: false, error: "Document status lookup failed" }, { status: 500 });
   }
 
-  return Response.json({ ok: true, documents: data ?? [] }, { headers: rateLimitHeaders(rateLimit) });
+  const STALE_INDEXING_THRESHOLD_MS = 15 * 60 * 1000;
+  const now = Date.now();
+  const staleDocIds: string[] = [];
+
+  const documents = (data ?? []).map((doc) => {
+    const isPending = doc.processing_status === "processing" || doc.processing_status === "queued";
+    const ageMs = now - new Date(doc.created_at).getTime();
+    if (isPending && ageMs > STALE_INDEXING_THRESHOLD_MS) {
+      staleDocIds.push(doc.id);
+      return {
+        ...doc,
+        processing_status: "failed",
+        processing_error: doc.processing_error || "Indexing timed out. Please delete and re-upload the document.",
+      };
+    }
+    return doc;
+  });
+
+  if (staleDocIds.length > 0) {
+    void supabase
+      .from("documents")
+      .update({
+        processing_status: "failed",
+        processing_error: "Indexing timed out. Please delete and re-upload the document.",
+      })
+      .in("id", staleDocIds);
+  }
+
+  return Response.json({ ok: true, documents }, { headers: rateLimitHeaders(rateLimit) });
 }
 
 export async function DELETE(request: Request) {
