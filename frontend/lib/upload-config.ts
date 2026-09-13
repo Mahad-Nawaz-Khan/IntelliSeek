@@ -20,10 +20,6 @@ export function getStorageUploadErrorMessage(message: string) {
     : message;
 }
 
-export function getAllowedMimeSet(): Set<string> {
-  return new Set(Object.values(ALLOWED_MIME_TYPES));
-}
-
 export function getExtension(filename: string): string {
   const dot = filename.lastIndexOf(".");
   if (dot === -1) return "";

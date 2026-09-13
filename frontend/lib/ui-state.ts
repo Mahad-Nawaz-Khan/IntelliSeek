@@ -1,12 +1,3 @@
-export type NavigationItem = {
-  id: string;
-  label: string;
-  href?: string;
-  icon?: string;
-  status: "active" | "inactive" | "disabled";
-  count?: number;
-};
-
 export type KnowledgeSource = {
   id: string;
   filename: string;
@@ -50,21 +41,6 @@ export type UploadItem = {
   errorMessage?: string;
 };
 
-export type RetrievalMatch = {
-  id: string;
-  sourceId: string;
-  filename: string;
-  locator?: string;
-  snippet?: string;
-  scoreLabel?: string;
-};
-
-export type RetrievalStatus = {
-  state: "idle" | "analyzing" | "retrieving" | "answering" | "complete" | "error";
-  message: string;
-  matches?: RetrievalMatch[];
-};
-
 export function getFileType(filename: string): KnowledgeSource["fileType"] {
   const extension = filename.split(".").pop()?.toLowerCase();
   if (extension === "pdf" || extension === "docx" || extension === "pptx" || extension === "txt" || extension === "md") {
@@ -91,20 +67,4 @@ export function createSourceGroups(uploadedSources: KnowledgeSource[]): Knowledg
       sources: personalSources,
     },
   ];
-}
-
-export function createRecentChats(messages: { id: string; role: string; content: string; createdAt: number }[]): ChatSession[] {
-  return messages
-    .filter((message) => message.role === "user")
-    .slice(-5)
-    .reverse()
-    .map((message) => ({
-      id: message.id,
-      title: message.content,
-      lastMessageAt: new Date(message.createdAt).toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
-      status: "inactive" as const,
-    }));
 }

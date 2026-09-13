@@ -112,51 +112,6 @@ function isSourceCitationArray(value: unknown): value is SourceCitation[] {
   return Array.isArray(value);
 }
 
-export async function submitChatQuestion(question: string, options: ChatRequestOptions = {}): Promise<ChatResponse> {
-  const trimmedQuestion = requireQuestion(question);
-
-  try {
-    const payload: ChatRequest = {
-      question: trimmedQuestion,
-      ...(options.retrievalHint ? { retrievalHint: options.retrievalHint } : {}),
-      ...(options.chatSessionId ? { chatSessionId: options.chatSessionId } : {}),
-    };
-
-    const response = await fetch(CHAT_ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    const data = (await response.json()) as ChatResponse | ChatErrorResponse;
-
-    if (!response.ok || !data.ok) {
-      throw new Error(
-        "error" in data && data.error
-          ? data.error
-          : "The assistant could not answer this question.",
-      );
-    }
-
-    if (!data.answer?.trim()) {
-      throw new Error("The assistant returned an empty answer.");
-    }
-
-    return {
-      ok: true,
-      answer: data.answer,
-      sources: Array.isArray(data.sources) ? data.sources : [],
-      chatSessionId: data.chatSessionId,
-    };
-  } catch (error) {
-    if (error instanceof Error) {
-      throw error;
-    }
-
-    throw new Error("Could not reach the chat service.");
-  }
-}
-
 export async function streamChatQuestion(question: string, handlers: StreamChatHandlers, options: ChatRequestOptions = {}): Promise<ChatResponse> {
   const trimmedQuestion = requireQuestion(question);
   const payload: ChatRequest = {
