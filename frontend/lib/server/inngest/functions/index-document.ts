@@ -94,7 +94,17 @@ export const indexDocument = inngest.createFunction(
         // returns one vector per input, so filtering after embedding would shift
         // vectors onto the wrong chunks.
         const parsedChunks = chunkText(extracted).map((chunk) => chunk.trim()).filter(Boolean);
-        if (!parsedChunks.length) throw new Error("Extracted text has no indexable content");
+        if (!parsedChunks.length) {
+          // This message becomes `processing_error`, which the upload toast and
+          // the sources panel show verbatim, so it has to tell the user what to
+          // do rather than describe the pipeline.
+          if (!extracted.trim() && fileType === "application/pdf") {
+            throw new Error(
+              "This PDF has no selectable text, which usually means it is a scan. Upload a text-based PDF, or run OCR on the scan first.",
+            );
+          }
+          throw new Error("No text could be extracted from this file");
+        }
         log.info("indexing.chunk.complete", { userId, documentId, textLength: extracted.length, chunkCount: parsedChunks.length });
         return parsedChunks;
       });

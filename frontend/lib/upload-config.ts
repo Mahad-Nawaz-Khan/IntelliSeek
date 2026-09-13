@@ -30,6 +30,20 @@ export function getExtension(filename: string): string {
   return filename.slice(dot).toLowerCase();
 }
 
+// Browsers report these when they cannot identify a file, which is common for
+// `.docx`/`.pptx` on machines without Office installed. An unknown type is not
+// a wrong type: the canonical MIME is what gets stored and re-validated
+// server-side, so this check only rejects a confidently mismatched report.
+const UNKNOWN_MIME_TYPES = new Set(["", "application/octet-stream"]);
+const TEXT_MIME_TYPES = new Set(["text/plain", "text/markdown"]);
+
+function reportsConflictingMime(extension: AllowedExtension, reportedMime: string) {
+  const reported = reportedMime.trim().toLowerCase();
+  if (UNKNOWN_MIME_TYPES.has(reported)) return false;
+  if (extension === ".txt" || extension === ".md") return !TEXT_MIME_TYPES.has(reported);
+  return reported !== ALLOWED_MIME_TYPES[extension];
+}
+
 export function isAllowedFile(file: File): {
   valid: boolean;
   error?: string;
@@ -39,12 +53,10 @@ export function isAllowedFile(file: File): {
     return { valid: false, error: `Unsupported file type: ${ext || "none"}` };
   }
 
-  const expectedMime = ALLOWED_MIME_TYPES[ext as AllowedExtension];
-  const isMarkdownMime = ext === ".md" && (!file.type || file.type === "text/plain" || file.type === "text/markdown");
-  if (!isMarkdownMime && (!file.type || file.type !== expectedMime)) {
+  if (reportsConflictingMime(ext as AllowedExtension, file.type)) {
     return {
       valid: false,
-      error: `File MIME type does not match ${ext}`,
+      error: `"${file.type}" does not match the ${ext} extension`,
     };
   }
 
