@@ -264,7 +264,9 @@ export async function GET(request: Request) {
   const suggestions: Suggestion[] = [];
   const seen = new Set<string>();
 
-  topicRows.forEach((row) => {
+  // Four templates per topic row; past ~12 rows the extra suggestions only
+  // inflate the payload — the dropdown shows six, ranked.
+  topicRows.slice(0, 12).forEach((row) => {
     const topic = normalizeTopicForSuggestion(row.topic);
     if (!topic || !isUsefulTopic(topic)) return;
 

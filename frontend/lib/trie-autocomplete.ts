@@ -94,7 +94,6 @@ function compareSuggestions(a: AutocompleteSuggestion, b: AutocompleteSuggestion
 export class TrieAutocomplete {
   private root = createNode();
   private seen = new Set<string>();
-  private suggestions: AutocompleteSuggestion[] = [];
 
   static fromSuggestions(suggestions: AutocompleteSuggestion[]) {
     const trie = new TrieAutocomplete();
@@ -102,68 +101,74 @@ export class TrieAutocomplete {
     return trie;
   }
 
+  /**
+   * Indexes a suggestion under every token of its searchable text, so a walk
+   * from the root along "b-i-n" reaches every suggestion containing a word that
+   * starts with "bin" — including ones whose sentence begins with "Explain".
+   * Indexing whole keys instead was why mid-sentence words never matched.
+   */
   insert(suggestion: AutocompleteSuggestion) {
-    const keys = [suggestion.value, ...(suggestion.keywords ?? [])].map(normalize).filter(Boolean);
-    if (!keys.length) return;
-
     const uniqueKey = `${suggestion.type}:${normalize(suggestion.value)}`;
     if (this.seen.has(uniqueKey)) return;
-    this.seen.add(uniqueKey);
-    this.suggestions.push(suggestion);
 
-    keys.forEach((key) => {
+    const tokens = [...new Set(tokenize(getSearchableText(suggestion)))];
+    if (!tokens.length) return;
+    this.seen.add(uniqueKey);
+
+    tokens.forEach((token) => {
       let node = this.root;
-      for (const char of key) {
+      for (const char of token) {
         const next = node.children.get(char) ?? createNode();
         node.children.set(char, next);
         node = next;
       }
-
       node.suggestions.push(suggestion);
-      node.suggestions.sort(compareSuggestions);
     });
   }
 
+  /**
+   * Walks the trie once per query token and ranks only the collected
+   * candidates. Because every suggestion is indexed under each of its tokens,
+   * the union of the walks contains every possible match: a candidate the walk
+   * misses cannot contain that token, and `scoreSuggestion` would reject it
+   * anyway. No full-corpus scan runs per keystroke.
+   */
   search(prefix: string, limit = 6) {
     const key = normalize(prefix);
-    if (!key) return [];
+    const queryTokens = tokenize(key);
+    if (!key || !queryTokens.length) return [];
 
-    const rankedFallback = this.suggestions
+    // Beyond `limit` per token, ranking decides what is shown; the bound keeps
+    // the candidate map from growing with the corpus.
+    const candidates = new Map<string, AutocompleteSuggestion>();
+    const collectLimit = limit * 4;
+    queryTokens.forEach((token) => {
+      let node = this.root;
+      for (const char of token) {
+        const next = node.children.get(char);
+        if (!next) return;
+        node = next;
+      }
+      this.collect(node, candidates, collectLimit);
+    });
+
+    return [...candidates.values()]
       .map((suggestion) => ({ suggestion, score: scoreSuggestion(suggestion, key) }))
       .filter((result) => Number.isFinite(result.score))
       .sort((a, b) => b.score - a.score || compareSuggestions(a.suggestion, b.suggestion))
+      .slice(0, limit)
       .map((result) => result.suggestion);
-
-    let node = this.root;
-    for (const char of key) {
-      const next = node.children.get(char);
-      if (!next) return rankedFallback.slice(0, limit);
-      node = next;
-    }
-
-    const results: AutocompleteSuggestion[] = [];
-    this.collect(node, results, limit);
-    const seen = new Set(results.map((suggestion) => suggestion.id));
-    rankedFallback.forEach((suggestion) => {
-      if (!seen.has(suggestion.id)) results.push(suggestion);
-    });
-    return results
-      .map((suggestion) => ({ suggestion, score: scoreSuggestion(suggestion, key) }))
-      .sort((a, b) => b.score - a.score || compareSuggestions(a.suggestion, b.suggestion))
-      .map((result) => result.suggestion)
-      .slice(0, limit);
   }
 
-  private collect(node: TrieNode, results: AutocompleteSuggestion[], limit: number) {
-    if (results.length >= limit) return;
+  private collect(node: TrieNode, results: Map<string, AutocompleteSuggestion>, limit: number) {
+    if (results.size >= limit) return;
 
-    results.push(...node.suggestions.slice(0, limit - results.length));
-    if (results.length >= limit) return;
+    node.suggestions.forEach((suggestion) => results.set(suggestion.id, suggestion));
+    if (results.size >= limit) return;
 
-    const children = [...node.children.entries()].sort(([a], [b]) => a.localeCompare(b));
-    for (const [, child] of children) {
+    for (const child of node.children.values()) {
       this.collect(child, results, limit);
-      if (results.length >= limit) return;
+      if (results.size >= limit) return;
     }
   }
 }
