@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createRequire } from "node:module";
+import os from "node:os";
 import { pathToFileURL } from "node:url";
 import Groq from "groq-sdk";
 import type { PDFParse as PDFParseType } from "pdf-parse";
@@ -22,13 +23,17 @@ async function spawnTesseractWorker(log?: RequestLogger): Promise<TesseractWorke
   try {
     const tesseract = await import("tesseract.js");
     const workerPath = getTesseractWorkerPath();
+    const cachePath = os.tmpdir();
+    const options: Record<string, unknown> = { cachePath };
     if (workerPath) {
-      return await tesseract.createWorker("eng", tesseract.OEM?.LSTM_ONLY ?? 1, { workerPath });
+      options.workerPath = workerPath;
     }
-    return await tesseract.createWorker("eng");
+    return await tesseract.createWorker("eng", tesseract.OEM?.LSTM_ONLY ?? 1, options);
   } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    console.error(`[OCR Tesseract Spawn Error]: ${errorMsg}`);
     log?.error("ocr.tesseract_spawn.failed", {
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMsg,
     });
     return null;
   }
@@ -137,11 +142,79 @@ export async function ocrWithGroqVision(
     log?.warn("ocr.groq_vision.empty_response", { pageNumber, model });
     return null;
   } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    console.error(`[OCR Groq Vision Error] Page ${pageNumber}: ${errorMsg}`);
     log?.warn("ocr.groq_vision.failed", {
       pageNumber,
       model,
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMsg,
     });
+    return null;
+  }
+}
+
+/**
+ * Attempts text extraction using OpenRouter Vision if OPENROUTER_API_KEY is configured.
+ * Serves as a cloud vision alternative when Groq Vision is unavailable or rate-limited.
+ */
+export async function ocrWithOpenRouter(
+  pageBuffer: Buffer,
+  pageNumber = 1,
+  log?: RequestLogger,
+): Promise<string | null> {
+  const apiKey = getServerEnv("OPENROUTER_API_KEY");
+  if (!apiKey) {
+    return null;
+  }
+
+  const model = getServerEnv("OPENROUTER_VISION_MODEL") ?? "google/gemini-2.0-flash-001";
+
+  try {
+    const { default: OpenAI } = await import("openai");
+    const client = new OpenAI({
+      apiKey,
+      baseURL: getServerEnv("OPENROUTER_BASE_URL") ?? "https://openrouter.ai/api/v1",
+      defaultHeaders: {
+        "HTTP-Referer": getServerEnv("OPENROUTER_HTTP_REFERER") ?? "http://localhost:3000",
+        "X-Title": getServerEnv("OPENROUTER_APP_TITLE") ?? "IntelliSeek",
+      },
+      timeout: OCR_TIMEOUT_MS,
+      maxRetries: 1,
+    });
+
+    const base64Image = pageBuffer.toString("base64");
+    const response = await client.chat.completions.create({
+      model,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "Transcribe all visible text in this document page accurately. Return only the extracted plain text with natural formatting and paragraph breaks. Do not include markdown preamble, commentary, or descriptions of images. If the page is blank or has no readable text, return an empty string.",
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:image/png;base64,${base64Image}`,
+              },
+            },
+          ],
+        },
+      ],
+      temperature: 0.1,
+    });
+
+    const text = response.choices?.[0]?.message?.content?.trim();
+    if (text) {
+      log?.info("ocr.openrouter_vision.success", { pageNumber, model, textLength: text.length });
+      return text;
+    }
+    return null;
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    console.warn(`[OCR OpenRouter Vision Error] Page ${pageNumber}: ${errorMsg}`);
+    log?.warn("ocr.openrouter_vision.failed", { pageNumber, model, error: errorMsg });
     return null;
   }
 }
@@ -184,6 +257,7 @@ export async function extractScannedPdfText(
   buffer: Buffer,
   log?: RequestLogger,
 ): Promise<string> {
+  console.log(`[OCR Pipeline] Starting OCR text extraction, buffer size: ${buffer.length} bytes`);
   log?.info("ocr.pipeline.start", { bufferSize: buffer.length });
 
   // Lazily initialized Tesseract worker shared across pages if fallback is needed
@@ -204,9 +278,12 @@ export async function extractScannedPdfText(
 
     const info = await parser.getInfo();
     totalPages = info.total ?? 0;
+    console.log(`[OCR Pipeline] PDF loaded: ${totalPages} pages found.`);
   } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    console.error(`[OCR Pipeline Error] Failed to load PDF for OCR: ${errorMsg}`);
     log?.error("ocr.pdf_load.failed", {
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMsg,
     });
     if (parser) {
       await parser.destroy().catch(() => {});
@@ -215,6 +292,7 @@ export async function extractScannedPdfText(
   }
 
   if (totalPages <= 0) {
+    console.warn("[OCR Pipeline] No pages found in PDF.");
     log?.warn("ocr.pipeline.no_pages_found");
     if (parser) {
       await parser.destroy().catch(() => {});
@@ -222,7 +300,7 @@ export async function extractScannedPdfText(
     return "";
   }
 
-const OCR_BATCH_SIZE = 25;
+  const OCR_BATCH_SIZE = 25;
 
   log?.info("ocr.pipeline.pages_detected", { totalPages, batchSize: OCR_BATCH_SIZE });
 
@@ -236,6 +314,7 @@ const OCR_BATCH_SIZE = 25;
         batchPages.push(p);
       }
 
+      console.log(`[OCR Pipeline] Processing batch pages ${startPage}-${endPage} (${batchPages.length} pages)...`);
       log?.info("ocr.pipeline.batch_start", { startPage, endPage, count: batchPages.length });
 
       let screenshot: Awaited<ReturnType<InstanceType<typeof PDFParseType>["getScreenshot"]>> | null = null;
@@ -246,33 +325,42 @@ const OCR_BATCH_SIZE = 25;
           scale: 2.0, // High resolution for sharp OCR
         });
       } catch (renderError) {
+        const errorMsg = renderError instanceof Error ? renderError.message : String(renderError);
+        console.error(`[OCR Pipeline Error] Batch render failed for pages ${startPage}-${endPage}: ${errorMsg}`);
         log?.error("ocr.batch_render.failed", {
           startPage,
           endPage,
-          error: renderError instanceof Error ? renderError.message : String(renderError),
+          error: errorMsg,
         });
       }
 
-      if (!screenshot?.pages?.length) continue;
+      if (!screenshot?.pages?.length) {
+        console.warn(`[OCR Pipeline] No rendered page images in batch ${startPage}-${endPage}.`);
+        continue;
+      }
 
-      // 1. Concurrently transcribe the batch via Groq Vision
-      const groqResults = await Promise.all(
+      // 1. Concurrently transcribe the batch via Groq Vision, falling back to OpenRouter Vision if available
+      const visionResults = await Promise.all(
         screenshot.pages.map(async (page) => {
           if (!page.data || page.data.length === 0) {
             return { pageNumber: page.pageNumber, buffer: null, text: null };
           }
           const pageBuffer = Buffer.from(page.data);
-          const text = await ocrWithGroqVision(pageBuffer, page.pageNumber, log);
+          let text = await ocrWithGroqVision(pageBuffer, page.pageNumber, log);
+          if (!text) {
+            text = await ocrWithOpenRouter(pageBuffer, page.pageNumber, log);
+          }
           return { pageNumber: page.pageNumber, buffer: pageBuffer, text };
         }),
       );
 
-      // 2. For any pages in the batch where Groq Vision failed or returned empty, run Tesseract fallback
-      for (const item of groqResults) {
+      // 2. For any pages in the batch where cloud vision failed or returned empty, run Tesseract fallback
+      for (const item of visionResults) {
         if (!item.buffer) continue;
         let pageText = item.text;
 
         if (!pageText) {
+          console.log(`[OCR Pipeline] Falling back to Tesseract.js for page ${item.pageNumber}...`);
           log?.info("ocr.pipeline.falling_back_to_tesseract", { pageNumber: item.pageNumber });
           if (!sharedTesseractWorker) {
             sharedTesseractWorker = await spawnTesseractWorker(log);
@@ -283,11 +371,14 @@ const OCR_BATCH_SIZE = 25;
               const result = await sharedTesseractWorker.recognize(item.buffer);
               const tesseractText = (result.data?.text ?? "").trim();
               pageText = tesseractText;
+              console.log(`[OCR Pipeline] Page ${item.pageNumber} transcribed via Tesseract (${pageText.length} chars).`);
               log?.info("ocr.tesseract.success", { pageNumber: item.pageNumber, textLength: pageText.length });
             } catch (tessError) {
+              const errorMsg = tessError instanceof Error ? tessError.message : String(tessError);
+              console.error(`[OCR Pipeline Error] Tesseract failed on page ${item.pageNumber}: ${errorMsg}`);
               log?.error("ocr.tesseract.failed", {
                 pageNumber: item.pageNumber,
-                error: tessError instanceof Error ? tessError.message : String(tessError),
+                error: errorMsg,
               });
               pageText = "";
             }
@@ -312,6 +403,7 @@ const OCR_BATCH_SIZE = 25;
   }
 
   const combinedText = pageTexts.join("\n\n");
+  console.log(`[OCR Pipeline] Completed. Extracted ${pageTexts.length}/${totalPages} pages (${combinedText.length} total characters).`);
   log?.info("ocr.pipeline.complete", {
     totalPages,
     pagesWithText: pageTexts.length,

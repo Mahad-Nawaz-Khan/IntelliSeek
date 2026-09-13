@@ -3,6 +3,7 @@ import JSZip from "jszip";
 import mammoth from "mammoth";
 
 import { extractScannedPdfText, isScannedPdfText } from "./ocr";
+import type { RequestLogger } from "../logger";
 
 function decodeXmlText(value: string): string {
   return value
@@ -13,7 +14,7 @@ function decodeXmlText(value: string): string {
     .replace(/&apos;/g, "'");
 }
 
-async function extractPdfText(buffer: Buffer): Promise<string> {
+async function extractPdfText(buffer: Buffer, log?: RequestLogger): Promise<string> {
   const worker = await import("pdf-parse/worker");
   const { PDFParse } = await import("pdf-parse");
 
@@ -32,7 +33,7 @@ async function extractPdfText(buffer: Buffer): Promise<string> {
   }
 
   if (isScannedPdfText(text)) {
-    return extractScannedPdfText(buffer);
+    return extractScannedPdfText(buffer, log);
   }
 
   return text;
@@ -69,6 +70,7 @@ export async function extractTextFromBuffer(
   arrayBuffer: ArrayBuffer,
   filename: string,
   mimeType: string,
+  log?: RequestLogger,
 ): Promise<string> {
   const extension = filename.slice(filename.lastIndexOf(".")).toLowerCase();
   const buffer = Buffer.from(arrayBuffer);
@@ -78,7 +80,7 @@ export async function extractTextFromBuffer(
   }
 
   if (extension === ".pdf" || mimeType === "application/pdf") {
-    return extractPdfText(buffer);
+    return extractPdfText(buffer, log);
   }
 
   if (

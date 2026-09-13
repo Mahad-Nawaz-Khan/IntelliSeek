@@ -116,7 +116,7 @@ export const indexDocument = inngest.createFunction(
           throw new Error(userFacingError);
         }
         log.info("indexing.storage_download.complete", { userId, documentId });
-        const text = await extractTextFromBuffer(await data.arrayBuffer(), filename, fileType);
+        const text = await extractTextFromBuffer(await data.arrayBuffer(), filename, fileType, log);
         log.info("indexing.parse.complete", { userId, documentId, textLength: text.length });
         return text;
       });
