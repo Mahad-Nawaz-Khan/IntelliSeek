@@ -6,8 +6,10 @@ import OpenAI from "openai";
 import { z } from "zod";
 
 import type { SourceCitation } from "../../chat-api";
+import { selectCitedSources } from "../../source-citations";
 import { getServerEnv } from "../env";
 import { streamGroqGeneralAnswer, streamGroqGroundedAnswer } from "../groq";
+import type { RequestLogger } from "../logger";
 import { embedText } from "../rag/embeddings";
 import { mergeRetrievedContext, retrieveKeywordContext, toSourceCitations, validateQuestion, type RetrievedContext } from "../rag/retriever";
 import { matchUserChunks, type RetrievedChunk } from "../rag/vector-store";
@@ -80,6 +82,12 @@ export type ConversationTurn = {
 
 export type AgentAnswerStreamEvent =
   | { type: "delta"; text: string }
+  /**
+   * The primary provider failed after emitting text and a fallback provider is
+   * starting over. Consumers must discard everything received so far, otherwise
+   * the two partial answers concatenate on screen.
+   */
+  | { type: "reset" }
   | { type: "done"; answer: string; sources: SourceCitation[] };
 
 type DocumentRow = {
@@ -148,6 +156,53 @@ function uniqueSources(chunks: AgentToolChunk[]): SourceCitation[] {
   }
 
   return sources;
+}
+
+/**
+ * A provider that streams text and then returns the complete answer. Wrapped in
+ * a factory so the fallback is only constructed if the primary actually fails.
+ */
+type TextStreamFactory = () => AsyncGenerator<string, string>;
+
+function requireAnswer(answer: string | undefined): string {
+  const trimmed = answer?.trim();
+  // `chat_history.answer` rejects blank text, and a blank answer is a failure in
+  // any case, so it is surfaced as an error instead of being persisted.
+  if (!trimmed) throw new Error("Agent answer generation returned no content");
+  return trimmed;
+}
+
+/**
+ * Streams from `primary`, falling back to `fallback` if it fails. If the primary
+ * had already emitted text, a `reset` event is issued first: the fallback starts
+ * the answer over, so without it the two partial answers concatenate on screen.
+ */
+async function* streamTextWithFallback(
+  primary: TextStreamFactory,
+  fallback: TextStreamFactory,
+  log?: RequestLogger,
+): AsyncGenerator<AgentAnswerStreamEvent, string> {
+  let emittedDelta = false;
+
+  try {
+    const stream = primary();
+    while (true) {
+      const next = await stream.next();
+      if (next.done) return requireAnswer(next.value);
+      emittedDelta = true;
+      yield { type: "delta", text: next.value };
+    }
+  } catch (error) {
+    log?.warn("agent.primary.failed", { errorCategory: "unknown", error, emittedDelta });
+    if (emittedDelta) yield { type: "reset" };
+  }
+
+  const fallbackStream = fallback();
+  while (true) {
+    const next = await fallbackStream.next();
+    if (next.done) return requireAnswer(next.value);
+    yield { type: "delta", text: next.value };
+  }
 }
 
 async function findUserDocuments(userId: string, query: string, limit: number): Promise<DocumentRow[]> {
@@ -232,9 +287,7 @@ async function* streamAgentText(agent: Agent, input: string): AsyncGenerator<str
   }
 
   await stream.completed;
-  const answer = stream.finalOutput?.trim();
-  if (!answer) throw new Error("Agent answer generation returned no content");
-  return answer;
+  return requireAnswer(stream.finalOutput);
 }
 
 function createAgentRun(userId: string) {
@@ -298,12 +351,11 @@ function createAgentRun(userId: string) {
 export async function generateAgentAnswer(question: string, userId: string, conversationContext: ConversationTurn[] = []): Promise<AgentRunResult> {
   const { agent, getSources } = createAgentRun(userId);
   const result = await run(agent, buildConversationInput(question, conversationContext), { maxTurns: 6 });
-  const answer = result.finalOutput?.trim();
-  if (!answer) throw new Error("Agent answer generation returned no content");
+  const answer = requireAnswer(result.finalOutput);
 
   return {
     answer,
-    sources: getSources(),
+    sources: selectCitedSources(answer, getSources()),
   };
 }
 
@@ -318,83 +370,58 @@ export async function* streamAgentAnswer(question: string, userId: string, conve
   }
 
   await stream.completed;
-  const answer = stream.finalOutput?.trim();
-  if (!answer) throw new Error("Agent answer generation returned no content");
+  const answer = requireAnswer(stream.finalOutput);
 
-  yield { type: "done", answer, sources: getSources() };
+  yield { type: "done", answer, sources: selectCitedSources(answer, getSources()) };
 }
 
 export async function* streamGroundedAgentAnswer(
   question: string,
   context: RetrievedContext[],
   conversationContext: ConversationTurn[] = [],
+  log?: RequestLogger,
 ): AsyncGenerator<AgentAnswerStreamEvent> {
-  let answer = "";
+  const conversationInput = buildConversationInput(question, conversationContext);
 
-  try {
-    configureAgentClient();
-    const agent = new Agent({
-      name: "IntelliSeek Uploaded File Assistant",
-      instructions: GROUNDED_SYSTEM_PROMPT,
-      model: getChatModel(),
-    });
-    const input = `Uploaded-file context chunks:\n${buildContextInput(context)}\n\n${buildConversationInput(question, conversationContext)}`;
-    const textStream = streamAgentText(agent, input);
+  const answer = yield* streamTextWithFallback(
+    () => {
+      configureAgentClient();
+      const agent = new Agent({
+        name: "IntelliSeek Uploaded File Assistant",
+        instructions: GROUNDED_SYSTEM_PROMPT,
+        model: getChatModel(),
+      });
+      return streamAgentText(agent, `Uploaded-file context chunks:\n${buildContextInput(context)}\n\n${conversationInput}`);
+    },
+    () => streamGroqGroundedAnswer(conversationInput, context),
+    log,
+  );
 
-    while (true) {
-      const next = await textStream.next();
-      if (next.done) {
-        answer = next.value;
-        break;
-      }
-      yield { type: "delta", text: next.value };
-    }
-  } catch {
-    const fallbackStream = streamGroqGroundedAnswer(buildConversationInput(question, conversationContext), context);
-    while (true) {
-      const next = await fallbackStream.next();
-      if (next.done) {
-        answer = next.value;
-        break;
-      }
-      yield { type: "delta", text: next.value };
-    }
-  }
-
-  yield { type: "done", answer, sources: toSourceCitations(context) };
+  // Retrieval over-fetches on purpose, so only the files the answer referenced
+  // are reported as sources.
+  yield { type: "done", answer, sources: selectCitedSources(answer, toSourceCitations(context)) };
 }
 
-export async function* streamGeneralAgentAnswer(question: string, conversationContext: ConversationTurn[] = []): AsyncGenerator<AgentAnswerStreamEvent> {
-  let answer = "";
+export async function* streamGeneralAgentAnswer(
+  question: string,
+  conversationContext: ConversationTurn[] = [],
+  log?: RequestLogger,
+): AsyncGenerator<AgentAnswerStreamEvent> {
+  const conversationInput = buildConversationInput(question, conversationContext);
 
-  try {
-    configureAgentClient();
-    const agent = new Agent({
-      name: "IntelliSeek General Assistant",
-      instructions: GENERAL_SYSTEM_PROMPT,
-      model: getChatModel(),
-    });
-    const textStream = streamAgentText(agent, buildConversationInput(question, conversationContext));
-
-    while (true) {
-      const next = await textStream.next();
-      if (next.done) {
-        answer = next.value;
-        break;
-      }
-      yield { type: "delta", text: next.value };
-    }
-  } catch {
-    const fallbackStream = streamGroqGeneralAnswer(buildConversationInput(question, conversationContext));
-    while (true) {
-      const next = await fallbackStream.next();
-      if (next.done) {
-        answer = next.value;
-        break;
-      }
-      yield { type: "delta", text: next.value };
-    }
-  }
+  const answer = yield* streamTextWithFallback(
+    () => {
+      configureAgentClient();
+      const agent = new Agent({
+        name: "IntelliSeek General Assistant",
+        instructions: GENERAL_SYSTEM_PROMPT,
+        model: getChatModel(),
+      });
+      return streamAgentText(agent, conversationInput);
+    },
+    () => streamGroqGeneralAnswer(conversationInput),
+    log,
+  );
 
   yield { type: "done", answer, sources: [] };
 }

@@ -517,6 +517,20 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
 
+      // A fallback provider restarts the answer from the beginning, so the
+      // partial text from the failed attempt is discarded rather than prefixed
+      // to the retry.
+      const resetStreamedAnswer = () => {
+        streamedAnswer = "";
+        setMessages((current) =>
+          current.map((message) =>
+            message.id === assistantId
+              ? { ...message, content: "", displayedContent: "", status: "loading" }
+              : message,
+          ),
+        );
+      };
+
       try {
         if (demo) {
           await streamChatQuestionDemo(trimmedQuestion, {
@@ -535,6 +549,7 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
                 ),
               );
             },
+            onReset: resetStreamedAnswer,
             onSources: (sources) => {
               setMessages((current) =>
                 current.map((message) =>
@@ -577,6 +592,7 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
                 ),
               );
             },
+            onReset: resetStreamedAnswer,
             onSources: (sources) => {
               setMessages((current) =>
                 current.map((message) =>
@@ -607,7 +623,23 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
                 ),
               );
               void refreshRecentChats();
-              window.setTimeout(() => void refreshRecentChats(), 2500);
+            },
+            // The title is generated after the answer, so it is applied when it
+            // arrives instead of guessing at a delay and re-fetching the list.
+            onTitle: (title) => {
+              const sessionId = activeSessionIdRef.current;
+              if (!sessionId) return;
+              setRecentSessionRows((current) => {
+                // The list refresh triggered by `done` may not have landed yet;
+                // re-fetching is what picks the new session up in that case.
+                if (!current.some((session) => session.id === sessionId)) {
+                  void refreshRecentChats();
+                  return current;
+                }
+                return current.map((session) =>
+                  session.id === sessionId ? { ...session, title, title_status: "generated" as const } : session,
+                );
+              });
             },
           }, {
             ...(selectedSuggestion?.metadata ? { retrievalHint: selectedSuggestion.metadata } : {}),

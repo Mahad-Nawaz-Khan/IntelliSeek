@@ -1,9 +1,9 @@
 import { normalizeSourceCitations } from "../../../../lib/source-citations";
 import { streamGeneralAgentAnswer, streamGroundedAgentAnswer, type AgentAnswerStreamEvent } from "../../../../lib/server/agents/chat-agent";
+import { toClientErrorMessage } from "../../../../lib/server/client-errors";
 import { createRequestLogger, type RequestLogger } from "../../../../lib/server/logger";
 import { checkRateLimit, getClientIp, rateLimitHeaders, rateLimitResponse } from "../../../../lib/server/rate-limit";
 import {
-  demoHasIndexedDocuments,
   filterRelevantContext,
   isDocumentSummaryRequest,
   mergeRetrievedContext,
@@ -40,10 +40,19 @@ async function streamDemoAnswer(
       continue;
     }
 
+    if (event.type === "reset") {
+      controller.enqueue(toSse("reset", {}));
+      log?.warn("demo.stream.reset", { errorCategory: "unknown" });
+      continue;
+    }
+
+    const answer = event.answer.trim();
+    if (!answer) throw new Error("Agent answer generation returned no content");
+
     const sources = normalizeSourceCitations(event.sources);
     controller.enqueue(toSse("sources", { sources }));
-    controller.enqueue(toSse("done", { answer: event.answer, sources, chatSessionId: undefined }));
-    log?.info("demo.stream.complete", { sourceCount: sources.length, answerLength: event.answer.length });
+    controller.enqueue(toSse("done", { answer, sources, chatSessionId: undefined }));
+    log?.info("demo.stream.complete", { sourceCount: sources.length, answerLength: answer.length });
     return;
   }
 
@@ -91,7 +100,7 @@ export async function POST(request: Request) {
         log.info("demo.retrieval.start", { questionLength: question.length });
         let relevantContext: Awaited<ReturnType<typeof retrieveDemoContext>> = [];
 
-        if (!relevantContext.length && isSummaryRequest) {
+        if (isSummaryRequest) {
           log.info("demo.retrieval.representative", { strategy: "representative_summary" });
           relevantContext = await retrieveDemoRepresentativeDocumentContext(10, question, log);
           log.info("demo.retrieval.complete", { strategy: "representative_summary", contextCount: relevantContext.length });
@@ -107,23 +116,14 @@ export async function POST(request: Request) {
           log.info("demo.retrieval.complete", { strategy: "hybrid_vector_keyword", contextCount: relevantContext.length });
         }
 
-        let events: AsyncGenerator<AgentAnswerStreamEvent>;
-        if (relevantContext.length) {
-          events = streamGroundedAgentAnswer(question, relevantContext, []);
-        } else {
-          events = streamGeneralAgentAnswer(question, []);
-        }
-
-        if (!relevantContext.length && isSummaryRequest && await demoHasIndexedDocuments(log)) {
-          events = streamGeneralAgentAnswer(question, []);
-        }
+        const events: AsyncGenerator<AgentAnswerStreamEvent> = relevantContext.length
+          ? streamGroundedAgentAnswer(question, relevantContext, [], log)
+          : streamGeneralAgentAnswer(question, [], log);
 
         await streamDemoAnswer(controller, events, log);
       } catch (error) {
         log.error("demo.stream.failed", { errorCategory: "unknown", error });
-        controller.enqueue(toSse("error", {
-          error: error instanceof Error ? error.message : "The assistant could not answer this question.",
-        }));
+        controller.enqueue(toSse("error", { error: toClientErrorMessage(error) }));
       } finally {
         controller.close();
       }

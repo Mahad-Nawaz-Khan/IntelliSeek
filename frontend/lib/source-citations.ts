@@ -34,6 +34,46 @@ export function normalizeSourceCitations(sources: unknown[], maxSources = 12): S
   return normalized;
 }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Filenames are matched on a word boundary so that `notes.pdf` is not reported
+ * as cited by an answer that merely mentions `lecture-notes.pdf`.
+ */
+function mentionsFilename(answer: string, filename: string) {
+  const trimmed = filename.trim();
+  if (!trimmed) return false;
+  if (new RegExp(`(^|[^\\p{L}\\p{N}])${escapeRegExp(trimmed)}`, "iu").test(answer)) return true;
+
+  // Models routinely cite `[Chapter 3]` for `Chapter 3.pdf`, so the extension is
+  // optional. Short stems are skipped because they collide with ordinary prose.
+  const stem = trimmed.replace(/\.[^.]+$/, "").trim();
+  if (stem.length < 4 || stem === trimmed) return false;
+  return new RegExp(`(^|[^\\p{L}\\p{N}])${escapeRegExp(stem)}([^\\p{L}\\p{N}]|$)`, "iu").test(answer);
+}
+
+/**
+ * Narrows retrieved sources to the files the answer actually referenced.
+ *
+ * Retrieval deliberately over-fetches, so listing every retrieved chunk tells
+ * the reader that files were used which the answer never drew on. When no
+ * filename is referenced the full set is returned unchanged: the answer is
+ * still grounded in that context, and hiding every source would be worse than
+ * showing a superset.
+ */
+export function selectCitedSources(answer: string, sources: SourceCitation[]): SourceCitation[] {
+  if (!answer.trim() || !sources.length) return sources;
+
+  const citedFilenames = new Set(
+    [...new Set(sources.map((source) => source.filename))].filter((filename) => mentionsFilename(answer, filename)),
+  );
+  if (!citedFilenames.size) return sources;
+
+  return sources.filter((source) => citedFilenames.has(source.filename));
+}
+
 function formatChunkRanges(sources: SourceCitation[]) {
   const indexes = [...new Set(sources.map((source) => source.chunk_index + 1))].sort((a, b) => a - b);
   const ranges: string[] = [];

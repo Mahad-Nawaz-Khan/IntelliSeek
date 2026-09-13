@@ -2,6 +2,7 @@ import type { ChatRetrievalHint, SourceCitation } from "../../../lib/chat-api";
 import { normalizeSourceCitations } from "../../../lib/source-citations";
 import { streamAgentAnswer, streamGeneralAgentAnswer, streamGroundedAgentAnswer, type AgentAnswerStreamEvent, type ConversationTurn } from "../../../lib/server/agents/chat-agent";
 import { getAuthenticatedUser } from "../../../lib/server/auth";
+import { toClientErrorMessage } from "../../../lib/server/client-errors";
 import { generateGroqChatTitle } from "../../../lib/server/groq";
 import { createRequestLogger, type LogData, type RequestLogger } from "../../../lib/server/logger";
 import { checkRateLimit, getClientIp, rateLimitHeaders, rateLimitResponse } from "../../../lib/server/rate-limit";
@@ -176,9 +177,16 @@ async function updateChatSessionTimestamp(userId: string, chatSessionId: string,
   if (error) log?.warn("chat_sessions.touch.failed", { errorCategory: "supabase_query", userId, sessionId: chatSessionId, error });
 }
 
-async function generateAndStoreTitle(chatSessionId: string, userId: string, question: string, answer: string, log?: RequestLogger) {
+/** Returns the stored title, or `null` if nothing could be stored. */
+async function generateAndStoreTitle(
+  chatSessionId: string,
+  userId: string,
+  question: string,
+  answer: string,
+  log?: RequestLogger,
+): Promise<string | null> {
   const supabase = getSupabaseServiceClient();
-  if (!supabase) return;
+  if (!supabase) return null;
 
   try {
     const title = await generateGroqChatTitle(question, answer);
@@ -189,14 +197,17 @@ async function generateAndStoreTitle(chatSessionId: string, userId: string, ques
       .eq("user_id", userId)
       .eq("title_status", "pending");
     if (error) throw error;
+    return title;
   } catch (error) {
+    const title = fallbackTitle(question);
     const { error: fallbackError } = await supabase
       .from("chat_sessions")
-      .update({ title: fallbackTitle(question), title_status: "fallback", updated_at: new Date().toISOString() })
+      .update({ title, title_status: "fallback", updated_at: new Date().toISOString() })
       .eq("id", chatSessionId)
       .eq("user_id", userId)
       .eq("title_status", "pending");
     log?.warn("chat_sessions.title.failed", { errorCategory: "unknown", userId, sessionId: chatSessionId, error, fallbackError });
+    return fallbackError ? null : title;
   }
 }
 
@@ -243,13 +254,34 @@ async function streamAnswer(
       continue;
     }
 
+    if (event.type === "reset") {
+      // A fallback provider is restarting the answer; the client discards the
+      // partial text it already rendered.
+      controller.enqueue(toSse("reset", {}));
+      log?.warn("stream.reset", { errorCategory: "unknown", userId });
+      continue;
+    }
+
+    const answer = event.answer.trim();
+    // `chat_history.answer` has a non-empty CHECK, so an empty answer must fail
+    // the request rather than be written and rejected by the database.
+    if (!answer) throw new Error("Agent answer generation returned no content");
+
     const sources = normalizeSourceCitations(event.sources);
     controller.enqueue(toSse("sources", { sources }));
-    await saveChatHistory(question, event.answer, sources, userId, chatSessionId, log);
+    await saveChatHistory(question, answer, sources, userId, chatSessionId, log);
     await updateChatSessionTimestamp(userId, chatSessionId, log);
-    if (shouldGenerateTitle) void generateAndStoreTitle(chatSessionId, userId, question, event.answer, log);
-    controller.enqueue(toSse("done", { answer: event.answer, sources, chatSessionId }));
-    log?.info("stream.complete", { userId, sourceCount: sources.length, answerLength: event.answer.length });
+    controller.enqueue(toSse("done", { answer, sources, chatSessionId }));
+    log?.info("stream.complete", { userId, sourceCount: sources.length, answerLength: answer.length });
+
+    // Awaited inside the stream rather than fire-and-forget: a serverless
+    // function can be frozen the moment the response ends, which would leave the
+    // session titled "New chat" forever. The client already has its answer, so
+    // the extra time only keeps the stream open.
+    if (shouldGenerateTitle) {
+      const title = await generateAndStoreTitle(chatSessionId, userId, question, answer, log);
+      if (title) controller.enqueue(toSse("title", { chatSessionId, title }));
+    }
     return;
   }
 
@@ -369,9 +401,17 @@ export async function POST(request: Request) {
 
         let events: AsyncGenerator<AgentAnswerStreamEvent>;
         let answerMode: "grounded" | "agent" | "general" | "static-warning";
-        if (relevantContext.length) {
+        // The indexed-but-unreadable case is decided first: previously a model
+        // answer was started and then thrown away, paying for a request whose
+        // output was never used.
+        if (!relevantContext.length && isSummaryRequest && !retrievalHint && await hasIndexedDocuments(user.id, log)) {
+          answerMode = "static-warning";
+          events = streamStaticAnswer(
+            "I found indexed uploaded document metadata, but I could not load any indexed text chunks to summarize. Please re-index the document or upload it again, then try the summary request once indexing finishes.",
+          );
+        } else if (relevantContext.length) {
           answerMode = "grounded";
-          events = streamGroundedAgentAnswer(question, relevantContext, conversationContext);
+          events = streamGroundedAgentAnswer(question, relevantContext, conversationContext, log);
         } else if (retrievalHint || isLikelyUploadedMaterialRequest(question)) {
           answerMode = "agent";
           log.info("retrieval.strategy.start", { userId: user.id, strategy: "agent_fallback" });
@@ -379,14 +419,7 @@ export async function POST(request: Request) {
         } else {
           answerMode = "general";
           log.info("retrieval.strategy.start", { userId: user.id, strategy: "general_answer" });
-          events = streamGeneralAgentAnswer(question, conversationContext);
-        }
-
-        if (!relevantContext.length && isSummaryRequest && !retrievalHint && await hasIndexedDocuments(user.id, log)) {
-          answerMode = "static-warning";
-          events = streamStaticAnswer(
-            "I found indexed uploaded document metadata, but I could not load any indexed text chunks to summarize. Please re-index the document or upload it again, then try the summary request once indexing finishes.",
-          );
+          events = streamGeneralAgentAnswer(question, conversationContext, log);
         }
 
         log.info("answer.mode.selected", { userId: user.id, answerMode, contextCount: relevantContext.length });
@@ -394,9 +427,9 @@ export async function POST(request: Request) {
         await streamAnswer(controller, events, question, user.id, chatSession.id, shouldGenerateTitle, log);
       } catch (error) {
         log.error("stream.failed", { errorCategory: "unknown", userId: user.id, error });
-        controller.enqueue(toSse("error", {
-          error: error instanceof Error ? error.message : "The assistant could not answer this question.",
-        }));
+        // Internal messages name providers, tables, and configuration; only the
+        // vetted set above is safe to show a user.
+        controller.enqueue(toSse("error", { error: toClientErrorMessage(error) }));
       } finally {
         controller.close();
       }

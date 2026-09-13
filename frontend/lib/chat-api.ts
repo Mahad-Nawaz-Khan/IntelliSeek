@@ -36,6 +36,7 @@ export type ChatResponse = {
   answer: string;
   sources: SourceCitation[];
   chatSessionId?: string;
+  title?: string;
 };
 
 export type ChatSessionSummary = {
@@ -60,8 +61,15 @@ type ChatErrorResponse = {
 
 type StreamChatHandlers = {
   onDelta: (text: string) => void;
+  /**
+   * A fallback provider restarted the answer. Clear the text rendered so far,
+   * otherwise the partial first attempt stays glued to the front of the retry.
+   */
+  onReset?: () => void;
   onSources?: (sources: SourceCitation[]) => void;
   onDone?: (response: ChatResponse) => void;
+  /** The session title, which is generated after the answer completes. */
+  onTitle?: (title: string) => void;
 };
 
 type StreamEvent = {
@@ -174,6 +182,7 @@ export async function streamChatQuestion(question: string, handlers: StreamChatH
   let finalAnswer = "";
   let finalSources: SourceCitation[] = [];
   let finalChatSessionId: string | undefined;
+  let finalTitle: string | undefined;
   let sawDone = false;
 
   function handleEvent(streamEvent: StreamEvent) {
@@ -184,6 +193,12 @@ export async function streamChatQuestion(question: string, handlers: StreamChatH
       if (!text) return;
       answer += text;
       handlers.onDelta(text);
+      return;
+    }
+
+    if (streamEvent.event === "reset") {
+      answer = "";
+      handlers.onReset?.();
       return;
     }
 
@@ -200,6 +215,13 @@ export async function streamChatQuestion(question: string, handlers: StreamChatH
       finalChatSessionId = chatSessionId;
       sawDone = true;
       handlers.onDone?.({ ok: true, answer: finalAnswer, sources: finalSources, chatSessionId });
+      return;
+    }
+
+    // Titles arrive after `done`, so this is not part of the returned answer.
+    if (streamEvent.event === "title") {
+      finalTitle = typeof data.title === "string" ? data.title : undefined;
+      if (finalTitle) handlers.onTitle?.(finalTitle);
       return;
     }
 
@@ -231,7 +253,7 @@ export async function streamChatQuestion(question: string, handlers: StreamChatH
   if (!sawDone) throw new Error("The assistant stream ended before completion.");
   if (!finalAnswer.trim()) throw new Error("The assistant returned an empty answer.");
 
-  return { ok: true, answer: finalAnswer, sources: finalSources, chatSessionId: finalChatSessionId };
+  return { ok: true, answer: finalAnswer, sources: finalSources, chatSessionId: finalChatSessionId, title: finalTitle };
 }
 
 export async function streamChatQuestionDemo(question: string, handlers: StreamChatHandlers, signal?: AbortSignal): Promise<ChatResponse> {
@@ -264,6 +286,12 @@ export async function streamChatQuestionDemo(question: string, handlers: StreamC
       if (!text) return;
       answer += text;
       handlers.onDelta(text);
+      return;
+    }
+
+    if (streamEvent.event === "reset") {
+      answer = "";
+      handlers.onReset?.();
       return;
     }
 
