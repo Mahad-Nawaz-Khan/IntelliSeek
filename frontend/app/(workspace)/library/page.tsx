@@ -5,44 +5,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { IndexingToast, type UploadIndexingToast } from "../../../components/upload/IndexingToast";
 import { UploadModal } from "../../../components/upload/UploadModal";
-import { getFileType, type KnowledgeSource } from "../../../lib/ui-state";
-
-type DocumentRow = {
-  id: string;
-  filename: string;
-  created_at?: string;
-  processing_status?: "uploaded" | "queued" | "processing" | "indexed" | "failed";
-  processing_error?: string | null;
-  source_scope?: "personal" | "knowledge_base";
-};
-
-type DocumentsResponse = {
-  ok: boolean;
-  documents?: DocumentRow[];
-};
-
-type MeResponse = {
-  ok: boolean;
-  user?: { role?: "admin" | "user" };
-};
-
-function toSource(row: DocumentRow): KnowledgeSource {
-  const status = row.processing_status === "queued" || row.processing_status === "processing" || row.processing_status === "uploaded"
-    ? "indexing"
-    : row.processing_status === "failed"
-      ? "failed"
-      : "indexed";
-
-  return {
-    id: row.id,
-    filename: row.filename,
-    sourceType: row.source_scope === "knowledge_base" ? "knowledge-base" : "uploaded",
-    fileType: getFileType(row.filename),
-    status,
-    createdAt: row.created_at,
-    summary: row.processing_error ?? undefined,
-  };
-}
+import { fetchAccessibleDocuments, fetchMyRole } from "../../../lib/documents";
+import type { KnowledgeSource } from "../../../lib/ui-state";
 
 export default function LibraryPage() {
   const [sources, setSources] = useState<KnowledgeSource[]>([]);
@@ -56,13 +20,9 @@ export default function LibraryPage() {
   const completedDocumentIds = useMemo(() => new Set(sources.filter((source) => source.status === "indexed").map((source) => source.id)), [sources]);
   const failedDocuments = useMemo(() => new Map(sources.filter((source) => source.status === "failed").map((source) => [source.id, source.summary ?? "Indexing failed"])), [sources]);
 
-  const refreshSources = useCallback(async () => {
+  const refreshSources = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
     try {
-      const response = await fetch("/api/documents");
-      const result = (await response.json()) as DocumentsResponse;
-      if (!response.ok || !result.ok) throw new Error("Document lookup failed");
-
-      const nextSources = (result.documents ?? []).map(toSource);
+      const nextSources = await fetchAccessibleDocuments({ force });
       setSources(nextSources);
       setStatus(nextSources.length ? "ready" : "empty");
     } catch {
@@ -73,9 +33,8 @@ export default function LibraryPage() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void refreshSources();
-    fetch("/api/me")
-      .then((response) => response.json() as Promise<MeResponse>)
-      .then((result) => setIsAdmin(Boolean(result.ok && result.user?.role === "admin")))
+    fetchMyRole()
+      .then((role) => setIsAdmin(role === "admin"))
       .catch(() => setIsAdmin(false));
   }, [refreshSources]);
 
@@ -134,7 +93,7 @@ export default function LibraryPage() {
         onClose={() => setIsUploadOpen(false)}
         uploadTarget="knowledge_base"
         onUploadToast={(toast) => {
-          if (toast.documentId) void refreshSources();
+          if (toast.documentId) void refreshSources({ force: true });
           setUploadToasts((current) => {
             const existing = current.find((item) => item.toastId === toast.toastId);
             return [

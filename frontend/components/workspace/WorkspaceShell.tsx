@@ -5,56 +5,15 @@ import { useRouter } from "next/navigation";
 
 import { useAuth } from "../../context/AuthContext";
 import { deleteChatSession, fetchChatSessions, type ChatSessionSummary } from "../../lib/chat-api";
-import {
-  createSourceGroups,
-  getFileType,
-  type KnowledgeSource,
-} from "../../lib/ui-state";
+import { fetchAccessibleDocuments, fetchMyRole } from "../../lib/documents";
+import { createSourceGroups, type KnowledgeSource } from "../../lib/ui-state";
 import { AcademicWorkspace } from "../chat/AcademicWorkspace";
 import { IndexingToast, type UploadIndexingToast } from "../upload/IndexingToast";
 import { UploadModal } from "../upload/UploadModal";
 
-type SupabaseKnowledgeSource = {
-  id: string;
-  user_id?: string;
-  filename: string;
-  created_at?: string;
-  processing_status?: "uploaded" | "queued" | "processing" | "indexed" | "failed";
-  processing_error?: string | null;
-  source_scope?: "personal" | "knowledge_base";
-};
-
-type DocumentsResponse = {
-  ok: boolean;
-  documents?: SupabaseKnowledgeSource[];
-};
-
-type MeResponse = {
-  ok: boolean;
-  user?: { role?: "admin" | "user" };
-};
-
 type WorkspaceShellProps = {
   children: ReactNode;
 };
-
-function toUploadedSource(source: SupabaseKnowledgeSource): KnowledgeSource {
-  const status = source.processing_status === "queued" || source.processing_status === "processing" || source.processing_status === "uploaded"
-    ? "indexing"
-    : source.processing_status === "failed"
-      ? "failed"
-      : "indexed";
-
-  return {
-    id: source.id,
-    filename: source.filename,
-    sourceType: source.source_scope === "knowledge_base" ? "knowledge-base" : "uploaded",
-    fileType: getFileType(source.filename),
-    status,
-    createdAt: source.created_at,
-    summary: source.processing_error ?? undefined,
-  };
-}
 
 export function WorkspaceShell({ children }: WorkspaceShellProps) {
   const router = useRouter();
@@ -96,17 +55,9 @@ export function WorkspaceShell({ children }: WorkspaceShellProps) {
     }
   }, []);
 
-  const refreshSources = useCallback(async () => {
+  const refreshSources = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
     try {
-      const response = await fetch("/api/documents");
-      const result = (await response.json()) as DocumentsResponse;
-
-      if (!response.ok || !result.ok) {
-        setSourceStatus("unavailable");
-        return;
-      }
-
-      const rows = (result.documents ?? []).map(toUploadedSource);
+      const rows = await fetchAccessibleDocuments({ force });
       setSources(rows);
       setSourceStatus(rows.length ? "ready" : "empty");
     } catch {
@@ -116,9 +67,7 @@ export function WorkspaceShell({ children }: WorkspaceShellProps) {
 
   const refreshRole = useCallback(async () => {
     try {
-      const response = await fetch("/api/me");
-      const result = (await response.json()) as MeResponse;
-      setIsAdmin(Boolean(response.ok && result.ok && result.user?.role === "admin"));
+      setIsAdmin((await fetchMyRole()) === "admin");
     } catch {
       setIsAdmin(false);
     }
@@ -244,7 +193,7 @@ export function WorkspaceShell({ children }: WorkspaceShellProps) {
         }}
         uploadTarget={uploadTarget}
         onUploadToast={(toast) => {
-          if (toast.documentId) void refreshSources();
+          if (toast.documentId) void refreshSources({ force: true });
           setUploadToasts((current) => {
             const existing = current.find((item) => item.toastId === toast.toastId);
             return [

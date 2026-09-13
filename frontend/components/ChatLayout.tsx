@@ -25,28 +25,14 @@ import {
   type ChatMessage as ChatMessageType,
   type ChatSessionSummary,
 } from "../lib/chat-api";
+import { fetchAccessibleDocuments } from "../lib/documents";
 import type { AutocompleteSuggestion } from "../lib/trie-autocomplete";
 import { uploadDocumentFile, type UploadToastPayload } from "../lib/upload-document";
-import { createSourceGroups, getFileType, type KnowledgeSource } from "../lib/ui-state";
-
-type SupabaseKnowledgeSource = {
-  id: string;
-  filename: string;
-  created_at?: string;
-  processing_status?: "uploaded" | "queued" | "processing" | "indexed" | "failed";
-  processing_error?: string | null;
-  indexed_at?: string | null;
-  source_scope?: "personal" | "knowledge_base";
-};
+import { createSourceGroups, type KnowledgeSource } from "../lib/ui-state";
 
 type AutocompleteResponse = {
   ok: boolean;
   suggestions?: AutocompleteSuggestion[];
-};
-
-type DocumentsResponse = {
-  ok: boolean;
-  documents?: SupabaseKnowledgeSource[];
 };
 
 type QueuedChatMessage = {
@@ -65,24 +51,6 @@ type ChatLayoutProps = {
 
 function toAutocompleteId(input: string) {
   return input.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-}
-
-function toUploadedSource(source: SupabaseKnowledgeSource): KnowledgeSource {
-  const status = source.processing_status === "queued" || source.processing_status === "processing" || source.processing_status === "uploaded"
-    ? "indexing"
-    : source.processing_status === "failed"
-      ? "failed"
-      : "indexed";
-
-  return {
-    id: source.id,
-    filename: source.filename,
-    sourceType: source.source_scope === "knowledge_base" ? "knowledge-base" : "uploaded",
-    fileType: getFileType(source.filename),
-    status,
-    createdAt: source.created_at,
-    summary: source.processing_error ?? undefined,
-  };
 }
 
 export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) {
@@ -220,18 +188,10 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
 
     async function loadSources() {
       try {
-        const response = await fetch("/api/documents");
-        const result = (await response.json()) as DocumentsResponse;
+        const rows = await fetchAccessibleDocuments();
 
         if (!active) return;
 
-        if (!response.ok || !result.ok) {
-          setSourceStatus("unavailable");
-          return;
-        }
-
-        const documents = result.documents ?? [];
-        const rows = documents.map(toUploadedSource);
         setSources(rows);
         setPollDocuments(rows.some((source) => source.status === "indexing"));
         setSourceStatus(rows.length ? "ready" : "empty");
@@ -326,11 +286,9 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
 
     async function refreshIndexedState() {
       try {
-        const response = await fetch("/api/documents");
-        const result = (await response.json()) as DocumentsResponse;
-        if (!active || !response.ok || !result.ok) return;
+        const rows = await fetchAccessibleDocuments();
+        if (!active) return;
 
-        const rows = (result.documents ?? []).map(toUploadedSource);
         const hasIndexingSources = rows.some((source) => source.status === "indexing");
         setSources(rows);
         setPollDocuments(hasIndexingSources);
