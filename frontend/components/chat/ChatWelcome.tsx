@@ -1,6 +1,7 @@
-import { ArrowRight, BookOpen, Sparkles } from "lucide-react";
+import { ArrowRight, BookOpen } from "lucide-react";
 
 import { SUGGESTIONS } from "../SuggestedQueries";
+import { BrandMark } from "../ui/BrandMark";
 
 type ChatWelcomeProps = {
   disabled?: boolean;
@@ -10,9 +11,7 @@ type ChatWelcomeProps = {
 export function ChatWelcome({ disabled = false, onSelect }: ChatWelcomeProps) {
   return (
     <section className="mx-auto my-0 flex w-full min-w-0 flex-col items-center px-0 py-0 text-center lg:max-w-4xl lg:px-4">
-      <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-[1.25rem] border border-cyan-300/20 bg-cyan-300/10 text-cyan-200 shadow-2xl shadow-cyan-950/30">
-        <Sparkles className="h-7 w-7" />
-      </div>
+      <BrandMark size="lg" className="mb-5" />
       <p className="mb-3 text-xs font-semibold uppercase tracking-[0.35em] text-cyan-200">Semantic Academic Assistant</p>
       <h1 className="w-full max-w-full text-3xl font-semibold tracking-tight text-white md:text-4xl lg:max-w-3xl lg:text-5xl">
         What would you like to learn today?

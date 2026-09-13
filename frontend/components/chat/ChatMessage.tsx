@@ -1,9 +1,9 @@
-import { Bot, User } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 
 import type { ChatMessage as ChatMessageType } from "../../lib/chat-api";
 import { groupSourceCitations } from "../../lib/source-citations";
 import { SourceChip } from "../sources/SourceChip";
+import { BrandMark } from "../ui/BrandMark";
 
 type ChatMessageProps = {
   message: ChatMessageType;
@@ -13,12 +13,17 @@ export function ChatMessage({ message }: ChatMessageProps) {
   const isUser = message.role === "user";
   const content = message.displayedContent ?? message.content;
   const sourceGroups = message.sources?.length ? groupSourceCitations(message.sources) : [];
+  const isStreaming = message.status === "loading";
 
   return (
-    <article className={`flex gap-2 md:gap-3 ${isUser ? "ml-4 justify-end md:ml-16" : "mr-2 justify-start md:mr-16"}`}>
+    <article className={`flex flex-col ${isUser ? "ml-4 items-end md:ml-16" : "mr-2 items-start md:mr-16"}`}>
+      {/* The mark sits above the message rather than beside it, so narrow screens
+          spend their width on text instead of a gutter. There is no user avatar:
+          the alignment already says who is speaking. */}
       {!isUser && (
-        <div className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-200">
-          <Bot className="h-5 w-5" />
+        <div className="mb-2 flex items-center gap-2">
+          <BrandMark spinning={isStreaming} />
+          <span className="text-xs font-medium tracking-wide text-cyan-200/70">IntelliSeek</span>
         </div>
       )}
 
@@ -31,14 +36,12 @@ export function ChatMessage({ message }: ChatMessageProps) {
               : "w-full max-w-[1000px] px-2 py-2 text-slate-100"
         }`}
       >
-        {message.status === "loading" ? (
-          <div className="space-y-3" aria-label="IntelliSeek is analyzing your documents">
-            <p className="text-sm text-cyan-100">IntelliSeek is analyzing your documents...</p>
-            <div className="flex items-center gap-2 py-1">
-              <span className="h-2 w-2 animate-pulse rounded-full bg-cyan-300" />
-              <span className="h-2 w-2 animate-pulse rounded-full bg-cyan-300 [animation-delay:120ms]" />
-              <span className="h-2 w-2 animate-pulse rounded-full bg-cyan-300 [animation-delay:240ms]" />
-            </div>
+        {isStreaming ? (
+          // The spinning mark above is the whole progress indicator, so this is
+          // only the accessible announcement plus a placeholder line.
+          <div role="status" aria-live="polite">
+            <span className="sr-only">IntelliSeek is preparing an answer</span>
+            <span className="block h-4 w-40 animate-pulse rounded-full bg-cyan-300/20" />
           </div>
         ) : isUser ? (
           <p className="whitespace-pre-wrap text-sm leading-6">{content}</p>
@@ -63,12 +66,6 @@ export function ChatMessage({ message }: ChatMessageProps) {
           </div>
         )}
       </div>
-
-      {isUser && (
-        <div className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/10 text-slate-200">
-          <User className="h-5 w-5" />
-        </div>
-      )}
     </article>
   );
 }

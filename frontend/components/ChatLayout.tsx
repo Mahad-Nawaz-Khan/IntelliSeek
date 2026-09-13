@@ -11,7 +11,7 @@ import { ChatMessage } from "./chat/ChatMessage";
 import { ChatWelcome } from "./chat/ChatWelcome";
 import { DemoLimitModal } from "./demo/DemoSignupModal";
 import { SUGGESTIONS } from "./SuggestedQueries";
-import { RetrievalStatus as RetrievalStatusBanner } from "./sources/RetrievalStatus";
+import { RetrievalStatus } from "./sources/RetrievalStatus";
 import { IndexingToast, type UploadIndexingToast } from "./upload/IndexingToast";
 import { UploadModal } from "./upload/UploadModal";
 import { useAuth } from "../context/AuthContext";
@@ -27,13 +27,7 @@ import {
 } from "../lib/chat-api";
 import type { AutocompleteSuggestion } from "../lib/trie-autocomplete";
 import { uploadDocumentFile, type UploadToastPayload } from "../lib/upload-document";
-import {
-  createSourceGroups,
-  getFileType,
-  type KnowledgeSource,
-  type RetrievalMatch,
-  type RetrievalStatus,
-} from "../lib/ui-state";
+import { createSourceGroups, getFileType, type KnowledgeSource } from "../lib/ui-state";
 
 type SupabaseKnowledgeSource = {
   id: string;
@@ -89,21 +83,6 @@ function toUploadedSource(source: SupabaseKnowledgeSource): KnowledgeSource {
     createdAt: source.created_at,
     summary: source.processing_error ?? undefined,
   };
-}
-
-function toRetrievalMatches(messages: ChatMessageType[]): RetrievalMatch[] {
-  const latestAssistant = [...messages]
-    .reverse()
-    .find((message) => message.role === "assistant" && message.sources?.length);
-
-  return (latestAssistant?.sources ?? []).slice(0, 3).map((source) => ({
-    id: `${source.document_id}-${source.chunk_id}`,
-    sourceId: source.document_id,
-    filename: source.filename,
-    locator: `Chunk ${source.chunk_index}`,
-    snippet: source.chunk_id,
-    scoreLabel: "Retrieved match",
-  }));
 }
 
 export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) {
@@ -173,18 +152,14 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
       : undefined,
     status: session.id === activeSessionId ? "active" as const : "inactive" as const,
   })), [activeSessionId, recentSessionRows]);
-  const retrievalMatches = useMemo(() => toRetrievalMatches(messages), [messages]);
-  const retrievalStatus = useMemo<RetrievalStatus>(() => {
-    if (isLoading) {
-      return {
-        state: "retrieving",
-        message: "Searching your indexed documents...",
-        matches: [],
-      };
-    }
-
-    return { state: "complete", message: "Sources ready", matches: retrievalMatches };
-  }, [isLoading, retrievalMatches]);
+  // While an answer is being prepared, the pill names the actual phase: the
+  // sources event arrives before the first token, so "sources present on the
+  // streaming message" is the honest line between searching and writing.
+  const latestMessage = messages.length ? messages[messages.length - 1] : undefined;
+  const retrievalMessage =
+    isLoading && latestMessage?.role === "assistant" && latestMessage.sources?.length
+      ? "Writing your answer..."
+      : "Searching your indexed documents...";
 
   const autocompleteSuggestions = useMemo<AutocompleteSuggestion[]>(() => {
     const promptSuggestions = SUGGESTIONS.map((suggestion) => ({
@@ -846,9 +821,6 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
                   <ChatWelcome disabled={isLoading} onSelect={handleSubmit} />
                 ) : (
                   <div className="mx-auto max-w-5xl space-y-5">
-                    {isLoading || retrievalStatus.matches?.length ? (
-                      <RetrievalStatusBanner status={retrievalStatus} />
-                    ) : null}
                     {messages.map((message) => (
                       <ChatMessage key={message.id} message={message} />
                     ))}
@@ -907,6 +879,7 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
         failedDocuments={failedDocuments}
       />
       <IndexingToast toasts={uploadToasts} onDismiss={dismissToast} />
+      {isLoading && <RetrievalStatus message={retrievalMessage} />}
       <DemoLimitModal isOpen={showSignupModal} onClose={() => setShowSignupModal(false)} />
     </>
   );

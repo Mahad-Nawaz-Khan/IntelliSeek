@@ -1,50 +1,31 @@
-import { CheckCircle2, FileText, Loader2, Search } from "lucide-react";
+"use client";
 
-import type { RetrievalStatus as RetrievalStatusType } from "../../lib/ui-state";
+import { createPortal } from "react-dom";
+import { Loader2 } from "lucide-react";
 
 type RetrievalStatusProps = {
-  status: RetrievalStatusType;
+  /** Shown in the floating pill while the current answer is being prepared. */
+  message: string;
 };
 
-const STAGGER_BASE_MS = 180;
+/**
+ * The retrieval indicator, portalled above the message list instead of rendered
+ * inside it. The in-flow banner used to push every message down on mount and
+ * pull them back up on completion, and scrolled away with the conversation.
+ */
+export function RetrievalStatus({ message }: RetrievalStatusProps) {
+  if (typeof document === "undefined") return null;
 
-export function RetrievalStatus({ status }: RetrievalStatusProps) {
-  if (status.state === "idle" || status.state === "complete") return null;
-
-  const isWorking = status.state === "analyzing" || status.state === "retrieving" || status.state === "answering";
-
-  return (
-    <div className="mb-4 rounded-2xl border border-cyan-300/15 bg-cyan-300/8 p-4 text-sm text-cyan-50 backdrop-blur-md">
-      <div className="flex items-center gap-2.5">
-        {isWorking ? (
-          <Loader2 className="h-4 w-4 animate-spin text-cyan-300" />
-        ) : (
-          <Search className="h-4 w-4 text-cyan-300" />
-        )}
-        <span className="font-medium">{status.message}</span>
-      </div>
-      {status.matches?.length ? (
-        <ul className="mt-3 grid gap-2">
-          {status.matches.map((match, index) => (
-            <li
-              key={match.id}
-              className="flex items-center gap-2.5 rounded-xl border border-white/5 bg-white/5 px-3 py-2.5 text-xs backdrop-blur-sm"
-              style={{
-                animationDelay: `${index * STAGGER_BASE_MS}ms`,
-                animationFillMode: "both",
-                animation: `retrievalSlideIn 400ms ease-out ${index * STAGGER_BASE_MS}ms both`,
-              }}
-            >
-              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400 motion-safe:animate-pulse" style={{ animationDelay: `${index * STAGGER_BASE_MS + 200}ms` }} />
-              <FileText className="h-3.5 w-3.5 shrink-0 text-cyan-300/70" />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate font-medium text-slate-100">{match.filename}</span>
-                {match.locator && <span className="text-slate-500">{match.locator}</span>}
-              </span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </div>
+  return createPortal(
+    <div
+      role="status"
+      aria-live="polite"
+      style={{ animation: "retrievalSlideIn 300ms ease-out both" }}
+      className="fixed left-1/2 top-4 z-40 flex -translate-x-1/2 items-center gap-2 rounded-full border border-cyan-300/25 bg-slate-950/85 px-4 py-2 text-xs font-medium text-cyan-50 shadow-xl shadow-cyan-950/30 backdrop-blur-md md:top-20"
+    >
+      <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-cyan-300" />
+      <span>{message}</span>
+    </div>,
+    document.body,
   );
 }
