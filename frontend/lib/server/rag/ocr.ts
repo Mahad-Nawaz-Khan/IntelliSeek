@@ -1,5 +1,6 @@
 import "server-only";
 
+import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import Groq from "groq-sdk";
 import type { PDFParse as PDFParseType } from "pdf-parse";
@@ -7,6 +8,31 @@ import type { Worker as TesseractWorker } from "tesseract.js";
 
 import { getServerEnv } from "../env";
 import type { RequestLogger } from "../logger";
+
+function getTesseractWorkerPath(): string | undefined {
+  try {
+    const esmRequire = createRequire(import.meta.url);
+    return esmRequire.resolve("tesseract.js/src/worker-script/node/index.js");
+  } catch {
+    return undefined;
+  }
+}
+
+async function spawnTesseractWorker(log?: RequestLogger): Promise<TesseractWorker | null> {
+  try {
+    const tesseract = await import("tesseract.js");
+    const workerPath = getTesseractWorkerPath();
+    if (workerPath) {
+      return await tesseract.createWorker("eng", tesseract.OEM?.LSTM_ONLY ?? 1, { workerPath });
+    }
+    return await tesseract.createWorker("eng");
+  } catch (error) {
+    log?.error("ocr.tesseract_spawn.failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
 
 const DEFAULT_GROQ_VISION_MODEL = "llama-3.2-11b-vision-preview";
 const OCR_TIMEOUT_MS = 25_000;
@@ -129,23 +155,22 @@ export async function ocrWithTesseract(
   pageNumber = 1,
   log?: RequestLogger,
 ): Promise<string> {
+  const worker = await spawnTesseractWorker(log);
+  if (!worker) return "";
+
   try {
-    const { createWorker } = await import("tesseract.js");
-    const worker = await createWorker("eng");
-    try {
-      const result = await worker.recognize(pageBuffer);
-      const text = result.data.text.trim();
-      log?.info("ocr.tesseract.success", { pageNumber, textLength: text.length });
-      return text;
-    } finally {
-      await worker.terminate();
-    }
+    const result = await worker.recognize(pageBuffer);
+    const text = (result.data?.text ?? "").trim();
+    log?.info("ocr.tesseract.success", { pageNumber, textLength: text.length });
+    return text;
   } catch (error) {
     log?.error("ocr.tesseract.failed", {
       pageNumber,
       error: error instanceof Error ? error.message : String(error),
     });
     return "";
+  } finally {
+    await worker.terminate().catch(() => {});
   }
 }
 
@@ -250,21 +275,22 @@ const OCR_BATCH_SIZE = 25;
         if (!pageText) {
           log?.info("ocr.pipeline.falling_back_to_tesseract", { pageNumber: item.pageNumber });
           if (!sharedTesseractWorker) {
-            const { createWorker } = await import("tesseract.js");
-            sharedTesseractWorker = await createWorker("eng");
+            sharedTesseractWorker = await spawnTesseractWorker(log);
           }
 
-          try {
-            const result = await sharedTesseractWorker.recognize(item.buffer);
-            const tesseractText = (result.data?.text ?? "").trim();
-            pageText = tesseractText;
-            log?.info("ocr.tesseract.success", { pageNumber: item.pageNumber, textLength: pageText.length });
-          } catch (tessError) {
-            log?.error("ocr.tesseract.failed", {
-              pageNumber: item.pageNumber,
-              error: tessError instanceof Error ? tessError.message : String(tessError),
-            });
-            pageText = "";
+          if (sharedTesseractWorker) {
+            try {
+              const result = await sharedTesseractWorker.recognize(item.buffer);
+              const tesseractText = (result.data?.text ?? "").trim();
+              pageText = tesseractText;
+              log?.info("ocr.tesseract.success", { pageNumber: item.pageNumber, textLength: pageText.length });
+            } catch (tessError) {
+              log?.error("ocr.tesseract.failed", {
+                pageNumber: item.pageNumber,
+                error: tessError instanceof Error ? tessError.message : String(tessError),
+              });
+              pageText = "";
+            }
           }
         }
 

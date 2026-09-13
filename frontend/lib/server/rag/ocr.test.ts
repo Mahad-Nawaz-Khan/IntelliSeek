@@ -15,6 +15,9 @@ vi.mock("groq-sdk", () => ({
 
 vi.mock("tesseract.js", () => ({
   createWorker: mockCreateWorker,
+  OEM: {
+    LSTM_ONLY: 1,
+  },
 }));
 
 import {
@@ -173,6 +176,7 @@ describe("extractScannedPdfText", () => {
     const result = await extractScannedPdfText(minimalPdf);
     expect(result).toBe("Extracted Page 1 via Tesseract Fallback");
     expect(mockGroqCreate).toHaveBeenCalledTimes(1);
-    expect(mockCreateWorker).toHaveBeenCalledWith("eng");
+    expect(mockCreateWorker).toHaveBeenCalled();
+    expect(mockCreateWorker.mock.calls[0][0]).toBe("eng");
   });
 });
