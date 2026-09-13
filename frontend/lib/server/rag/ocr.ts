@@ -177,8 +177,8 @@ export async function extractScannedPdfText(
       CanvasFactory: worker.CanvasFactory,
     });
 
-    const info = await parser.load();
-    totalPages = info.numPages ?? 0;
+    const info = await parser.getInfo();
+    totalPages = info.total ?? 0;
   } catch (error) {
     log?.error("ocr.pdf_load.failed", {
       error: error instanceof Error ? error.message : String(error),
