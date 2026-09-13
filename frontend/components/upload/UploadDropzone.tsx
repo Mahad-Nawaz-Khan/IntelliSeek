@@ -37,6 +37,7 @@ export function UploadDropzone({
       <span className="mt-1 text-xs text-slate-500">Maximum 20 MB per file</span>
       <input
         type="file"
+        multiple
         accept=".pdf,.docx,.pptx,.txt,.md"
         disabled={disabled}
         onChange={onChange}
