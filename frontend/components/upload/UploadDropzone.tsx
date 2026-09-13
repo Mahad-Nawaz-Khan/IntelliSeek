@@ -34,7 +34,7 @@ export function UploadDropzone({
       </span>
       <span className="text-lg font-semibold text-white">Drag & Drop Files Here</span>
       <span className="mt-2 text-sm text-slate-400">PDF • DOCX • PPTX • TXT • MD</span>
-      <span className="mt-1 text-xs text-slate-500">Maximum 10 MB per file</span>
+      <span className="mt-1 text-xs text-slate-500">Maximum 20 MB per file</span>
       <input
         type="file"
         accept=".pdf,.docx,.pptx,.txt,.md"

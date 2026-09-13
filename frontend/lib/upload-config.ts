@@ -11,7 +11,7 @@ export const ALLOWED_MIME_TYPES: Record<AllowedExtension, string> = {
   ".md": "text/markdown",
 };
 
-export const MAX_FILE_SIZE = 10 * 1024 * 1024;
+export const MAX_FILE_SIZE = 20 * 1024 * 1024;
 export const BUCKET_NAME = "academic-documents";
 
 export function getStorageUploadErrorMessage(message: string) {
@@ -59,7 +59,7 @@ export function isAllowedFile(file: File): {
   if (file.size > MAX_FILE_SIZE) {
     return {
       valid: false,
-      error: `File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum is 10 MB.`,
+      error: `File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum is 20 MB.`,
     };
   }
   return { valid: true };
