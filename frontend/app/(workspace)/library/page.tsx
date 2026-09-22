@@ -129,19 +129,36 @@ function SourceSection({ title, items, emptyMessage }: SourceSectionProps) {
       <h2 className="mb-4 text-lg font-semibold text-white">{title}</h2>
       {items.length ? (
         <div className="space-y-3">
-          {items.map((item) => (
-            <article key={item.id} className="rounded-3xl border border-white/10 bg-white/5 p-4">
-              <div className="flex min-w-0 items-start gap-3">
-                <FileText className="mt-1 h-5 w-5 shrink-0 text-cyan-200" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-semibold text-slate-100" title={item.filename}>{item.filename}</p>
-                  <p className="mt-1 text-xs uppercase tracking-[0.18em] text-cyan-200">{item.status}</p>
-                  {item.createdAt ? <p className="mt-2 text-xs text-slate-500">Uploaded {new Date(item.createdAt).toLocaleDateString()}</p> : null}
-                  {item.summary ? <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-400">{item.summary}</p> : null}
+          {items.map((item) => {
+            const isFailed = item.status === "failed";
+            // Indexed (and its aliases) render as a plain card; only failed and
+            // in-progress documents carry a visual signal.
+            const isInProgress = item.status !== "indexed" && !isFailed;
+            const cardClass = isFailed
+              ? "rounded-3xl border border-red-400/60 bg-red-400/5 p-4"
+              : isInProgress
+                ? "status-ring status-ring-indexing rounded-3xl bg-slate-950/95 p-4"
+                : "rounded-3xl border border-white/10 bg-white/5 p-4";
+
+            const body = (
+              <div className="p-4">
+                <div className="flex min-w-0 items-start gap-3">
+                  <FileText className={`mt-1 h-5 w-5 shrink-0 ${isFailed ? "text-red-300" : "text-cyan-200"}`} />
+                  <div className="min-w-0 flex-1">
+                    <p className={`truncate font-semibold ${isFailed ? "text-red-200" : "text-slate-100"}`} title={item.filename}>{item.filename}</p>
+                    {item.createdAt ? <p className="mt-2 text-xs text-slate-500">Uploaded {new Date(item.createdAt).toLocaleDateString()}</p> : null}
+                    {item.summary ? <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-400">{item.summary}</p> : null}
+                  </div>
                 </div>
               </div>
-            </article>
-          ))}
+            );
+
+            return (
+              <article key={item.id} className={cardClass}>
+                {isInProgress ? <div className="relative">{body}</div> : body}
+              </article>
+            );
+          })}
         </div>
       ) : (
         <p className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm leading-6 text-slate-500">{emptyMessage}</p>

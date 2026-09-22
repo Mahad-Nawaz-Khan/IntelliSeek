@@ -275,6 +275,71 @@ button:hover,
   animation: chat-title-slide 4.5s ease-in-out 0.2s infinite;
 }
 
+/* Animated gradient ring for cards whose upload/indexing is in progress.
+   The conic gradient angle is animated through @property, and the mask cuts
+   everything except a 1.5px border ring, so the glow never leaks past the
+   card. Uploading runs blue to the site's cyan; indexing runs purple. */
+@property --ring-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.status-ring {
+  position: relative;
+}
+
+.status-ring::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(from var(--ring-angle), transparent 0deg 250deg, var(--ring-from) 300deg, var(--ring-to) 335deg, transparent 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  animation: status-ring-spin 1.5s linear infinite;
+}
+
+@keyframes status-ring-spin {
+  to { --ring-angle: 360deg; }
+}
+
+.status-ring-uploading {
+  --ring-from: #3b82f6;
+  --ring-to: #22d3ee;
+}
+
+.status-ring-indexing {
+  --ring-from: #a855f7;
+  --ring-to: #7c3aed;
+}
+
+/* Compact colored status dots for compact lists (sidebar sources). */
+.status-dot {
+  display: inline-block;
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 9999px;
+}
+
+.status-dot-indexing {
+  background: #a855f7;
+  animation: status-dot-pulse 1.2s ease-in-out infinite;
+}
+
+.status-dot-failed {
+  background: #f87171;
+}
+
+@keyframes status-dot-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.75); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

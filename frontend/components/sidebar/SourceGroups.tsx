@@ -88,20 +88,23 @@ export function SourceGroups({ groups, status, deletingSourceId, onDeleteSource,
                     {group.sources.map((source) => (
                       <li key={source.id} className="group rounded-xl px-2.5 py-2 transition hover:bg-cyan-300/8">
                         <div className="flex min-w-0 items-start gap-2">
-                          <FileText className="mt-0.5 h-4 w-4 shrink-0 text-cyan-200" />
+                          <FileText className={`mt-0.5 h-4 w-4 shrink-0 ${source.status === "failed" ? "text-red-300" : "text-cyan-200"}`} />
                           <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-medium text-slate-100">{source.filename}</p>
-                            <p className="mt-1 text-xs capitalize text-slate-500">{source.status}</p>
+                            <p className={`truncate text-sm font-medium ${source.status === "failed" ? "text-red-200" : "text-slate-100"}`}>{source.filename}</p>
+                            <p className="mt-1 flex h-3 items-center">
+                              {source.status === "indexing" ? <span className="status-dot status-dot-indexing" aria-label="Indexing" /> : null}
+                              {source.status === "failed" ? <span className="status-dot status-dot-failed" aria-label="Failed" /> : null}
+                            </p>
                           </div>
                           {(source.sourceType === "uploaded" || (source.sourceType === "knowledge-base" && canManageKnowledgeBase)) && onDeleteSource ? (
                             <button
                               type="button"
                               onClick={() => onDeleteSource(source.id)}
                               disabled={deletingSourceId === source.id}
-                              className="rounded-xl border border-red-300/15 bg-red-400/10 p-1.5 text-red-200 opacity-0 transition hover:border-red-200/40 hover:bg-red-400/20 hover:text-red-100 disabled:cursor-not-allowed disabled:opacity-60 group-hover:opacity-100 focus:opacity-100"
+                              className="rounded p-0.5 text-red-300/60 opacity-0 transition hover:text-red-200 hover:drop-shadow-[0_0_5px_rgba(248,113,113,0.75)] focus:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-40 group-hover:disabled:opacity-40"
                               aria-label={`Delete ${source.filename}`}
                             >
-                              <Trash2 className="h-3.5 w-3.5" />
+                              <Trash2 className="h-3 w-3" />
                             </button>
                           ) : null}
                         </div>
