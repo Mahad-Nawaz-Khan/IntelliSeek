@@ -4,6 +4,7 @@ import { ChevronDown, Database, FileText, FileUp, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import type { KnowledgeSourceGroup } from "../../lib/ui-state";
+import { SessionTitleLabel } from "./SessionTitleLabel";
 import { StatusBadge } from "../ui/StatusBadge";
 
 type SourceGroupsProps = {
@@ -90,7 +91,12 @@ export function SourceGroups({ groups, status, deletingSourceId, onDeleteSource,
                         <div className="flex min-w-0 items-start gap-2">
                           <FileText className={`mt-0.5 h-4 w-4 shrink-0 ${source.status === "failed" ? "text-red-300" : "text-cyan-200"}`} />
                           <div className="min-w-0 flex-1">
-                            <p className={`truncate text-sm font-medium ${source.status === "failed" ? "text-red-200" : "text-slate-100"}`}>{source.filename}</p>
+                            <p className="text-sm font-medium">
+                              <SessionTitleLabel
+                                title={source.filename}
+                                className={source.status === "failed" ? "text-red-200" : "text-slate-100"}
+                              />
+                            </p>
                             {source.status === "indexing" || source.status === "failed" ? (
                               <p className="mt-1 flex items-center">
                                 {source.status === "indexing" ? <span className="status-dot status-dot-indexing" aria-label="Indexing" /> : <span className="status-dot status-dot-failed" aria-label="Failed" />}

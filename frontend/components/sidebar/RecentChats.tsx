@@ -1,9 +1,10 @@
 "use client";
 
 import { MessageSquareText, Pencil, Trash2 } from "lucide-react";
-import { useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useState, type KeyboardEvent } from "react";
 
 import type { ChatSession } from "../../lib/ui-state";
+import { SessionTitleLabel } from "./SessionTitleLabel";
 
 type RecentChatsProps = {
   sessions: ChatSession[];
@@ -12,36 +13,6 @@ type RecentChatsProps = {
   onDeleteSession?: (sessionId: string) => void;
   onRenameSession?: (sessionId: string, title: string) => Promise<boolean>;
 };
-
-/**
- * Slides an overflowing chat title to its end on hover so the whole name can
- * be read. The distance is measured once on hover and handed to the keyframes
- * through a CSS variable; short titles never animate.
- */
-function SessionTitleLabel({ title }: { title: string }) {
-  const innerRef = useRef<HTMLSpanElement>(null);
-  const [slideDistance, setSlideDistance] = useState<number | null>(null);
-
-  const measure = () => {
-    const el = innerRef.current;
-    if (!el) return;
-    setSlideDistance(el.scrollWidth > el.clientWidth ? el.clientWidth - el.scrollWidth : null);
-  };
-  const reset = () => setSlideDistance(null);
-
-  const sliding = slideDistance !== null;
-  return (
-    <span className="block overflow-hidden" onMouseEnter={measure} onMouseLeave={reset}>
-      <span
-        ref={innerRef}
-        className={`block whitespace-nowrap text-xs font-medium text-slate-300 ${sliding ? "chat-title-sliding" : "truncate"}`}
-        style={sliding ? ({ "--chat-title-slide": `${slideDistance}px` } as CSSProperties) : undefined}
-      >
-        {title}
-      </span>
-    </span>
-  );
-}
 
 export function RecentChats({ sessions, deletingSessionId, onOpenSession, onDeleteSession, onRenameSession }: RecentChatsProps) {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
