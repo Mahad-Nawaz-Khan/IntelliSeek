@@ -87,7 +87,12 @@ export function SourceGroups({ groups, status, deletingSourceId, onDeleteSource,
                 ) : group.sources.length ? (
                   <ul className="space-y-2">
                     {group.sources.map((source) => (
-                      <li key={source.id} className="group rounded-xl px-2.5 py-2 transition hover:bg-cyan-300/8">
+                      <li
+                        key={source.id}
+                        className={`group rounded-xl px-2.5 py-2 transition hover:bg-cyan-300/8 ${
+                          source.status === "indexing" ? "status-ring status-ring-indexing" : ""
+                        }`}
+                      >
                         <div className="flex min-w-0 items-start gap-2">
                           <FileText className={`mt-0.5 h-4 w-4 shrink-0 ${source.status === "failed" ? "text-red-300" : "text-cyan-200"}`} />
                           <div className="min-w-0 flex-1">
@@ -97,9 +102,9 @@ export function SourceGroups({ groups, status, deletingSourceId, onDeleteSource,
                                 className={source.status === "failed" ? "text-red-200" : "text-slate-100"}
                               />
                             </p>
-                            {source.status === "indexing" || source.status === "failed" ? (
+                            {source.status === "failed" ? (
                               <p className="mt-1 flex items-center">
-                                {source.status === "indexing" ? <span className="status-dot status-dot-indexing" aria-label="Indexing" /> : <span className="status-dot status-dot-failed" aria-label="Failed" />}
+                                <span className="status-dot status-dot-failed" aria-label="Failed" />
                               </p>
                             ) : null}
                           </div>

@@ -81,6 +81,10 @@ export async function uploadDocumentFile({
 
   const check = isAllowedFile(file);
   if (!check.valid) return fail(check.error ?? "Invalid file");
+  // A 0-byte file is either a dragged folder (which reports size 0) or an
+  // empty file; either way there is nothing to index, so fail before the
+  // storage upload instead of with a cryptic parse error afterwards.
+  if (!file.size) return fail(`${file.name} is empty (0 bytes), so there is nothing to index.`);
   if (!isAuthLoaded) return fail("Authentication is still loading");
   if (!isSignedIn || !userId) return fail("Sign in before uploading notes");
   if (!supabase) return fail("Supabase client is not configured");
