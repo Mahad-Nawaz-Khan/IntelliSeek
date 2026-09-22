@@ -91,10 +91,11 @@ export function SourceGroups({ groups, status, deletingSourceId, onDeleteSource,
                           <FileText className={`mt-0.5 h-4 w-4 shrink-0 ${source.status === "failed" ? "text-red-300" : "text-cyan-200"}`} />
                           <div className="min-w-0 flex-1">
                             <p className={`truncate text-sm font-medium ${source.status === "failed" ? "text-red-200" : "text-slate-100"}`}>{source.filename}</p>
-                            <p className="mt-1 flex h-3 items-center">
-                              {source.status === "indexing" ? <span className="status-dot status-dot-indexing" aria-label="Indexing" /> : null}
-                              {source.status === "failed" ? <span className="status-dot status-dot-failed" aria-label="Failed" /> : null}
-                            </p>
+                            {source.status === "indexing" || source.status === "failed" ? (
+                              <p className="mt-1 flex items-center">
+                                {source.status === "indexing" ? <span className="status-dot status-dot-indexing" aria-label="Indexing" /> : <span className="status-dot status-dot-failed" aria-label="Failed" />}
+                              </p>
+                            ) : null}
                           </div>
                           {(source.sourceType === "uploaded" || (source.sourceType === "knowledge-base" && canManageKnowledgeBase)) && onDeleteSource ? (
                             <button
