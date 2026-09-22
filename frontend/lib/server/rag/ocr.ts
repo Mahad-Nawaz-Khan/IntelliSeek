@@ -39,8 +39,48 @@ async function spawnTesseractWorker(log?: RequestLogger): Promise<TesseractWorke
   }
 }
 
-const DEFAULT_GROQ_VISION_MODEL = "llama-3.2-11b-vision-preview";
+// The only vision-capable model on Groq as of 2026-09. llama-3.2-*-vision-preview
+// was removed from the platform, so the old default 404'd on every call.
+const DEFAULT_GROQ_VISION_MODEL = "qwen/qwen3.8-27b";
+// Groq's OTPM admission check rejects a request whose *expected* output exceeds
+// the org's per-minute output budget (1000 on the free tier) before it even
+// runs. Without an explicit max_tokens the model default (1454) fails that
+// check, so every page 429s and cascades down to the Tesseract fallback.
+const DEFAULT_GROQ_VISION_MAX_TOKENS = 1024;
 const OCR_TIMEOUT_MS = 25_000;
+// Cloud-vision pages processed at once. Unbounded concurrency over a batch
+// trips Groq's RPM/OTPM limits, and the 429s push pages onto lower-quality
+// fallbacks that a paced retry would have avoided.
+const OCR_PAGE_CONCURRENCY = 3;
+
+function getGroqMaxTokens(): number {
+  const raw = getServerEnv("GROQ_VISION_MAX_TOKENS");
+  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_GROQ_VISION_MAX_TOKENS;
+}
+
+/**
+ * Maps items through an async function with at most `limit` calls in flight.
+ * Results keep input order. Exported for tests.
+ */
+export async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= items.length) return;
+      results[index] = await fn(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
 
 /**
  * Checks if the text extracted by native pdf-parse is essentially empty or consists
@@ -108,12 +148,17 @@ export async function ocrWithGroqVision(
     const client = new Groq({
       apiKey,
       timeout: OCR_TIMEOUT_MS,
-      maxRetries: 1,
+      // Two retries lets the SDK honor Groq's retry-after on transient 429s
+      // instead of immediately demoting the page to a weaker fallback.
+      maxRetries: 2,
     });
 
     const base64Image = pageBuffer.toString("base64");
     const response = await client.chat.completions.create({
       model,
+      // Keep the request inside the org's OTPM admission budget; see the
+      // DEFAULT_GROQ_VISION_MAX_TOKENS note above.
+      max_tokens: getGroqMaxTokens(),
       messages: [
         {
           role: "user",
@@ -167,7 +212,10 @@ export async function ocrWithOpenRouter(
     return null;
   }
 
-  const model = getServerEnv("OPENROUTER_VISION_MODEL") ?? "google/gemini-2.0-flash-001";
+  // gemini-2.0-flash-001 was removed from OpenRouter ("No endpoints found"),
+  // and paid models stop working when credits run out, so the default is a
+  // :free vision model (verified to exist and accept image input).
+  const model = getServerEnv("OPENROUTER_VISION_MODEL") ?? "inclusionai/ling-3.0-flash-vl:free";
 
   try {
     const { default: OpenAI } = await import("openai");
@@ -179,7 +227,7 @@ export async function ocrWithOpenRouter(
         "X-Title": getServerEnv("OPENROUTER_APP_TITLE") ?? "IntelliSeek",
       },
       timeout: OCR_TIMEOUT_MS,
-      maxRetries: 1,
+      maxRetries: 2,
     });
 
     const base64Image = pageBuffer.toString("base64");
@@ -300,7 +348,10 @@ export async function extractScannedPdfText(
     return "";
   }
 
-  const OCR_BATCH_SIZE = 25;
+  // Pages rendered per wave. At scale 2.0 each page PNG can be a few MB, so a
+  // 25-page batch would hold ~200MB of buffers for the whole OCR round; 5 keeps
+  // memory bounded while still amortizing the pdf.js render call.
+  const OCR_BATCH_SIZE = 5;
 
   log?.info("ocr.pipeline.pages_detected", { totalPages, batchSize: OCR_BATCH_SIZE });
 
@@ -339,9 +390,13 @@ export async function extractScannedPdfText(
         continue;
       }
 
-      // 1. Concurrently transcribe the batch via Groq Vision, falling back to OpenRouter Vision if available
-      const visionResults = await Promise.all(
-        screenshot.pages.map(async (page) => {
+      // 1. Transcribe the batch via Groq Vision (with OpenRouter Vision as the
+      // second tier), paced through a small concurrency pool so the provider
+      // rate limits are not tripped by a simultaneous burst.
+      const visionResults = await mapWithConcurrency(
+        screenshot.pages,
+        OCR_PAGE_CONCURRENCY,
+        async (page) => {
           if (!page.data || page.data.length === 0) {
             return { pageNumber: page.pageNumber, buffer: null, text: null };
           }
@@ -351,7 +406,7 @@ export async function extractScannedPdfText(
             text = await ocrWithOpenRouter(pageBuffer, page.pageNumber, log);
           }
           return { pageNumber: page.pageNumber, buffer: pageBuffer, text };
-        }),
+        },
       );
 
       // 2. For any pages in the batch where cloud vision failed or returned empty, run Tesseract fallback

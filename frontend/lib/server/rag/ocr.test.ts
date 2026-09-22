@@ -23,6 +23,7 @@ vi.mock("tesseract.js", () => ({
 import {
   extractScannedPdfText,
   isScannedPdfText,
+  mapWithConcurrency,
   ocrWithGroqVision,
   ocrWithTesseract,
   renderPdfPagesToImages,
@@ -89,6 +90,20 @@ describe("ocrWithGroqVision", () => {
     const result = await ocrWithGroqVision(Buffer.from("fake-png-bytes"));
     expect(result).toBe("Transcribed lab report content from page image");
     expect(mockGroqCreate).toHaveBeenCalledTimes(1);
+    // The explicit max_tokens keeps the request inside Groq's OTPM admission
+    // budget; without it the provider 429s before generating anything.
+    expect(mockGroqCreate.mock.calls[0][0].max_tokens).toBe(1024);
+  });
+
+  it("honors GROQ_VISION_MAX_TOKENS when configured", async () => {
+    vi.stubEnv("GROQ_API_KEY", "gsk-mock-key");
+    vi.stubEnv("GROQ_VISION_MAX_TOKENS", "2048");
+    mockGroqCreate.mockResolvedValueOnce({
+      choices: [{ message: { content: "text" } }],
+    });
+
+    await ocrWithGroqVision(Buffer.from("fake-png-bytes"));
+    expect(mockGroqCreate.mock.calls[0][0].max_tokens).toBe(2048);
   });
 
   it("gracefully catches Groq errors and returns null instead of throwing", async () => {
@@ -122,6 +137,27 @@ describe("ocrWithTesseract", () => {
 
     const result = await ocrWithTesseract(Buffer.from("fake-img"));
     expect(result).toBe("");
+  });
+});
+
+describe("mapWithConcurrency", () => {
+  it("never exceeds the concurrency limit and preserves input order", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const result = await mapWithConcurrency([1, 2, 3, 4, 5, 6, 7], 3, async (value) => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+      return value * 10;
+    });
+    expect(peak).toBeLessThanOrEqual(3);
+    expect(result).toEqual([10, 20, 30, 40, 50, 60, 70]);
+  });
+
+  it("returns results for an empty input and a limit above the item count", async () => {
+    expect(await mapWithConcurrency([], 3, async (v: number) => v)).toEqual([]);
+    expect(await mapWithConcurrency([1, 2], 8, async (v) => v + 1)).toEqual([2, 3]);
   });
 });
 
