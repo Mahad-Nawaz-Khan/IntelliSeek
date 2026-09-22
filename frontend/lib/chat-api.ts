@@ -322,3 +322,16 @@ export async function deleteChatSession(sessionId: string): Promise<void> {
   const data = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
   if (!response.ok || !data?.ok) throw new Error(data?.error ?? "Could not delete chat session");
 }
+
+export async function renameChatSession(sessionId: string, title: string): Promise<ChatSessionSummary> {
+  const response = await fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+  const data = (await response.json().catch(() => null)) as
+    | { ok?: boolean; error?: string; session?: ChatSessionSummary }
+    | null;
+  if (!response.ok || !data?.ok || !data.session) throw new Error(data?.error ?? "Could not rename chat session");
+  return data.session;
+}

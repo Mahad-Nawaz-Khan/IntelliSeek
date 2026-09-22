@@ -20,6 +20,7 @@ import {
   deleteChatSession,
   fetchChatSessionMessages,
   fetchChatSessions,
+  renameChatSession,
   streamChatQuestion,
   streamChatQuestionDemo,
   type ChatMessage as ChatMessageType,
@@ -116,9 +117,6 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
   const recentChats = useMemo(() => recentSessionRows.map((session) => ({
     id: session.id,
     title: session.title || "New chat",
-    lastMessageAt: session.updated_at
-      ? new Date(session.updated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-      : undefined,
     status: session.id === activeSessionId ? "active" as const : "inactive" as const,
   })), [activeSessionId, recentSessionRows]);
   // While an answer is being prepared, the pill names the actual phase: the
@@ -743,6 +741,19 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
     router.push(`/chat?session=${encodeURIComponent(sessionId)}`);
   }, [demo, isLoading, router]);
 
+  const handleRenameSession = useCallback(async (sessionId: string, title: string) => {
+    if (demo) return false;
+    try {
+      const updated = await renameChatSession(sessionId, title);
+      setRecentSessionRows((current) =>
+        current.map((session) => (session.id === sessionId ? { ...session, title: updated.title } : session)),
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }, [demo]);
+
   const handleDeleteSession = useCallback(async (sessionId: string) => {
     if (deletingSessionId || demo) return;
 
@@ -897,6 +908,7 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
       deletingSessionId={deletingSessionId}
       onDeleteSource={handleDeleteSource}
       onDeleteSession={handleDeleteSession}
+      onRenameSession={handleRenameSession}
       onOpenSession={handleOpenSession}
       onNewChat={handleNewChat}
       onOpenUpload={demo ? () => setShowSignupModal(true) : () => setIsUploadOpen(true)}

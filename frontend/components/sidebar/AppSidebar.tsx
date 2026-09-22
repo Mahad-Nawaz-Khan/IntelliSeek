@@ -20,6 +20,7 @@ type AppSidebarProps = {
   onClose?: () => void;
   onDeleteSource?: (sourceId: string) => void;
   onDeleteSession?: (sessionId: string) => void;
+  onRenameSession?: (sessionId: string, title: string) => Promise<boolean>;
   onOpenSession?: (sessionId: string) => void;
   onNewChat?: () => void;
   onOpenUpload?: () => void;
@@ -35,7 +36,7 @@ const navigation = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
-export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId, deletingSessionId, onClose, onDeleteSource, onDeleteSession, onOpenSession, onNewChat, onOpenUpload, onOpenKnowledgeBaseUpload, canManageKnowledgeBase, isCollapsed, onToggleCollapsed }: AppSidebarProps) {
+export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId, deletingSessionId, onClose, onDeleteSource, onDeleteSession, onRenameSession, onOpenSession, onNewChat, onOpenUpload, onOpenKnowledgeBaseUpload, canManageKnowledgeBase, isCollapsed, onToggleCollapsed }: AppSidebarProps) {
   const pathname = usePathname();
   const { signOut, user } = useAuth();
 
@@ -172,7 +173,7 @@ export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId
       </div>
 
       <div className="pt-1">
-        <RecentChats sessions={recentChats} deletingSessionId={deletingSessionId} onDeleteSession={onDeleteSession} onOpenSession={onOpenSession} />
+        <RecentChats sessions={recentChats} deletingSessionId={deletingSessionId} onDeleteSession={onDeleteSession} onRenameSession={onRenameSession} onOpenSession={onOpenSession} />
       </div>
 
       <div className="mt-auto border-t border-white/10 px-1 pt-3">

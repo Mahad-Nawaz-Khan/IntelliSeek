@@ -82,6 +82,46 @@ export async function GET(_request: Request, context: RouteContext) {
   return Response.json({ ok: true, session, messages });
 }
 
+export async function PATCH(request: Request, context: RouteContext) {
+  const log = createRequestLogger("api.chat.session.rename");
+  const user = await getAuthenticatedUser(log);
+  if (!user) return failure(401, "Sign in is required");
+
+  const { sessionId } = await context.params;
+  if (!isUuid(sessionId)) return failure(400, "Invalid chat session id");
+
+  let body: { title?: unknown };
+  try {
+    body = (await request.json()) as { title?: unknown };
+  } catch {
+    return failure(400, "Invalid JSON request body");
+  }
+
+  const title = typeof body.title === "string" ? body.title.replace(/\s+/g, " ").trim() : "";
+  if (!title) return failure(400, "Chat title cannot be empty");
+  if (title.length > 80) return failure(400, "Chat title is too long (80 characters max)");
+
+  const supabase = getSupabaseServiceClient();
+  if (!supabase) return failure(503, "Chat sessions are unavailable");
+
+  // 'generated' marks the title as settled so a still-pending automatic title
+  // from the first answer cannot overwrite the user's rename.
+  const { data, error } = await supabase
+    .from("chat_sessions")
+    .update({ title, title_status: "generated", updated_at: new Date().toISOString() })
+    .eq("id", sessionId)
+    .eq("user_id", user.id)
+    .select("id, title, title_status, created_at, updated_at")
+    .single();
+
+  if (error || !data) {
+    log.warn("chat_sessions.rename.failed", { errorCategory: "supabase_query", userId: user.id, sessionId, error });
+    return failure(404, "Chat session was not found");
+  }
+
+  return Response.json({ ok: true, session: data });
+}
+
 export async function DELETE(_request: Request, context: RouteContext) {
   const log = createRequestLogger("api.chat.session.delete");
   const user = await getAuthenticatedUser(log);

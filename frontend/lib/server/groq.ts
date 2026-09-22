@@ -6,7 +6,10 @@ import type { ChatCompletionMessageParam } from "groq-sdk/resources/chat/complet
 import { getServerEnv } from "./env";
 import type { RetrievedContext } from "./rag/retriever";
 
-const DEFAULT_GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
+// The only text chat model still served by Groq on this account tier; the
+// previous default (meta-llama/llama-4-scout) was removed, which silently
+// pushed every answer and title onto provider fallbacks.
+const DEFAULT_GROQ_MODEL = "qwen/qwen3.8-27b";
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RETRIES = 2;
 

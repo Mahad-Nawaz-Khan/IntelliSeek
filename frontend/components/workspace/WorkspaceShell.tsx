@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useRouter } from "next/navigation";
 
 import { useAuth } from "../../context/AuthContext";
-import { deleteChatSession, fetchChatSessions, type ChatSessionSummary } from "../../lib/chat-api";
+import { deleteChatSession, fetchChatSessions, renameChatSession, type ChatSessionSummary } from "../../lib/chat-api";
 import { fetchAccessibleDocuments, fetchMyRole } from "../../lib/documents";
 import { createSourceGroups, type KnowledgeSource } from "../../lib/ui-state";
 import { AcademicWorkspace } from "../chat/AcademicWorkspace";
@@ -33,9 +33,6 @@ export function WorkspaceShell({ children }: WorkspaceShellProps) {
   const recentChats = useMemo(() => recentSessionRows.map((session) => ({
     id: session.id,
     title: session.title || "New chat",
-    lastMessageAt: session.updated_at
-      ? new Date(session.updated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-      : undefined,
     status: "inactive" as const,
   })), [recentSessionRows]);
   const completedDocumentIds = useMemo(
@@ -147,6 +144,18 @@ export function WorkspaceShell({ children }: WorkspaceShellProps) {
     }
   }, [deletingSourceId]);
 
+  const handleRenameSession = useCallback(async (sessionId: string, title: string) => {
+    try {
+      const updated = await renameChatSession(sessionId, title);
+      setRecentSessionRows((current) =>
+        current.map((session) => (session.id === sessionId ? { ...session, title: updated.title } : session)),
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
   const handleDeleteSession = useCallback(async (sessionId: string) => {
     if (deletingSessionId) return;
 
@@ -172,6 +181,7 @@ export function WorkspaceShell({ children }: WorkspaceShellProps) {
       deletingSessionId={deletingSessionId}
       onDeleteSource={handleDeleteSource}
       onDeleteSession={handleDeleteSession}
+      onRenameSession={handleRenameSession}
       onOpenSession={(sessionId) => router.push(`/chat?session=${encodeURIComponent(sessionId)}`)}
       onNewChat={() => router.push("/chat")}
       onOpenUpload={() => {

@@ -17,6 +17,7 @@ type AcademicWorkspaceProps = {
   deletingSessionId?: string | null;
   onDeleteSource?: (sourceId: string) => void;
   onDeleteSession?: (sessionId: string) => void;
+  onRenameSession?: (sessionId: string, title: string) => Promise<boolean>;
   onOpenSession?: (sessionId: string) => void;
   onNewChat?: () => void;
   onOpenUpload?: () => void;
@@ -33,6 +34,7 @@ export function AcademicWorkspace({
   deletingSessionId,
   onDeleteSource,
   onDeleteSession,
+  onRenameSession,
   onOpenSession,
   onNewChat,
   onOpenUpload,
@@ -56,6 +58,7 @@ export function AcademicWorkspace({
             deletingSessionId={deletingSessionId}
             onDeleteSource={onDeleteSource}
             onDeleteSession={onDeleteSession}
+            onRenameSession={onRenameSession}
             onOpenSession={onOpenSession}
             onNewChat={onNewChat}
             onOpenUpload={onOpenUpload}
@@ -77,6 +80,7 @@ export function AcademicWorkspace({
               onClose={() => setIsSidebarOpen(false)}
               onDeleteSource={onDeleteSource}
               onDeleteSession={onDeleteSession}
+              onRenameSession={onRenameSession}
               onOpenSession={(sessionId) => {
                 onOpenSession?.(sessionId);
                 setIsSidebarOpen(false);

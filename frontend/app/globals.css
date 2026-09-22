@@ -262,6 +262,19 @@ button:hover,
   animation: toastCompleteFlash 0.5s ease-in-out 2;
 }
 
+/* Sidebar chat titles: on hover an overflowing name slides to its end so the
+   user can read it in full, holds there, then slides back. The travel distance
+   is set per item through --chat-title-slide (see SessionTitleLabel). */
+@keyframes chat-title-slide {
+  0%, 15% { transform: translateX(0); }
+  60%, 80% { transform: translateX(var(--chat-title-slide, 0px)); }
+  100% { transform: translateX(0); }
+}
+
+.chat-title-sliding {
+  animation: chat-title-slide 4.5s ease-in-out 0.2s infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
