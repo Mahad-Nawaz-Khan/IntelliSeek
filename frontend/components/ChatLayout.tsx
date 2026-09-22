@@ -79,6 +79,7 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
   const loadedSessionRef = useRef<string | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const activeJobIdRef = useRef<string | null>(null);
   const queuedMessagesRef = useRef<QueuedChatMessage[]>([]);
   const conversationRunRef = useRef(0);
   const isLoadingRef = useRef(false);
@@ -171,6 +172,7 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
       conversationRunRef.current += 1;
       abortControllerRef.current?.abort();
       abortControllerRef.current = null;
+      activeJobIdRef.current = null;
       setSources([]);
       setRecentSessionRows([]);
       setActiveSessionId(null);
@@ -514,6 +516,9 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
           }, abortController.signal);
         } else {
           await streamChatQuestion(trimmedQuestion, {
+            onJob: (jobId) => {
+              activeJobIdRef.current = jobId;
+            },
             onDelta: (text) => {
               streamedAnswer += text;
               setMessages((current) =>
@@ -626,7 +631,10 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
           ),
         );
       } finally {
-        if (abortControllerRef.current === abortController) abortControllerRef.current = null;
+        if (abortControllerRef.current === abortController) {
+          abortControllerRef.current = null;
+          activeJobIdRef.current = null;
+        }
         setIsLoading(false);
         isLoadingRef.current = false;
 
@@ -693,6 +701,17 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
 
   const handleStopResponse = useCallback(() => {
     abortControllerRef.current?.abort();
+    const jobId = activeJobIdRef.current;
+    activeJobIdRef.current = null;
+    if (!jobId) return;
+    // Tearing down the fetch only stops the visible stream; this asks the
+    // server to cancel the background job too, so generation truly ends and
+    // only the partial answer seen so far is persisted.
+    void fetch("/api/chat/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jobId }),
+    }).catch(() => {});
   }, []);
 
   const handleNewChat = useCallback(() => {
@@ -704,6 +723,7 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
       // Detach instead of aborting: the answer keeps generating server-side
       // and is saved to its session even though this view is being reset.
       abortControllerRef.current = null;
+      activeJobIdRef.current = null;
     }
     setIsLoadingSession(false);
     setIsLoading(false);

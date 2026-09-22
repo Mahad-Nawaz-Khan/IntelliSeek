@@ -44,6 +44,18 @@ create table if not exists public.chat_sessions (
   updated_at timestamptz not null default now()
 );
 
+-- Stop requests for in-flight chat answers. The chat route generates a job id,
+-- streams it to the client as the first SSE event, and polls this table while
+-- generating; POST /api/chat/cancel inserts here so pressing Stop cancels the
+-- answer on the server as well, even when the cancel request lands on a
+-- different serverless instance than the generation. Rows are deleted by the
+-- job when it finishes; stale rows are harmless.
+create table if not exists public.chat_stop_requests (
+  job_id uuid primary key,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+
 alter table public.chat_history add column if not exists chat_session_id uuid;
 
 do $$
@@ -149,6 +161,7 @@ $$;
 alter table public.documents enable row level security;
 alter table public.chunks enable row level security;
 alter table public.chat_sessions enable row level security;
+alter table public.chat_stop_requests enable row level security;
 alter table public.chat_history enable row level security;
 alter table public.document_topics enable row level security;
 

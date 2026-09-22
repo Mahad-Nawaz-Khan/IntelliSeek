@@ -4,6 +4,12 @@ import type { ChatRetrievalHint, SourceCitation } from "../../../lib/chat-api";
 import { normalizeSourceCitations } from "../../../lib/source-citations";
 import { streamAgentAnswer, streamGeneralAgentAnswer, streamGroundedAgentAnswer, type AgentAnswerStreamEvent, type ConversationTurn } from "../../../lib/server/agents/chat-agent";
 import { getAuthenticatedUser } from "../../../lib/server/auth";
+import {
+  forgetChatJobCancelled,
+  forgetChatJobCancelledInDb,
+  isChatJobCancelledInDb,
+  isChatJobCancelledInMemory,
+} from "../../../lib/server/chat-jobs";
 import { toClientErrorMessage } from "../../../lib/server/client-errors";
 import { generateGroqChatTitle } from "../../../lib/server/groq";
 import { createRequestLogger, type LogData, type RequestLogger } from "../../../lib/server/logger";
@@ -201,16 +207,32 @@ async function generateAndStoreTitle(
     if (error) throw error;
     return title;
   } catch (error) {
-    const title = fallbackTitle(question);
-    const { error: fallbackError } = await supabase
-      .from("chat_sessions")
-      .update({ title, title_status: "fallback", updated_at: new Date().toISOString() })
-      .eq("id", chatSessionId)
-      .eq("user_id", userId)
-      .eq("title_status", "pending");
-    log?.warn("chat_sessions.title.failed", { errorCategory: "unknown", userId, sessionId: chatSessionId, error, fallbackError });
-    return fallbackError ? null : title;
+    return storeFallbackTitle(chatSessionId, userId, question, log, error);
   }
+}
+
+/** Writes the derived-from-question title without a model call. */
+async function storeFallbackTitle(
+  chatSessionId: string,
+  userId: string,
+  question: string,
+  log?: RequestLogger,
+  cause?: unknown,
+): Promise<string | null> {
+  const supabase = getSupabaseServiceClient();
+  if (!supabase) return null;
+
+  const title = fallbackTitle(question);
+  const { error: fallbackError } = await supabase
+    .from("chat_sessions")
+    .update({ title, title_status: "fallback", updated_at: new Date().toISOString() })
+    .eq("id", chatSessionId)
+    .eq("user_id", userId)
+    .eq("title_status", "pending");
+  if (cause) {
+    log?.warn("chat_sessions.title.failed", { errorCategory: "unknown", userId, sessionId: chatSessionId, error: cause, fallbackError });
+  }
+  return fallbackError ? null : title;
 }
 
 async function saveChatHistory(question: string, answer: string, sources: SourceCitation[], userId: string, chatSessionId: string, log?: RequestLogger) {
@@ -243,17 +265,42 @@ async function saveChatHistory(question: string, answer: string, sources: Source
 
 type SseSend = (event: string, data: unknown) => void;
 
-async function streamAnswer(
-  send: SseSend,
-  events: AsyncGenerator<AgentAnswerStreamEvent>,
-  question: string,
-  userId: string,
-  chatSessionId: string,
-  shouldGenerateTitle: boolean,
-  log?: RequestLogger,
-) {
+/** How often the generating job checks whether the user pressed Stop. */
+const CANCEL_CHECK_INTERVAL_MS = 1_500;
+
+async function streamAnswer(options: {
+  send: SseSend;
+  jobId: string;
+  userId: string;
+  question: string;
+  chatSessionId: string;
+  shouldGenerateTitle: boolean;
+  events: AsyncGenerator<AgentAnswerStreamEvent>;
+  log?: RequestLogger;
+}): Promise<"completed" | "cancelled"> {
+  const { send, jobId, userId, question, chatSessionId, shouldGenerateTitle, events, log } = options;
+
+  let lastCancelCheck = 0;
+  let cancelled = false;
+  // Accumulated delta text, kept so that pressing Stop can still persist
+  // whatever portion of the answer was already generated.
+  let partialAnswer = "";
+
+  const isCancelled = async () => {
+    if (isChatJobCancelledInMemory(jobId)) return true;
+    if (Date.now() - lastCancelCheck < CANCEL_CHECK_INTERVAL_MS) return false;
+    lastCancelCheck = Date.now();
+    return isChatJobCancelledInDb(jobId, userId);
+  };
+
   for await (const event of events) {
+    if (await isCancelled()) {
+      cancelled = true;
+      break;
+    }
+
     if (event.type === "delta") {
+      partialAnswer += event.text;
       send("delta", { text: event.text });
       continue;
     }
@@ -261,6 +308,7 @@ async function streamAnswer(
     if (event.type === "reset") {
       // A fallback provider is restarting the answer; the client discards the
       // partial text it already rendered.
+      partialAnswer = "";
       send("reset", {});
       log?.warn("stream.reset", { errorCategory: "unknown", userId });
       continue;
@@ -288,10 +336,24 @@ async function streamAnswer(
       const title = await generateAndStoreTitle(chatSessionId, userId, question, answer, log);
       if (title) send("title", { chatSessionId, title });
     }
-    return;
+    return "completed";
   }
 
-  throw new Error("Agent answer generation returned no content");
+  if (!cancelled) throw new Error("Agent answer generation returned no content");
+
+  // Stop was pressed. Keep whatever portion had already been generated so the
+  // session shows the same partial answer the user saw; sources never arrive
+  // for a partial answer. An empty partial has nothing worth storing.
+  const partial = partialAnswer.trim();
+  if (partial) {
+    await saveChatHistory(question, partial, [], userId, chatSessionId, log);
+    await updateChatSessionTimestamp(userId, chatSessionId, log);
+  }
+  if (shouldGenerateTitle) {
+    await storeFallbackTitle(chatSessionId, userId, question, log);
+  }
+  log?.info("stream.cancelled", { userId, sessionId: chatSessionId, partialLength: partial.length });
+  return "cancelled";
 }
 
 /**
@@ -301,14 +363,19 @@ async function streamAnswer(
  */
 async function runAnswerJob(options: {
   send: SseSend;
+  jobId: string;
   question: string;
   userId: string;
   requestedChatSessionId?: string;
   retrievalHint?: ChatRetrievalHint;
   log: RequestLogger;
 }) {
-  const { send, question, userId, requestedChatSessionId, retrievalHint, log } = options;
+  const { send, jobId, question, userId, requestedChatSessionId, retrievalHint, log } = options;
   try {
+    // Announce the job id first so a Stop press can cancel this answer even
+    // before the first token exists.
+    send("job", { jobId });
+
     const chatSession = requestedChatSessionId
       ? await getOwnedChatSession(requestedChatSessionId, userId, log)
       : await createChatSession(userId, log);
@@ -392,12 +459,20 @@ async function runAnswerJob(options: {
 
     log.info("answer.mode.selected", { userId, answerMode, contextCount: relevantContext.length });
 
-    await streamAnswer(send, events, question, userId, chatSession.id, shouldGenerateTitle, log);
+    await streamAnswer({ send, jobId, events, question, userId, chatSessionId: chatSession.id, shouldGenerateTitle, log });
   } catch (error) {
     log.error("stream.failed", { errorCategory: "unknown", userId, error });
     // Internal messages name providers, tables, and configuration; only the
     // vetted set above is safe to show a user.
     send("error", { error: toClientErrorMessage(error) });
+  } finally {
+    // Breaking out of the answer generator on cancellation closes it, which
+    // tears down the provider stream; drop the flag so nothing lingers.
+    await forgetChatJobCancelledInDb(jobId, userId).then(() => {
+      forgetChatJobCancelled(jobId);
+    }, () => {
+      forgetChatJobCancelled(jobId);
+    });
   }
 }
 
@@ -470,6 +545,7 @@ export async function POST(request: Request) {
 
       const job = runAnswerJob({
         send,
+        jobId: crypto.randomUUID(),
         question,
         userId: user.id,
         requestedChatSessionId,

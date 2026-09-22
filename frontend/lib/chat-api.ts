@@ -66,6 +66,8 @@ type StreamChatHandlers = {
    * otherwise the partial first attempt stays glued to the front of the retry.
    */
   onReset?: () => void;
+  /** The server-side job id for this answer; needed to cancel it via Stop. */
+  onJob?: (jobId: string) => void;
   onSources?: (sources: SourceCitation[]) => void;
   onDone?: (response: ChatResponse) => void;
   /** The session title, which is generated after the answer completes. */
@@ -142,6 +144,12 @@ export async function streamChatQuestion(question: string, handlers: StreamChatH
 
   function handleEvent(streamEvent: StreamEvent) {
     const data = streamEvent.data as Record<string, unknown>;
+
+    if (streamEvent.event === "job") {
+      const jobId = typeof data.jobId === "string" ? data.jobId : "";
+      if (jobId) handlers.onJob?.(jobId);
+      return;
+    }
 
     if (streamEvent.event === "delta") {
       const text = typeof data.text === "string" ? data.text : "";
