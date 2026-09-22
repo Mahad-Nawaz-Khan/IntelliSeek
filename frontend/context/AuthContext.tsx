@@ -47,7 +47,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     if (!supabase) return;
     await supabase.auth.signOut();
-    window.location.href = "/";
+    // replace() so the workspace does not stay in the history stack after
+    // signing out; Back from the homepage cannot resurface it.
+    window.location.replace("/");
   }, []);
 
   const value = useMemo<AuthContextValue>(() => ({

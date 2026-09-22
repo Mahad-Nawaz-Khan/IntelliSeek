@@ -15,6 +15,12 @@ export async function GET(request: Request) {
       : { error: new Error("Supabase Auth is not configured") };
 
     if (!error) {
+      // Popup flows land here in the popup window; send them to a page that
+      // closes itself instead of loading the workspace inside the popup. The
+      // opener tab has been polling its session and navigates on its own.
+      if (requestUrl.searchParams.get("popup") === "1") {
+        return NextResponse.redirect(new URL("/auth/complete", requestUrl.origin));
+      }
       return NextResponse.redirect(new URL(next, requestUrl.origin));
     }
   }

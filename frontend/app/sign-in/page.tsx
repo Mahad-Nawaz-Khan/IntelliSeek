@@ -14,6 +14,7 @@ import { FormEvent, Suspense, useEffect, useState } from "react";
 
 import { useTheme } from "../../context/ThemeContext";
 import { getSafeReturnPath } from "../../lib/safe-redirect";
+import { startProviderAuth } from "../../lib/oauth-popup";
 import { hasSupabasePublicConfig, supabase } from "../../lib/supabase";
 
 function getErrorMessage(error: string | null) {
@@ -59,28 +60,14 @@ function SignInForm() {
       return;
     }
 
-    const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(getSafeReturnPath(next))}`;
-    const { data, error: oauthError } = await supabase.auth.signInWithOAuth({
+    await startProviderAuth({
+      supabase,
       provider,
-      options: {
-        redirectTo,
-        skipBrowserRedirect: true,
-      },
+      next,
+      onAuthenticated: () => router.replace(getSafeReturnPath(next)),
+      onError: setError,
+      onSettled: () => setOauthProvider(null),
     });
-
-    if (oauthError) {
-      setError(oauthError.message);
-      setOauthProvider(null);
-      return;
-    }
-
-    if (data.url) {
-      window.location.assign(data.url);
-      return;
-    }
-
-    setError("Could not start OAuth sign-in.");
-    setOauthProvider(null);
   }
 
   async function handleSubmit(event: FormEvent) {
