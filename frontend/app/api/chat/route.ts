@@ -1,3 +1,5 @@
+import { after } from "next/server";
+
 import type { ChatRetrievalHint, SourceCitation } from "../../../lib/chat-api";
 import { normalizeSourceCitations } from "../../../lib/source-citations";
 import { streamAgentAnswer, streamGeneralAgentAnswer, streamGroundedAgentAnswer, type AgentAnswerStreamEvent, type ConversationTurn } from "../../../lib/server/agents/chat-agent";
@@ -239,8 +241,10 @@ async function saveChatHistory(question: string, answer: string, sources: Source
   log?.info("chat_history.insert.complete", { userId, sourceCount: sources.length });
 }
 
+type SseSend = (event: string, data: unknown) => void;
+
 async function streamAnswer(
-  controller: ReadableStreamDefaultController<Uint8Array>,
+  send: SseSend,
   events: AsyncGenerator<AgentAnswerStreamEvent>,
   question: string,
   userId: string,
@@ -250,14 +254,14 @@ async function streamAnswer(
 ) {
   for await (const event of events) {
     if (event.type === "delta") {
-      controller.enqueue(toSse("delta", { text: event.text }));
+      send("delta", { text: event.text });
       continue;
     }
 
     if (event.type === "reset") {
       // A fallback provider is restarting the answer; the client discards the
       // partial text it already rendered.
-      controller.enqueue(toSse("reset", {}));
+      send("reset", {});
       log?.warn("stream.reset", { errorCategory: "unknown", userId });
       continue;
     }
@@ -268,24 +272,133 @@ async function streamAnswer(
     if (!answer) throw new Error("Agent answer generation returned no content");
 
     const sources = normalizeSourceCitations(event.sources);
-    controller.enqueue(toSse("sources", { sources }));
+    send("sources", { sources });
+    // Persistence runs even when the client has already disconnected: the
+    // send() calls above become no-ops then, but the row has to land so the
+    // user finds the answer when they return to this session.
     await saveChatHistory(question, answer, sources, userId, chatSessionId, log);
     await updateChatSessionTimestamp(userId, chatSessionId, log);
-    controller.enqueue(toSse("done", { answer, sources, chatSessionId }));
+    send("done", { answer, sources, chatSessionId });
     log?.info("stream.complete", { userId, sourceCount: sources.length, answerLength: answer.length });
 
-    // Awaited inside the stream rather than fire-and-forget: a serverless
-    // function can be frozen the moment the response ends, which would leave the
-    // session titled "New chat" forever. The client already has its answer, so
-    // the extra time only keeps the stream open.
+    // Awaited rather than fire-and-forget: a serverless function can be frozen
+    // the moment the job ends, which would leave the session titled "New chat"
+    // forever. The after() pin on the route keeps the invocation alive for it.
     if (shouldGenerateTitle) {
       const title = await generateAndStoreTitle(chatSessionId, userId, question, answer, log);
-      if (title) controller.enqueue(toSse("title", { chatSessionId, title }));
+      if (title) send("title", { chatSessionId, title });
     }
     return;
   }
 
   throw new Error("Agent answer generation returned no content");
+}
+
+/**
+ * Generates and persists one answer, independent of the client connection.
+ * `send` streams SSE events to whichever client is still listening and
+ * silently no-ops once it has disconnected.
+ */
+async function runAnswerJob(options: {
+  send: SseSend;
+  question: string;
+  userId: string;
+  requestedChatSessionId?: string;
+  retrievalHint?: ChatRetrievalHint;
+  log: RequestLogger;
+}) {
+  const { send, question, userId, requestedChatSessionId, retrievalHint, log } = options;
+  try {
+    const chatSession = requestedChatSessionId
+      ? await getOwnedChatSession(requestedChatSessionId, userId, log)
+      : await createChatSession(userId, log);
+    const conversationContext = await getRecentConversationContext(userId, chatSession.id, log);
+    const shouldGenerateTitle = !requestedChatSessionId && chatSession.title_status === "pending";
+    log.info("retrieval.hint", {
+      userId,
+      hintKind: retrievalHint?.kind,
+      hintedDocumentCount: retrievalHint?.kind === "topic" ? retrievalHint.documentIds.length : retrievalHint ? 1 : 0,
+    });
+    const isSummaryRequest = isDocumentSummaryRequest(question);
+    let relevantContext = retrievalHint?.kind === "document"
+      ? await retrieveDocumentContextByIds(userId, [retrievalHint.documentId], 12, log)
+      : retrievalHint?.kind === "topic"
+        ? await retrieveContextFromDocumentIds(`${retrievalHint.topic}\n${question}`, userId, retrievalHint.documentIds, 8, log)
+        : [];
+    if (retrievalHint) {
+      log.info("retrieval.strategy.complete", {
+        userId,
+        strategy: retrievalHint.kind === "topic" ? "hinted_topic_semantic" : "hinted_documents",
+        contextCount: relevantContext.length,
+      });
+    }
+
+    if (!relevantContext.length && retrievalHint?.kind === "topic") {
+      log.info("retrieval.strategy.start", { userId, strategy: "hinted_topic_fallback_documents" });
+      relevantContext = await retrieveDocumentContextByIds(userId, retrievalHint.documentIds, 10, log);
+      log.info("retrieval.strategy.complete", {
+        userId,
+        strategy: "hinted_topic_fallback_documents",
+        contextCount: relevantContext.length,
+      });
+    }
+
+    if (!relevantContext.length && isSummaryRequest) {
+      log.info("retrieval.strategy.start", { userId, strategy: "representative_summary" });
+      relevantContext = await retrieveRepresentativeDocumentContext(userId, 10, question, log);
+      log.info("retrieval.strategy.complete", {
+        userId,
+        strategy: "representative_summary",
+        contextCount: relevantContext.length,
+      });
+    }
+
+    if (!relevantContext.length) {
+      log.info("retrieval.strategy.start", { userId, strategy: "hybrid_vector_keyword" });
+      const [semanticContext, keywordContext] = await Promise.all([
+        retrieveContext(question, userId, 10, log),
+        retrieveKeywordContext(question, userId, 8, log),
+      ]);
+      relevantContext = filterRelevantContext(mergeRetrievedContext(semanticContext, keywordContext), log);
+      log.info("retrieval.strategy.complete", {
+        userId,
+        strategy: "hybrid_vector_keyword",
+        contextCount: relevantContext.length,
+      });
+    }
+
+    let events: AsyncGenerator<AgentAnswerStreamEvent>;
+    let answerMode: "grounded" | "agent" | "general" | "static-warning";
+    // The indexed-but-unreadable case is decided first: previously a model
+    // answer was started and then thrown away, paying for a request whose
+    // output was never used.
+    if (!relevantContext.length && isSummaryRequest && !retrievalHint && await hasIndexedDocuments(userId, log)) {
+      answerMode = "static-warning";
+      events = streamStaticAnswer(
+        "I found indexed uploaded document metadata, but I could not load any indexed text chunks to summarize. Please re-index the document or upload it again, then try the summary request once indexing finishes.",
+      );
+    } else if (relevantContext.length) {
+      answerMode = "grounded";
+      events = streamGroundedAgentAnswer(question, relevantContext, conversationContext, log);
+    } else if (retrievalHint || isLikelyUploadedMaterialRequest(question)) {
+      answerMode = "agent";
+      log.info("retrieval.strategy.start", { userId, strategy: "agent_fallback" });
+      events = streamAgentAnswer(question, userId, conversationContext);
+    } else {
+      answerMode = "general";
+      log.info("retrieval.strategy.start", { userId, strategy: "general_answer" });
+      events = streamGeneralAgentAnswer(question, conversationContext, log);
+    }
+
+    log.info("answer.mode.selected", { userId, answerMode, contextCount: relevantContext.length });
+
+    await streamAnswer(send, events, question, userId, chatSession.id, shouldGenerateTitle, log);
+  } catch (error) {
+    log.error("stream.failed", { errorCategory: "unknown", userId, error });
+    // Internal messages name providers, tables, and configuration; only the
+    // vetted set above is safe to show a user.
+    send("error", { error: toClientErrorMessage(error) });
+  }
 }
 
 async function* streamStaticAnswer(answer: string, sources: SourceCitation[] = []): AsyncGenerator<AgentAnswerStreamEvent> {
@@ -338,102 +451,42 @@ export async function POST(request: Request) {
 
   log.info("request.validated", { userId: user.id, questionLength: question.length });
 
+  const retrievalHint = parseRetrievalHint(body.retrievalHint);
+
   const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      try {
-        const retrievalHint = parseRetrievalHint(body.retrievalHint);
-        const chatSession = requestedChatSessionId
-          ? await getOwnedChatSession(requestedChatSessionId, user.id, log)
-          : await createChatSession(user.id, log);
-        const conversationContext = await getRecentConversationContext(user.id, chatSession.id, log);
-        const shouldGenerateTitle = !requestedChatSessionId && chatSession.title_status === "pending";
-        log.info("retrieval.hint", {
-          userId: user.id,
-          hintKind: retrievalHint?.kind,
-          hintedDocumentCount: retrievalHint?.kind === "topic" ? retrievalHint.documentIds.length : retrievalHint ? 1 : 0,
-        });
-        const isSummaryRequest = isDocumentSummaryRequest(question);
-        let relevantContext = retrievalHint?.kind === "document"
-          ? await retrieveDocumentContextByIds(user.id, [retrievalHint.documentId], 12, log)
-          : retrievalHint?.kind === "topic"
-            ? await retrieveContextFromDocumentIds(`${retrievalHint.topic}\n${question}`, user.id, retrievalHint.documentIds, 8, log)
-            : [];
-        if (retrievalHint) {
-          log.info("retrieval.strategy.complete", {
-            userId: user.id,
-            strategy: retrievalHint.kind === "topic" ? "hinted_topic_semantic" : "hinted_documents",
-            contextCount: relevantContext.length,
-          });
+    start(controller) {
+      let clientGone = false;
+      const send: SseSend = (event, data) => {
+        if (clientGone) return;
+        try {
+          controller.enqueue(toSse(event, data));
+        } catch {
+          // The client navigated away or closed the tab mid-answer. Stop
+          // writing; the job keeps running so the answer is still persisted
+          // for the user's next visit to the session.
+          clientGone = true;
         }
+      };
 
-        if (!relevantContext.length && retrievalHint?.kind === "topic") {
-          log.info("retrieval.strategy.start", { userId: user.id, strategy: "hinted_topic_fallback_documents" });
-          relevantContext = await retrieveDocumentContextByIds(user.id, retrievalHint.documentIds, 10, log);
-          log.info("retrieval.strategy.complete", {
-            userId: user.id,
-            strategy: "hinted_topic_fallback_documents",
-            contextCount: relevantContext.length,
-          });
+      const job = runAnswerJob({
+        send,
+        question,
+        userId: user.id,
+        requestedChatSessionId,
+        retrievalHint,
+        log,
+      }).finally(() => {
+        try {
+          controller.close();
+        } catch {
+          // The stream was already torn down with the disconnected client.
         }
+      });
 
-        if (!relevantContext.length && isSummaryRequest) {
-          log.info("retrieval.strategy.start", { userId: user.id, strategy: "representative_summary" });
-          relevantContext = await retrieveRepresentativeDocumentContext(user.id, 10, question, log);
-          log.info("retrieval.strategy.complete", {
-            userId: user.id,
-            strategy: "representative_summary",
-            contextCount: relevantContext.length,
-          });
-        }
-
-        if (!relevantContext.length) {
-          log.info("retrieval.strategy.start", { userId: user.id, strategy: "hybrid_vector_keyword" });
-          const [semanticContext, keywordContext] = await Promise.all([
-            retrieveContext(question, user.id, 10, log),
-            retrieveKeywordContext(question, user.id, 8, log),
-          ]);
-          relevantContext = filterRelevantContext(mergeRetrievedContext(semanticContext, keywordContext), log);
-          log.info("retrieval.strategy.complete", {
-            userId: user.id,
-            strategy: "hybrid_vector_keyword",
-            contextCount: relevantContext.length,
-          });
-        }
-
-        let events: AsyncGenerator<AgentAnswerStreamEvent>;
-        let answerMode: "grounded" | "agent" | "general" | "static-warning";
-        // The indexed-but-unreadable case is decided first: previously a model
-        // answer was started and then thrown away, paying for a request whose
-        // output was never used.
-        if (!relevantContext.length && isSummaryRequest && !retrievalHint && await hasIndexedDocuments(user.id, log)) {
-          answerMode = "static-warning";
-          events = streamStaticAnswer(
-            "I found indexed uploaded document metadata, but I could not load any indexed text chunks to summarize. Please re-index the document or upload it again, then try the summary request once indexing finishes.",
-          );
-        } else if (relevantContext.length) {
-          answerMode = "grounded";
-          events = streamGroundedAgentAnswer(question, relevantContext, conversationContext, log);
-        } else if (retrievalHint || isLikelyUploadedMaterialRequest(question)) {
-          answerMode = "agent";
-          log.info("retrieval.strategy.start", { userId: user.id, strategy: "agent_fallback" });
-          events = streamAgentAnswer(question, user.id, conversationContext);
-        } else {
-          answerMode = "general";
-          log.info("retrieval.strategy.start", { userId: user.id, strategy: "general_answer" });
-          events = streamGeneralAgentAnswer(question, conversationContext, log);
-        }
-
-        log.info("answer.mode.selected", { userId: user.id, answerMode, contextCount: relevantContext.length });
-
-        await streamAnswer(controller, events, question, user.id, chatSession.id, shouldGenerateTitle, log);
-      } catch (error) {
-        log.error("stream.failed", { errorCategory: "unknown", userId: user.id, error });
-        // Internal messages name providers, tables, and configuration; only the
-        // vetted set above is safe to show a user.
-        controller.enqueue(toSse("error", { error: toClientErrorMessage(error) }));
-      } finally {
-        controller.close();
-      }
+      // Pins the serverless invocation until the answer is generated and
+      // persisted even when the client disconnects; without it the platform
+      // cancels the function at disconnect and the answer would be lost.
+      after(() => job);
     },
   });
 

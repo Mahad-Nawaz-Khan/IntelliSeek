@@ -449,6 +449,10 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
       let streamedAnswer = "";
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
+      // The session this question belongs to as of right now. If it changes
+      // before the stream finishes, the user has navigated elsewhere and the
+      // completion must not touch the current view (see onDone below).
+      const sessionAtSend = activeSessionIdRef.current;
 
       // A fallback provider restarts the answer from the beginning, so the
       // partial text from the failed attempt is discarded rather than prefixed
@@ -536,25 +540,39 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
               );
             },
             onDone: (response) => {
-              if (response.chatSessionId) {
-                activeSessionIdRef.current = response.chatSessionId;
-                setActiveSessionId(response.chatSessionId);
-                loadedSessionRef.current = response.chatSessionId;
-                window.history.replaceState(null, "", `/chat?session=${encodeURIComponent(response.chatSessionId)}`);
+              const completedSessionId = response.chatSessionId;
+              // While generating, the user may have opened another chat. The
+              // server persists the answer either way; only touch this view's
+              // state when the user is still on the conversation asked in.
+              const stillAttached =
+                conversationRunRef.current === runScope && activeSessionIdRef.current === sessionAtSend;
+
+              if (stillAttached) {
+                if (completedSessionId) {
+                  activeSessionIdRef.current = completedSessionId;
+                  setActiveSessionId(completedSessionId);
+                  loadedSessionRef.current = completedSessionId;
+                  window.history.replaceState(null, "", `/chat?session=${encodeURIComponent(completedSessionId)}`);
+                }
+                setMessages((current) =>
+                  current.map((message) =>
+                    message.id === assistantId
+                      ? {
+                          ...message,
+                          content: response.answer,
+                          displayedContent: undefined,
+                          sources: response.sources,
+                          status: "complete",
+                        }
+                      : message,
+                  ),
+                );
+              } else if (completedSessionId) {
+                // Invalidate the cached load so revisiting the session
+                // refetches and shows the answer that completed in the
+                // background.
+                if (loadedSessionRef.current === completedSessionId) loadedSessionRef.current = null;
               }
-              setMessages((current) =>
-                current.map((message) =>
-                  message.id === assistantId
-                    ? {
-                        ...message,
-                        content: response.answer,
-                        displayedContent: undefined,
-                        sources: response.sources,
-                        status: "complete",
-                      }
-                    : message,
-                ),
-              );
               void refreshRecentChats();
             },
             // The title is generated after the answer, so it is applied when it
@@ -679,8 +697,14 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
 
   const handleNewChat = useCallback(() => {
     conversationRunRef.current += 1;
-    abortControllerRef.current?.abort();
-    abortControllerRef.current = null;
+    if (demo) {
+      // The demo stream is a local fake with nothing to persist; cancel it.
+      abortControllerRef.current?.abort();
+    } else {
+      // Detach instead of aborting: the answer keeps generating server-side
+      // and is saved to its session even though this view is being reset.
+      abortControllerRef.current = null;
+    }
     setIsLoadingSession(false);
     setIsLoading(false);
     isLoadingRef.current = false;
