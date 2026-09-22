@@ -19,5 +19,10 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.redirect(new URL("/sign-in?error=auth_callback_failed", requestUrl.origin));
+  // Keep ?next so a retry (e.g. the sign-in page's provider buttons) drops the
+  // user on the page they originally asked for instead of the default.
+  const signInUrl = new URL("/sign-in", requestUrl.origin);
+  signInUrl.searchParams.set("error", "auth_callback_failed");
+  signInUrl.searchParams.set("next", next);
+  return NextResponse.redirect(signInUrl);
 }
