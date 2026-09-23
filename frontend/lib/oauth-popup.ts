@@ -16,7 +16,8 @@ type StartProviderAuthOptions = {
 
 const POPUP_NAME = "intelliseek-oauth";
 const POPUP_FEATURES = "popup=true,width=520,height=720";
-const POPUP_TIMEOUT_MS = 120_000;
+const POPUP_TIMEOUT_MS = 300_000;
+const POLL_INTERVAL_MS = 500;
 
 /**
  * Starts a Google/GitHub sign-in.
@@ -64,26 +65,67 @@ export async function startProviderAuth({
 
   popup.location.href = data.url;
 
+  // Completion is detected by polling the session, NOT by watching the popup:
+  // the session cookie lands in this browser's shared jar the moment the
+  // popup's code exchange succeeds, so a local session read works even when
+  // the popup refuses to close itself, when popup.closed lies (embedded
+  // browsers return shell handles), or when the popup was closed manually at
+  // exactly the wrong moment. Closing the popup remotely and reporting a
+  // cancelled sign-in remain best-effort secondary signals.
   const startedAt = Date.now();
+  let settled = false;
+
   const poll = window.setInterval(() => {
-    if (!popup.closed) {
-      if (Date.now() - startedAt > POPUP_TIMEOUT_MS) {
+    if (settled) return;
+
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (settled || !data.session) return;
+        settled = true;
         window.clearInterval(poll);
-        popup.close();
-        onError("Sign-in took too long. Please try again.");
+        try {
+          popup.close();
+        } catch {
+          // The popup may already be gone or the handle may be a stub.
+        }
+        onAuthenticated();
         onSettled();
-      }
+      })
+      .catch(() => {});
+
+    if (settled) return;
+
+    if (popup.closed) {
+      settled = true;
+      window.clearInterval(poll);
+      supabase.auth
+        .getUser()
+        .then(({ data: { user } }) => {
+          if (user) {
+            onAuthenticated();
+          } else {
+            onError("Sign-in was cancelled before it finished.");
+          }
+          onSettled();
+        })
+        .catch(() => {
+          onError("Sign-in was cancelled before it finished.");
+          onSettled();
+        });
       return;
     }
 
-    window.clearInterval(poll);
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) {
-        onAuthenticated();
-      } else {
-        onError("Sign-in was cancelled before it finished.");
+    if (Date.now() - startedAt > POPUP_TIMEOUT_MS) {
+      settled = true;
+      window.clearInterval(poll);
+      try {
+        popup.close();
+      } catch {
+        // Ignore: nothing more can be done with the handle.
       }
+      onError("Sign-in took too long. Please try again.");
       onSettled();
-    });
-  }, 400);
+    }
+  }, POLL_INTERVAL_MS);
 }
