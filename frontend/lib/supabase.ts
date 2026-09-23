@@ -12,6 +12,6 @@ export function hasSupabasePublicConfig() {
   return isConfigured(supabaseUrl) && isConfigured(supabasePublicKey);
 }
 
-export const supabase = hasSupabasePublicConfig()
-  ? createBrowserClient(supabaseUrl!, supabasePublicKey!)
+export const supabase = (supabaseUrl && supabasePublicKey && hasSupabasePublicConfig())
+  ? createBrowserClient(supabaseUrl, supabasePublicKey)
   : null;

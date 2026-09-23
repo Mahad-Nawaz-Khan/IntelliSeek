@@ -15,7 +15,7 @@ type WorkspaceShellProps = {
   children: ReactNode;
 };
 
-export function WorkspaceShell({ children }: WorkspaceShellProps) {
+export function WorkspaceShell({ children }: Readonly<WorkspaceShellProps>) {
   const router = useRouter();
   const { isLoaded, isSignedIn, user } = useAuth();
   const [sources, setSources] = useState<KnowledgeSource[]>([]);
@@ -79,13 +79,12 @@ export function WorkspaceShell({ children }: WorkspaceShellProps) {
     if (didLoadSidebarRef.current) return;
     didLoadSidebarRef.current = true;
 
-    void refreshSources();
-    void refreshRecentChats();
-    void refreshRole();
+    refreshSources().catch(() => {});
+    refreshRecentChats().catch(() => {});
+    refreshRole().catch(() => {});
   }, [isLoaded, isSignedIn, refreshRecentChats, refreshRole, refreshSources, router, user]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setUploadToasts((current) =>
       current.map((toast) => {
         if (toast.status !== "uploading" && toast.status !== "indexing") return toast;
@@ -106,7 +105,9 @@ export function WorkspaceShell({ children }: WorkspaceShellProps) {
     const hasIndexing = sources.some((source) => source.status === "indexing");
     if (!hasIndexing) return;
 
-    const interval = window.setInterval(() => void refreshSources(), 3000);
+    const interval = window.setInterval(() => {
+      refreshSources().catch(() => {});
+    }, 3000);
     return () => window.clearInterval(interval);
   }, [refreshSources, sources]);
 
@@ -116,8 +117,11 @@ export function WorkspaceShell({ children }: WorkspaceShellProps) {
       .map((toast) => toast.toastId);
     if (!completedIds.length) return;
 
+    const filterCompleted = (current: UploadIndexingToast[]) =>
+      current.filter((toast) => !completedIds.includes(toast.toastId));
+
     const timeout = window.setTimeout(() => {
-      setUploadToasts((current) => current.filter((toast) => !completedIds.includes(toast.toastId)));
+      setUploadToasts(filterCompleted);
     }, 1800);
 
     return () => window.clearTimeout(timeout);
@@ -203,7 +207,9 @@ export function WorkspaceShell({ children }: WorkspaceShellProps) {
         }}
         uploadTarget={uploadTarget}
         onUploadToast={(toast) => {
-          if (toast.documentId) void refreshSources({ force: true });
+          if (toast.documentId) {
+            refreshSources({ force: true }).catch(() => {});
+          }
           setUploadToasts((current) => {
             const existing = current.find((item) => item.toastId === toast.toastId);
             return [

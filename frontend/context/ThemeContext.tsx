@@ -43,7 +43,7 @@ function subscribe(callback: () => void) {
   };
 }
 
-export function ThemeProvider({ children }: { children: ReactNode }) {
+export function ThemeProvider({ children }: Readonly<{ children: ReactNode }>) {
   const theme = useSyncExternalStore<Theme>(
     subscribe,
     getStoredTheme,

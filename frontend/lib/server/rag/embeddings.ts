@@ -52,6 +52,47 @@ function normalizeEmbeddingResponse(
   return embeddings;
 }
 
+async function postEmbeddingRequest(
+  inputs: string[],
+  model: string,
+  apiKey: string,
+): Promise<Response> {
+  return fetch(OPENROUTER_EMBEDDINGS_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      input: inputs,
+      dimensions: EMBEDDING_DIMENSION,
+    }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+}
+
+function handleFailedResponse(
+  response: Response,
+  model: string,
+  inputCount: number,
+  attempt: number,
+  startedAt: number,
+  log?: RequestLogger,
+): boolean {
+  const retryable = response.status === 429 || response.status >= 500;
+  const level = retryable ? "warn" : "error";
+  log?.[level]("embeddings.http.failed", {
+    errorCategory: "embedding_failure",
+    model,
+    inputCount,
+    status: response.status,
+    attempt,
+    durationMs: Date.now() - startedAt,
+  });
+  return retryable;
+}
+
 async function embedBatch(
   inputs: string[],
   model: string,
@@ -63,21 +104,7 @@ async function embedBatch(
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     let response: Response;
     try {
-      response = await fetch(OPENROUTER_EMBEDDINGS_URL, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model,
-          input: inputs,
-          dimensions: EMBEDDING_DIMENSION,
-        }),
-        // Without a timeout a hung provider connection holds the Inngest step
-        // open until the platform kills it, losing the retry.
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      });
+      response = await postEmbeddingRequest(inputs, model, apiKey);
     } catch (error) {
       log?.warn("embeddings.http.unreachable", {
         errorCategory: "embedding_failure",
@@ -93,16 +120,7 @@ async function embedBatch(
     }
 
     if (!response.ok) {
-      // 4xx other than 429 will not change on retry, so fail fast.
-      const retryable = response.status === 429 || response.status >= 500;
-      log?.[retryable ? "warn" : "error"]("embeddings.http.failed", {
-        errorCategory: "embedding_failure",
-        model,
-        inputCount: inputs.length,
-        status: response.status,
-        attempt,
-        durationMs: Date.now() - startedAt,
-      });
+      const retryable = handleFailedResponse(response, model, inputs.length, attempt, startedAt, log);
       if (!retryable || attempt === MAX_ATTEMPTS) throw new Error("Embedding generation failed");
       await delay(RETRY_BASE_DELAY_MS * attempt);
       continue;

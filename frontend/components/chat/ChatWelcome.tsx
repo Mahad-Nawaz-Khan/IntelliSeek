@@ -8,7 +8,7 @@ type ChatWelcomeProps = {
   onSelect: (question: string) => void;
 };
 
-export function ChatWelcome({ disabled = false, onSelect }: ChatWelcomeProps) {
+export function ChatWelcome({ disabled = false, onSelect }: Readonly<ChatWelcomeProps>) {
   return (
     <section className="mx-auto my-0 flex w-full min-w-0 flex-col items-center px-0 py-0 text-center lg:max-w-4xl lg:px-4">
       <BrandMark size="lg" className="mb-5" />

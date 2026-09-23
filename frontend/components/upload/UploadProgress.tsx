@@ -12,30 +12,47 @@ type UploadProgressProps = {
  * while uploading (blue to cyan) or indexing (purple), a red outline with red
  * text on failure, and a plain neutral card once indexed.
  */
-export function UploadProgress({ item, onRetry }: UploadProgressProps) {
+function getEstimatedProgress(status: UploadItem["status"], progress?: number): number {
+  if (typeof progress === "number") return progress;
+  if (status === "indexed") return 100;
+  if (status === "indexing") return 80;
+  return 45;
+}
+
+function getUploadCardClass(status: UploadItem["status"]): string {
+  if (status === "failed") {
+    return "rounded-2xl border border-red-400/60 bg-red-400/5 p-4";
+  }
+  if (status === "indexed") {
+    return "rounded-2xl border border-white/10 bg-white/5 p-4";
+  }
+  const ringModifier = status === "indexing" ? "status-ring-indexing" : "status-ring-uploading";
+  return `status-ring rounded-2xl bg-slate-950/95 p-4 ${ringModifier}`;
+}
+
+function renderUploadStatusIcon(status: UploadItem["status"]) {
+  if (status === "failed") {
+    return <AlertCircle className="h-5 w-5 text-red-300" />;
+  }
+  if (status === "indexed") {
+    return <CheckCircle2 className="h-5 w-5 text-slate-300" />;
+  }
+  const colorClass = status === "indexing" ? "text-purple-300" : "text-cyan-300";
+  return <Loader2 className={`h-5 w-5 animate-spin ${colorClass}`} />;
+}
+
+export function UploadProgress({ item, onRetry }: Readonly<UploadProgressProps>) {
   const isFailed = item.status === "failed";
-  const isComplete = item.status === "indexed";
   const isIndexing = item.status === "indexing";
   const isInProgress = item.status === "uploading" || isIndexing;
-  const progress = item.progress ?? (isComplete ? 100 : isIndexing ? 80 : 45);
-
-  const cardClass = isFailed
-    ? "rounded-2xl border border-red-400/60 bg-red-400/5 p-4"
-    : isComplete
-      ? "rounded-2xl border border-white/10 bg-white/5 p-4"
-      : `status-ring rounded-2xl bg-slate-950/95 p-4 ${isIndexing ? "status-ring-indexing" : "status-ring-uploading"}`;
+  const progress = getEstimatedProgress(item.status, item.progress);
+  const cardClass = getUploadCardClass(item.status);
 
   const body = (
     <div className="p-4">
       <div className="flex items-start gap-3">
         <div className="mt-0.5 text-slate-100">
-          {isFailed ? (
-            <AlertCircle className="h-5 w-5 text-red-300" />
-          ) : isComplete ? (
-            <CheckCircle2 className="h-5 w-5 text-slate-300" />
-          ) : (
-            <Loader2 className={`h-5 w-5 animate-spin ${isIndexing ? "text-purple-300" : "text-cyan-300"}`} />
-          )}
+          {renderUploadStatusIcon(item.status)}
         </div>
         <div className="min-w-0 flex-1">
           <p className={`truncate text-sm font-semibold ${isFailed ? "text-red-200" : "text-white"}`}>{item.filename}</p>

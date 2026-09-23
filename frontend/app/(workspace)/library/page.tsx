@@ -31,8 +31,7 @@ export default function LibraryPage() {
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void refreshSources();
+    refreshSources().catch(() => {});
     fetchMyRole()
       .then((role) => setIsAdmin(role === "admin"))
       .catch(() => setIsAdmin(false));
@@ -40,7 +39,9 @@ export default function LibraryPage() {
 
   useEffect(() => {
     if (!sources.some((source) => source.status === "indexing")) return;
-    const interval = window.setInterval(() => void refreshSources(), 3000);
+    const interval = window.setInterval(() => {
+      refreshSources().catch(() => {});
+    }, 3000);
     return () => window.clearInterval(interval);
   }, [refreshSources, sources]);
 
@@ -93,7 +94,9 @@ export default function LibraryPage() {
         onClose={() => setIsUploadOpen(false)}
         uploadTarget="knowledge_base"
         onUploadToast={(toast) => {
-          if (toast.documentId) void refreshSources({ force: true });
+          if (toast.documentId) {
+            refreshSources({ force: true }).catch(() => {});
+          }
           setUploadToasts((current) => {
             const existing = current.find((item) => item.toastId === toast.toastId);
             return [
@@ -123,7 +126,17 @@ type SourceSectionProps = {
   emptyMessage: string;
 };
 
-function SourceSection({ title, items, emptyMessage }: SourceSectionProps) {
+function getSourceCardClass(isFailed: boolean, isInProgress: boolean): string {
+  if (isFailed) {
+    return "rounded-3xl border border-red-400/60 bg-red-400/5 p-4";
+  }
+  if (isInProgress) {
+    return "status-ring status-ring-indexing rounded-3xl bg-slate-950/95 p-4";
+  }
+  return "rounded-3xl border border-white/10 bg-white/5 p-4";
+}
+
+function SourceSection({ title, items, emptyMessage }: Readonly<SourceSectionProps>) {
   return (
     <section className="rounded-4xl border border-white/10 bg-slate-950/55 p-5 shadow-xl shadow-slate-950/30 backdrop-blur-xl">
       <h2 className="mb-4 text-lg font-semibold text-white">{title}</h2>
@@ -134,11 +147,7 @@ function SourceSection({ title, items, emptyMessage }: SourceSectionProps) {
             // Indexed (and its aliases) render as a plain card; only failed and
             // in-progress documents carry a visual signal.
             const isInProgress = item.status !== "indexed" && !isFailed;
-            const cardClass = isFailed
-              ? "rounded-3xl border border-red-400/60 bg-red-400/5 p-4"
-              : isInProgress
-                ? "status-ring status-ring-indexing rounded-3xl bg-slate-950/95 p-4"
-                : "rounded-3xl border border-white/10 bg-white/5 p-4";
+            const cardClass = getSourceCardClass(isFailed, isInProgress);
 
             const body = (
               <div className="p-4">

@@ -31,7 +31,7 @@ export function ChatComposer({
   onRemoveQueuedMessage,
   onStopResponse,
   onOpenUpload,
-}: ChatComposerProps) {
+}: Readonly<ChatComposerProps>) {
   return (
     <div className="mx-auto w-full max-w-5xl space-y-2">
       {queuedMessages.length > 0 && (

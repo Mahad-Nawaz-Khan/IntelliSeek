@@ -92,8 +92,8 @@ function compareSuggestions(a: AutocompleteSuggestion, b: AutocompleteSuggestion
 }
 
 export class TrieAutocomplete {
-  private root = createNode();
-  private seen = new Set<string>();
+  private readonly root = createNode();
+  private readonly seen = new Set<string>();
 
   static fromSuggestions(suggestions: AutocompleteSuggestion[]) {
     const trie = new TrieAutocomplete();

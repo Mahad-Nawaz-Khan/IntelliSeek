@@ -14,7 +14,7 @@ type RecentChatsProps = {
   onRenameSession?: (sessionId: string, title: string) => Promise<boolean>;
 };
 
-export function RecentChats({ sessions, deletingSessionId, onOpenSession, onDeleteSession, onRenameSession }: RecentChatsProps) {
+export function RecentChats({ sessions, deletingSessionId, onOpenSession, onDeleteSession, onRenameSession }: Readonly<RecentChatsProps>) {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
   const [savingSessionId, setSavingSessionId] = useState<string | null>(null);

@@ -40,7 +40,7 @@ export function AcademicWorkspace({
   onOpenUpload,
   onOpenKnowledgeBaseUpload,
   canManageKnowledgeBase,
-}: AcademicWorkspaceProps) {
+}: Readonly<AcademicWorkspaceProps>) {
   const { theme, toggleTheme } = useTheme();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isDesktopSidebarCollapsed, setIsDesktopSidebarCollapsed] = useState(false);

@@ -64,7 +64,7 @@ type HistoryRow = {
 };
 
 function toAutocompleteId(input: string) {
-  return input.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return input.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(?:^-)|(?:-$)/g, "");
 }
 
 const BLOCKED_TOPIC_WORDS = new Set([

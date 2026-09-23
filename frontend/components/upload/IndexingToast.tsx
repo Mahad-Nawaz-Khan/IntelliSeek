@@ -28,29 +28,41 @@ function AnimatedDots() {
   return <span className="inline-block w-6 text-left">{"".padEnd(count, ".")}</span>;
 }
 
-function ToastCard({ toast, onDismiss }: { toast: UploadIndexingToast; onDismiss: (id: string) => void }) {
+function getStageLabel(status: UploadIndexingToast["status"]): string {
+  switch (status) {
+    case "uploading":
+      return "Uploading";
+    case "indexing":
+      return "Indexing";
+    case "completed":
+      return "Ready";
+    case "failed":
+    default:
+      return "Failed";
+  }
+}
+
+function getToastCardStatusClass(isComplete: boolean, isFailed: boolean): string {
+  if (isComplete) {
+    return "border-emerald-400/40 bg-emerald-400/10 indexing-toast-complete";
+  }
+  if (isFailed) {
+    return "border-red-400/30 bg-red-400/10";
+  }
+  return "border-cyan-300/20 bg-slate-950/80";
+}
+
+function ToastCard({ toast, onDismiss }: Readonly<{ toast: UploadIndexingToast; onDismiss: (id: string) => void }>) {
   const isWorking = toast.status === "uploading" || toast.status === "indexing";
   const isComplete = toast.status === "completed";
   const isFailed = toast.status === "failed";
-
-  const stageLabel =
-    toast.status === "uploading"
-      ? "Uploading"
-      : toast.status === "indexing"
-        ? "Indexing"
-        : toast.status === "completed"
-          ? "Ready"
-          : "Failed";
+  const stageLabel = getStageLabel(toast.status);
 
   return (
     <div
       className={[
         "relative overflow-hidden rounded-2xl border backdrop-blur-xl shadow-2xl shadow-slate-950/40 transition-all duration-300",
-        isComplete
-          ? "border-emerald-400/40 bg-emerald-400/10 indexing-toast-complete"
-          : isFailed
-            ? "border-red-400/30 bg-red-400/10"
-            : "border-cyan-300/20 bg-slate-950/80",
+        getToastCardStatusClass(isComplete, isFailed),
       ].join(" ")}
     >
       <div className="flex items-start gap-3 px-4 py-3">
@@ -93,7 +105,7 @@ function ToastCard({ toast, onDismiss }: { toast: UploadIndexingToast; onDismiss
   );
 }
 
-export function IndexingToast({ toasts, onDismiss }: IndexingToastProps) {
+export function IndexingToast({ toasts, onDismiss }: Readonly<IndexingToastProps>) {
   if (toasts.length === 0) return null;
 
   return (

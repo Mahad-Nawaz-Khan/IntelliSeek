@@ -9,7 +9,7 @@ type ChatHeaderProps = {
   onOpenUpload: () => void;
 };
 
-export function ChatHeader({ onOpenUpload }: ChatHeaderProps) {
+export function ChatHeader({ onOpenUpload }: Readonly<ChatHeaderProps>) {
   const { theme, toggleTheme } = useTheme();
   const isDark = theme === "dark";
 

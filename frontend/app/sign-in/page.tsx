@@ -18,12 +18,10 @@ import { startProviderAuth } from "../../lib/oauth-popup";
 import { hasSupabasePublicConfig, supabase } from "../../lib/supabase";
 
 function getErrorMessage(error: string | null) {
-  switch (error) {
-    case "auth_callback_failed":
-      return "Sign-in could not be completed. Please try again.";
-    default:
-      return null;
+  if (error === "auth_callback_failed") {
+    return "Sign-in could not be completed. Please try again.";
   }
+  return null;
 }
 
 function SignInForm() {

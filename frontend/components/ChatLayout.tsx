@@ -51,10 +51,76 @@ type ChatLayoutProps = {
 };
 
 function toAutocompleteId(input: string) {
-  return input.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return input.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(?:^-)|(?:-$)/g, "");
 }
 
-export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) {
+function patchAssistantMessage(
+  messages: ChatMessageType[],
+  assistantId: string,
+  patch: Partial<ChatMessageType>,
+): ChatMessageType[] {
+  return messages.map((message) => (message.id === assistantId ? { ...message, ...patch } : message));
+}
+
+function updateSessionTitleInRows(
+  rows: ChatSessionSummary[],
+  sessionId: string,
+  title: string,
+): ChatSessionSummary[] {
+  return rows.map((session) =>
+    session.id === sessionId ? { ...session, title, title_status: "generated" as const } : session,
+  );
+}
+
+function resolveErrorMessage(
+  error: unknown,
+  isAbort: boolean,
+  streamedAnswer: string,
+): { content: string; status: "complete" | "error" } {
+  if (isAbort) {
+    return {
+      content: streamedAnswer,
+      status: "complete",
+    };
+  }
+  return {
+    content: error instanceof Error ? error.message : "The assistant could not answer this question.",
+    status: "error",
+  };
+}
+
+type ChatConversationViewProps = {
+  isLoadingSession: boolean;
+  messages: ChatMessageType[];
+  isLoading: boolean;
+  onSubmit: (question: string) => boolean;
+  bottomRef: React.RefObject<HTMLDivElement | null>;
+};
+
+function ChatConversationView({
+  isLoadingSession,
+  messages,
+  isLoading,
+  onSubmit,
+  bottomRef,
+}: Readonly<ChatConversationViewProps>) {
+  if (isLoadingSession) {
+    return <div className="mx-auto max-w-5xl py-10 text-sm text-slate-400">Loading conversation...</div>;
+  }
+  if (messages.length === 0) {
+    return <ChatWelcome disabled={isLoading} onSelect={onSubmit} />;
+  }
+  return (
+    <div className="mx-auto max-w-5xl space-y-5">
+      {messages.map((message) => (
+        <ChatMessage key={message.id} message={message} />
+      ))}
+      <div ref={bottomRef} />
+    </div>
+  );
+}
+
+export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayoutProps>) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { isLoaded, isSignedIn, user } = useAuth();
@@ -252,7 +318,7 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
         setMessages(result.messages);
         setIsLoadingSession(false);
         isLoadingSessionRef.current = false;
-        void refreshRecentChats();
+        refreshRecentChats().catch(() => {});
       } catch {
         if (!active) return;
         setActiveSessionId(null);
@@ -339,10 +405,11 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
 
     if (completedIds.length === 0) return;
 
+    const filterCompletedToasts = (current: UploadIndexingToast[]) =>
+      current.filter((t) => !completedIds.includes(t.toastId));
+
     const timeout = window.setTimeout(() => {
-      setUploadToasts((current) =>
-        current.filter((t) => !completedIds.includes(t.toastId)),
-      );
+      setUploadToasts(filterCompletedToasts);
     }, 1800);
 
     return () => window.clearTimeout(timeout);
@@ -373,14 +440,14 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
     if (!files.length || demo) return;
 
     files.forEach((file) => {
-      void uploadDocumentFile({
+      uploadDocumentFile({
         file,
         userId: user?.id,
         isAuthLoaded: isLoaded,
         isSignedIn,
         toastValidationFailures: true,
         onToast: handleUploadToast,
-      });
+      }).catch(() => {});
     });
   }, [demo, handleUploadToast, isLoaded, isSignedIn, user]);
 
@@ -460,11 +527,11 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
       const resetStreamedAnswer = () => {
         streamedAnswer = "";
         setMessages((current) =>
-          current.map((message) =>
-            message.id === assistantId
-              ? { ...message, content: "", displayedContent: "", status: "loading" }
-              : message,
-          ),
+          patchAssistantMessage(current, assistantId, {
+            content: "",
+            displayedContent: "",
+            status: "loading",
+          }),
         );
       };
 
@@ -474,41 +541,27 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
             onDelta: (text) => {
               streamedAnswer += text;
               setMessages((current) =>
-                current.map((message) =>
-                  message.id === assistantId
-                    ? {
-                        ...message,
-                        content: streamedAnswer,
-                        displayedContent: streamedAnswer,
-                        status: "complete",
-                      }
-                    : message,
-                ),
+                patchAssistantMessage(current, assistantId, {
+                  content: streamedAnswer,
+                  displayedContent: streamedAnswer,
+                  status: "complete",
+                }),
               );
             },
             onReset: resetStreamedAnswer,
             onSources: (sources) => {
               setMessages((current) =>
-                current.map((message) =>
-                  message.id === assistantId
-                    ? { ...message, sources }
-                    : message,
-                ),
+                patchAssistantMessage(current, assistantId, { sources }),
               );
             },
             onDone: (response) => {
               setMessages((current) =>
-                current.map((message) =>
-                  message.id === assistantId
-                    ? {
-                        ...message,
-                        content: response.answer,
-                        displayedContent: undefined,
-                        sources: response.sources,
-                        status: "complete",
-                      }
-                    : message,
-                ),
+                patchAssistantMessage(current, assistantId, {
+                  content: response.answer,
+                  displayedContent: undefined,
+                  sources: response.sources,
+                  status: "complete",
+                }),
               );
             },
           }, abortController.signal);
@@ -520,26 +573,17 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
             onDelta: (text) => {
               streamedAnswer += text;
               setMessages((current) =>
-                current.map((message) =>
-                  message.id === assistantId
-                    ? {
-                        ...message,
-                        content: streamedAnswer,
-                        displayedContent: streamedAnswer,
-                        status: "complete",
-                      }
-                    : message,
-                ),
+                patchAssistantMessage(current, assistantId, {
+                  content: streamedAnswer,
+                  displayedContent: streamedAnswer,
+                  status: "complete",
+                }),
               );
             },
             onReset: resetStreamedAnswer,
             onSources: (sources) => {
               setMessages((current) =>
-                current.map((message) =>
-                  message.id === assistantId
-                    ? { ...message, sources }
-                    : message,
-                ),
+                patchAssistantMessage(current, assistantId, { sources }),
               );
             },
             onDone: (response) => {
@@ -558,25 +602,20 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
                   window.history.replaceState(null, "", `/chat?session=${encodeURIComponent(completedSessionId)}`);
                 }
                 setMessages((current) =>
-                  current.map((message) =>
-                    message.id === assistantId
-                      ? {
-                          ...message,
-                          content: response.answer,
-                          displayedContent: undefined,
-                          sources: response.sources,
-                          status: "complete",
-                        }
-                      : message,
-                  ),
+                  patchAssistantMessage(current, assistantId, {
+                    content: response.answer,
+                    displayedContent: undefined,
+                    sources: response.sources,
+                    status: "complete",
+                  }),
                 );
-              } else if (completedSessionId) {
+              } else if (completedSessionId && loadedSessionRef.current === completedSessionId) {
                 // Invalidate the cached load so revisiting the session
                 // refetches and shows the answer that completed in the
                 // background.
-                if (loadedSessionRef.current === completedSessionId) loadedSessionRef.current = null;
+                loadedSessionRef.current = null;
               }
-              void refreshRecentChats();
+              refreshRecentChats().catch(() => {});
             },
             // The title is generated after the answer, so it is applied when it
             // arrives instead of guessing at a delay and re-fetching the list.
@@ -587,12 +626,10 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
                 // The list refresh triggered by `done` may not have landed yet;
                 // re-fetching is what picks the new session up in that case.
                 if (!current.some((session) => session.id === sessionId)) {
-                  void refreshRecentChats();
+                  refreshRecentChats().catch(() => {});
                   return current;
                 }
-                return current.map((session) =>
-                  session.id === sessionId ? { ...session, title, title_status: "generated" as const } : session,
-                );
+                return updateSessionTitleInRows(current, sessionId, title);
               });
             },
           }, {
@@ -606,27 +643,13 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
           ? error.name === "AbortError"
           : error instanceof Error && error.name === "AbortError";
 
+        const resolved = resolveErrorMessage(error, isAbort, streamedAnswer);
         setMessages((current) =>
-          current.map((message) =>
-            message.id === assistantId
-              ? isAbort
-                ? {
-                    ...message,
-                    content: streamedAnswer,
-                    displayedContent: undefined,
-                    status: "complete",
-                  }
-                : {
-                    ...message,
-                    content:
-                      error instanceof Error
-                        ? error.message
-                        : "The assistant could not answer this question.",
-                    displayedContent: undefined,
-                    status: "error",
-                  }
-              : message,
-          ),
+          patchAssistantMessage(current, assistantId, {
+            content: resolved.content,
+            displayedContent: undefined,
+            status: resolved.status,
+          }),
         );
       } finally {
         if (abortControllerRef.current === abortController) {
@@ -636,14 +659,14 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
         setIsLoading(false);
         isLoadingRef.current = false;
 
-        if (conversationRunRef.current !== runScope) return;
-
-        const [nextQueuedMessage, ...remainingQueuedMessages] = queuedMessagesRef.current;
-        if (!nextQueuedMessage) return;
-
-        queuedMessagesRef.current = remainingQueuedMessages;
-        setQueuedMessages(remainingQueuedMessages);
-        void runQuestion(nextQueuedMessage.question, nextQueuedMessage.selectedSuggestion, runScope);
+        if (conversationRunRef.current === runScope) {
+          const [nextQueuedMessage, ...remainingQueuedMessages] = queuedMessagesRef.current;
+          if (nextQueuedMessage) {
+            queuedMessagesRef.current = remainingQueuedMessages;
+            setQueuedMessages(remainingQueuedMessages);
+            runQuestion(nextQueuedMessage.question, nextQueuedMessage.selectedSuggestion, runScope).catch(() => {});
+          }
+        }
       }
     },
     [demo, refreshRecentChats],
@@ -667,7 +690,7 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
       }
 
       if (!isLoadingRef.current) {
-        void runQuestion(trimmedQuestion, selectedSuggestion);
+        runQuestion(trimmedQuestion, selectedSuggestion).catch(() => {});
         return true;
       }
 
@@ -705,7 +728,7 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
     // Tearing down the fetch only stops the visible stream; this asks the
     // server to cancel the background job too, so generation truly ends and
     // only the partial answer seen so far is persisted.
-    void fetch("/api/chat/cancel", {
+    fetch("/api/chat/cancel", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ jobId }),
@@ -828,18 +851,13 @@ export function ChatLayout({ embedded = false, demo = false }: ChatLayoutProps) 
           <div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
             <div className="flex min-h-full flex-col">
               <div className="flex-1 pb-6">
-                {isLoadingSession ? (
-                  <div className="mx-auto max-w-5xl py-10 text-sm text-slate-400">Loading conversation...</div>
-                ) : messages.length === 0 ? (
-                  <ChatWelcome disabled={isLoading} onSelect={handleSubmit} />
-                ) : (
-                  <div className="mx-auto max-w-5xl space-y-5">
-                    {messages.map((message) => (
-                      <ChatMessage key={message.id} message={message} />
-                    ))}
-                    <div ref={bottomRef} />
-                  </div>
-                )}
+                <ChatConversationView
+                  isLoadingSession={isLoadingSession}
+                  messages={messages}
+                  isLoading={isLoading}
+                  onSubmit={handleSubmit}
+                  bottomRef={bottomRef}
+                />
               </div>
 
               <div className="sticky bottom-0 z-20 -mx-4 px-4 pb-6 pt-6 sm:-mx-6 sm:px-6">

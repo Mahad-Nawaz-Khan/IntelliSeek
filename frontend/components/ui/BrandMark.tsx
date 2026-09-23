@@ -23,7 +23,7 @@ const SIZES = {
  * The rotation is wrapped in `motion-safe:` so it respects
  * `prefers-reduced-motion`.
  */
-export function BrandMark({ size = "sm", spinning = false, className = "" }: BrandMarkProps) {
+export function BrandMark({ size = "sm", spinning = false, className = "" }: Readonly<BrandMarkProps>) {
   const { frame, icon } = SIZES[size];
 
   return (

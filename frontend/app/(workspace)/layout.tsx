@@ -10,7 +10,7 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export default async function WorkspaceLayout({ children }: { children: ReactNode }) {
+export default async function WorkspaceLayout({ children }: Readonly<{ children: ReactNode }>) {
   await requireAuthenticatedUser("/chat");
 
   return <WorkspaceShell>{children}</WorkspaceShell>;

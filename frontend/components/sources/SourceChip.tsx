@@ -32,8 +32,19 @@ function formatSource(source: SourceCitation): Citation {
   };
 }
 
-export function SourceChip({ citation, source, group }: SourceChipProps) {
-  const display = citation ?? (group ? formatGroup(group) : source ? formatSource(source) : undefined);
+function resolveDisplayCitation(
+  citation?: Citation,
+  group?: GroupedSourceCitation,
+  source?: SourceCitation,
+): Citation | undefined {
+  if (citation) return citation;
+  if (group) return formatGroup(group);
+  if (source) return formatSource(source);
+  return undefined;
+}
+
+export function SourceChip({ citation, source, group }: Readonly<SourceChipProps>) {
+  const display = resolveDisplayCitation(citation, group, source);
   if (!display) return null;
 
   return (

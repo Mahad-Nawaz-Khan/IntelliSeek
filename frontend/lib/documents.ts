@@ -9,6 +9,8 @@ export type DocumentRow = {
   source_scope?: "personal" | "knowledge_base";
 };
 
+export type UserRole = "admin" | "user";
+
 type DocumentsResponse = {
   ok: boolean;
   documents?: DocumentRow[];
@@ -16,15 +18,21 @@ type DocumentsResponse = {
 
 type MeResponse = {
   ok: boolean;
-  user?: { role?: "admin" | "user" };
+  user?: { role?: UserRole };
 };
 
+function resolveKnowledgeSourceStatus(processingStatus?: DocumentRow["processing_status"]): "indexing" | "failed" | "indexed" {
+  if (processingStatus === "queued" || processingStatus === "processing" || processingStatus === "uploaded") {
+    return "indexing";
+  }
+  if (processingStatus === "failed") {
+    return "failed";
+  }
+  return "indexed";
+}
+
 export function toKnowledgeSource(row: DocumentRow): KnowledgeSource {
-  const status = row.processing_status === "queued" || row.processing_status === "processing" || row.processing_status === "uploaded"
-    ? "indexing"
-    : row.processing_status === "failed"
-      ? "failed"
-      : "indexed";
+  const status = resolveKnowledgeSourceStatus(row.processing_status);
 
   return {
     id: row.id,
@@ -44,7 +52,7 @@ export function toKnowledgeSource(row: DocumentRow): KnowledgeSource {
 const DEDUPE_WINDOW_MS = 2500;
 
 let documentsCache: { at: number; promise: Promise<KnowledgeSource[]> } | null = null;
-let roleCache: { at: number; promise: Promise<"admin" | "user" | null> } | null = null;
+let roleCache: { at: number; promise: Promise<UserRole | null> } | null = null;
 
 async function requestDocuments(): Promise<KnowledgeSource[]> {
   const response = await fetch("/api/documents");

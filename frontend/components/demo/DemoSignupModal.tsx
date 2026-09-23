@@ -18,7 +18,7 @@ const defaultMessage = "Create a free account to upload your own notes, save cha
 const limitTitle = "You've reached the demo limit";
 const limitMessage = "You've asked 5 questions. Sign up for free to continue chatting, upload your own documents, and save your chat history.";
 
-export function DemoSignupModal({ isOpen, onClose, title, message }: DemoSignupModalProps) {
+export function DemoSignupModal({ isOpen, onClose, title, message }: Readonly<DemoSignupModalProps>) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const { theme } = useTheme();
   const isDark = theme === "dark";
@@ -26,23 +26,16 @@ export function DemoSignupModal({ isOpen, onClose, title, message }: DemoSignupM
   if (!isOpen) return null;
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
+    <dialog
+      open
       aria-labelledby="demo-modal-title"
-      className="fixed inset-0 z-100 flex items-center justify-center"
+      className="fixed inset-0 z-100 m-0 flex h-full max-h-full w-full max-w-full items-center justify-center border-none bg-transparent p-0"
     >
-      <div
-        className="absolute inset-0 bg-slate-950/75 backdrop-blur-sm hover:cursor-pointer"
+      <button
+        type="button"
+        className="absolute inset-0 h-full w-full cursor-pointer border-none bg-slate-950/75 backdrop-blur-sm"
         onClick={onClose}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            onClose();
-            e.stopPropagation();
-          }
-        }}
+        aria-label="Close dialog"
       />
       <div
         className={`relative z-10 w-full max-w-md rounded-4xl border p-6 shadow-2xl sm:p-8 ${
@@ -99,10 +92,10 @@ export function DemoSignupModal({ isOpen, onClose, title, message }: DemoSignupM
           </Link>
         </div>
       </div>
-    </div>
+    </dialog>
   );
 }
 
-export function DemoLimitModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+export function DemoLimitModal({ isOpen, onClose }: Readonly<{ isOpen: boolean; onClose: () => void }>) {
   return <DemoSignupModal isOpen={isOpen} onClose={onClose} title={limitTitle} message={limitMessage} />;
 }

@@ -36,7 +36,7 @@ const navigation = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
-export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId, deletingSessionId, onClose, onDeleteSource, onDeleteSession, onRenameSession, onOpenSession, onNewChat, onOpenUpload, onOpenKnowledgeBaseUpload, canManageKnowledgeBase, isCollapsed, onToggleCollapsed }: AppSidebarProps) {
+export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId, deletingSessionId, onClose, onDeleteSource, onDeleteSession, onRenameSession, onOpenSession, onNewChat, onOpenUpload, onOpenKnowledgeBaseUpload, canManageKnowledgeBase, isCollapsed, onToggleCollapsed }: Readonly<AppSidebarProps>) {
   const pathname = usePathname();
   const { signOut, user } = useAuth();
 

@@ -87,7 +87,7 @@ export async function mapWithConcurrency<T, R>(
  * solely of pagination markers like "-- 1 of 11 --".
  */
 export function isScannedPdfText(text: string): boolean {
-  if (!text || !text.trim()) return true;
+  if (!text?.trim()) return true;
   const stripped = text.replace(/--\s*\d+\s+of\s+\d+\s*--/gi, "").trim();
   return stripped.length === 0;
 }
@@ -301,6 +301,138 @@ export async function ocrWithTesseract(
  * page image resides in memory at a time. This allows documents of any length
  * to be processed without risk of Out-Of-Memory (OOM) crashes.
  */
+async function loadPdfParser(buffer: Buffer, log?: RequestLogger) {
+  try {
+    const worker = await import("pdf-parse/worker");
+    const { PDFParse } = await import("pdf-parse");
+
+    PDFParse.setWorker(pathToFileURL(worker.getPath()).href);
+
+    const parser = new PDFParse({
+      data: buffer,
+      CanvasFactory: worker.CanvasFactory,
+    });
+
+    const info = await parser.getInfo();
+    const totalPages = info.total ?? 0;
+    console.log(`[OCR Pipeline] PDF loaded: ${totalPages} pages found.`);
+    return { parser, totalPages };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    console.error(`[OCR Pipeline Error] Failed to load PDF for OCR: ${errorMsg}`);
+    log?.error("ocr.pdf_load.failed", { error: errorMsg });
+    return null;
+  }
+}
+
+async function renderBatchScreenshot(
+  parser: InstanceType<typeof PDFParseType>,
+  startPage: number,
+  endPage: number,
+  log?: RequestLogger,
+) {
+  const batchPages: number[] = [];
+  for (let p = startPage; p <= endPage; p++) {
+    batchPages.push(p);
+  }
+
+  console.log(`[OCR Pipeline] Processing batch pages ${startPage}-${endPage} (${batchPages.length} pages)...`);
+  log?.info("ocr.pipeline.batch_start", { startPage, endPage, count: batchPages.length });
+
+  try {
+    return await parser.getScreenshot({
+      partial: batchPages,
+      imageBuffer: true,
+      scale: 2.0,
+    });
+  } catch (renderError) {
+    const errorMsg = renderError instanceof Error ? renderError.message : String(renderError);
+    console.error(`[OCR Pipeline Error] Batch render failed for pages ${startPage}-${endPage}: ${errorMsg}`);
+    log?.error("ocr.batch_render.failed", { startPage, endPage, error: errorMsg });
+    return null;
+  }
+}
+
+type VisionItem = {
+  pageNumber: number;
+  buffer: Buffer | null;
+  text: string | null;
+};
+
+async function transcribeBatchWithVision(
+  pages: Array<{ pageNumber: number; data?: Uint8Array | null }>,
+  log?: RequestLogger,
+): Promise<VisionItem[]> {
+  return mapWithConcurrency(
+    pages,
+    OCR_PAGE_CONCURRENCY,
+    async (page) => {
+      if (!page.data || page.data.length === 0) {
+        return { pageNumber: page.pageNumber, buffer: null, text: null };
+      }
+      const pageBuffer = Buffer.from(page.data);
+      let text = await ocrWithGroqVision(pageBuffer, page.pageNumber, log);
+      if (!text) {
+        text = await ocrWithOpenRouter(pageBuffer, page.pageNumber, log);
+      }
+      return { pageNumber: page.pageNumber, buffer: pageBuffer, text };
+    },
+  );
+}
+
+async function runTesseractOnBuffer(
+  worker: TesseractWorker,
+  buffer: Buffer,
+  pageNumber: number,
+  log?: RequestLogger,
+): Promise<string> {
+  try {
+    const result = await worker.recognize(buffer);
+    const tesseractText = (result.data?.text ?? "").trim();
+    console.log(`[OCR Pipeline] Page ${pageNumber} transcribed via Tesseract (${tesseractText.length} chars).`);
+    log?.info("ocr.tesseract.success", { pageNumber, textLength: tesseractText.length });
+    return tesseractText;
+  } catch (tessError) {
+    const errorMsg = tessError instanceof Error ? tessError.message : String(tessError);
+    console.error(`[OCR Pipeline Error] Tesseract failed on page ${pageNumber}: ${errorMsg}`);
+    log?.error("ocr.tesseract.failed", { pageNumber, error: errorMsg });
+    return "";
+  }
+}
+
+async function resolveBatchTexts(
+  visionResults: VisionItem[],
+  getTesseractWorker: () => Promise<TesseractWorker | null>,
+  log?: RequestLogger,
+): Promise<string[]> {
+  const texts: string[] = [];
+
+  for (const item of visionResults) {
+    if (!item.buffer) continue;
+    let pageText = item.text;
+
+    if (!pageText) {
+      console.log(`[OCR Pipeline] Falling back to Tesseract.js for page ${item.pageNumber}...`);
+      log?.info("ocr.pipeline.falling_back_to_tesseract", { pageNumber: item.pageNumber });
+      const worker = await getTesseractWorker();
+      if (worker) {
+        pageText = await runTesseractOnBuffer(worker, item.buffer, item.pageNumber, log);
+      }
+    }
+
+    if (pageText) {
+      texts.push(pageText);
+    }
+  }
+
+  return texts;
+}
+
+/**
+ * Processes pages sequentially in turns (page-by-page streaming) so only ONE
+ * page image resides in memory at a time. This allows documents of any length
+ * to be processed without risk of Out-Of-Memory (OOM) crashes.
+ */
 export async function extractScannedPdfText(
   buffer: Buffer,
   log?: RequestLogger,
@@ -308,152 +440,47 @@ export async function extractScannedPdfText(
   console.log(`[OCR Pipeline] Starting OCR text extraction, buffer size: ${buffer.length} bytes`);
   log?.info("ocr.pipeline.start", { bufferSize: buffer.length });
 
-  // Lazily initialized Tesseract worker shared across pages if fallback is needed
-  let sharedTesseractWorker: TesseractWorker | null = null;
-  let parser: InstanceType<typeof PDFParseType> | null = null;
-  let totalPages = 0;
-
-  try {
-    const worker = await import("pdf-parse/worker");
-    const { PDFParse } = await import("pdf-parse");
-
-    PDFParse.setWorker(pathToFileURL(worker.getPath()).href);
-
-    parser = new PDFParse({
-      data: buffer,
-      CanvasFactory: worker.CanvasFactory,
-    });
-
-    const info = await parser.getInfo();
-    totalPages = info.total ?? 0;
-    console.log(`[OCR Pipeline] PDF loaded: ${totalPages} pages found.`);
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    console.error(`[OCR Pipeline Error] Failed to load PDF for OCR: ${errorMsg}`);
-    log?.error("ocr.pdf_load.failed", {
-      error: errorMsg,
-    });
-    if (parser) {
-      await parser.destroy().catch(() => {});
+  const workerHolder: { current: TesseractWorker | null } = { current: null };
+  const getTesseract = async () => {
+    if (!workerHolder.current) {
+      workerHolder.current = await spawnTesseractWorker(log);
     }
-    return "";
-  }
+    return workerHolder.current;
+  };
 
+  const loaded = await loadPdfParser(buffer, log);
+  if (!loaded) return "";
+
+  const { parser, totalPages } = loaded;
   if (totalPages <= 0) {
     console.warn("[OCR Pipeline] No pages found in PDF.");
     log?.warn("ocr.pipeline.no_pages_found");
-    if (parser) {
-      await parser.destroy().catch(() => {});
-    }
+    await parser.destroy().catch(() => {});
     return "";
   }
 
-  // Pages rendered per wave. At scale 2.0 each page PNG can be a few MB, so a
-  // 25-page batch would hold ~200MB of buffers for the whole OCR round; 5 keeps
-  // memory bounded while still amortizing the pdf.js render call.
   const OCR_BATCH_SIZE = 5;
-
   log?.info("ocr.pipeline.pages_detected", { totalPages, batchSize: OCR_BATCH_SIZE });
-
   const pageTexts: string[] = [];
 
   try {
     for (let startPage = 1; startPage <= totalPages; startPage += OCR_BATCH_SIZE) {
       const endPage = Math.min(startPage + OCR_BATCH_SIZE - 1, totalPages);
-      const batchPages: number[] = [];
-      for (let p = startPage; p <= endPage; p++) {
-        batchPages.push(p);
-      }
-
-      console.log(`[OCR Pipeline] Processing batch pages ${startPage}-${endPage} (${batchPages.length} pages)...`);
-      log?.info("ocr.pipeline.batch_start", { startPage, endPage, count: batchPages.length });
-
-      let screenshot: Awaited<ReturnType<InstanceType<typeof PDFParseType>["getScreenshot"]>> | null = null;
-      try {
-        screenshot = await parser.getScreenshot({
-          partial: batchPages,
-          imageBuffer: true,
-          scale: 2.0, // High resolution for sharp OCR
-        });
-      } catch (renderError) {
-        const errorMsg = renderError instanceof Error ? renderError.message : String(renderError);
-        console.error(`[OCR Pipeline Error] Batch render failed for pages ${startPage}-${endPage}: ${errorMsg}`);
-        log?.error("ocr.batch_render.failed", {
-          startPage,
-          endPage,
-          error: errorMsg,
-        });
-      }
-
+      let screenshot = await renderBatchScreenshot(parser, startPage, endPage, log);
       if (!screenshot?.pages?.length) {
         console.warn(`[OCR Pipeline] No rendered page images in batch ${startPage}-${endPage}.`);
         continue;
       }
 
-      // 1. Transcribe the batch via Groq Vision (with OpenRouter Vision as the
-      // second tier), paced through a small concurrency pool so the provider
-      // rate limits are not tripped by a simultaneous burst.
-      const visionResults = await mapWithConcurrency(
-        screenshot.pages,
-        OCR_PAGE_CONCURRENCY,
-        async (page) => {
-          if (!page.data || page.data.length === 0) {
-            return { pageNumber: page.pageNumber, buffer: null, text: null };
-          }
-          const pageBuffer = Buffer.from(page.data);
-          let text = await ocrWithGroqVision(pageBuffer, page.pageNumber, log);
-          if (!text) {
-            text = await ocrWithOpenRouter(pageBuffer, page.pageNumber, log);
-          }
-          return { pageNumber: page.pageNumber, buffer: pageBuffer, text };
-        },
-      );
-
-      // 2. For any pages in the batch where cloud vision failed or returned empty, run Tesseract fallback
-      for (const item of visionResults) {
-        if (!item.buffer) continue;
-        let pageText = item.text;
-
-        if (!pageText) {
-          console.log(`[OCR Pipeline] Falling back to Tesseract.js for page ${item.pageNumber}...`);
-          log?.info("ocr.pipeline.falling_back_to_tesseract", { pageNumber: item.pageNumber });
-          if (!sharedTesseractWorker) {
-            sharedTesseractWorker = await spawnTesseractWorker(log);
-          }
-
-          if (sharedTesseractWorker) {
-            try {
-              const result = await sharedTesseractWorker.recognize(item.buffer);
-              const tesseractText = (result.data?.text ?? "").trim();
-              pageText = tesseractText;
-              console.log(`[OCR Pipeline] Page ${item.pageNumber} transcribed via Tesseract (${pageText.length} chars).`);
-              log?.info("ocr.tesseract.success", { pageNumber: item.pageNumber, textLength: pageText.length });
-            } catch (tessError) {
-              const errorMsg = tessError instanceof Error ? tessError.message : String(tessError);
-              console.error(`[OCR Pipeline Error] Tesseract failed on page ${item.pageNumber}: ${errorMsg}`);
-              log?.error("ocr.tesseract.failed", {
-                pageNumber: item.pageNumber,
-                error: errorMsg,
-              });
-              pageText = "";
-            }
-          }
-        }
-
-        if (pageText) {
-          pageTexts.push(pageText);
-        }
-      }
-
-      // Explicitly dereference screenshot so the ~200MB of image buffers for this batch are freed before the next batch
+      const visionResults = await transcribeBatchWithVision(screenshot.pages, log);
+      const batchTexts = await resolveBatchTexts(visionResults, getTesseract, log);
+      pageTexts.push(...batchTexts);
       screenshot = null;
     }
   } finally {
-    if (parser) {
-      await parser.destroy().catch(() => {});
-    }
-    if (sharedTesseractWorker) {
-      await sharedTesseractWorker.terminate().catch(() => {});
+    await parser.destroy().catch(() => {});
+    if (workerHolder.current) {
+      await workerHolder.current.terminate().catch(() => {});
     }
   }
 

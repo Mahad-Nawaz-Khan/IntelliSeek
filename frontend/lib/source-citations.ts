@@ -79,7 +79,8 @@ function formatChunkRanges(sources: SourceCitation[]) {
   const indexes = [...new Set(sources.map((source) => source.chunk_index + 1))].sort((a, b) => a - b);
   const ranges: string[] = [];
 
-  for (let index = 0; index < indexes.length; index += 1) {
+  let index = 0;
+  while (index < indexes.length) {
     const start = indexes[index];
     let end = start;
     while (indexes[index + 1] === end + 1) {
@@ -87,6 +88,7 @@ function formatChunkRanges(sources: SourceCitation[]) {
       end = indexes[index];
     }
     ranges.push(start === end ? `${start}` : `${start}-${end}`);
+    index += 1;
   }
 
   return ranges.length === 1 ? `Chunk ${ranges[0]}` : `Chunks ${ranges.join(", ")}`;

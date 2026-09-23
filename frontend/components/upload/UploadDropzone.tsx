@@ -17,7 +17,7 @@ export function UploadDropzone({
   onDragLeave,
   onDragOver,
   onDrop,
-}: UploadDropzoneProps) {
+}: Readonly<UploadDropzoneProps>) {
   return (
     <label
       onDrop={onDrop}

@@ -25,6 +25,7 @@ import {
   retrieveKeywordContext,
   retrieveRepresentativeDocumentContext,
   validateQuestion,
+  type RetrievedContext,
 } from "../../../lib/server/rag/retriever";
 import { getSupabaseServiceClient } from "../../../lib/server/supabase";
 
@@ -268,6 +269,52 @@ type SseSend = (event: string, data: unknown) => void;
 /** How often the generating job checks whether the user pressed Stop. */
 const CANCEL_CHECK_INTERVAL_MS = 1_500;
 
+async function finalizeStreamAnswer(options: {
+  event: Extract<AgentAnswerStreamEvent, { type: "done" }>;
+  question: string;
+  userId: string;
+  chatSessionId: string;
+  shouldGenerateTitle: boolean;
+  send: SseSend;
+  log?: RequestLogger;
+}) {
+  const { event, question, userId, chatSessionId, shouldGenerateTitle, send, log } = options;
+  const answer = event.answer.trim();
+  if (!answer) throw new Error("Agent answer generation returned no content");
+
+  const sources = normalizeSourceCitations(event.sources);
+  send("sources", { sources });
+  await saveChatHistory(question, answer, sources, userId, chatSessionId, log);
+  await updateChatSessionTimestamp(userId, chatSessionId, log);
+  send("done", { answer, sources, chatSessionId });
+  log?.info("stream.complete", { userId, sourceCount: sources.length, answerLength: answer.length });
+
+  if (shouldGenerateTitle) {
+    const title = await generateAndStoreTitle(chatSessionId, userId, question, answer, log);
+    if (title) send("title", { chatSessionId, title });
+  }
+}
+
+async function handleCancelledStream(options: {
+  partialAnswer: string;
+  question: string;
+  userId: string;
+  chatSessionId: string;
+  shouldGenerateTitle: boolean;
+  log?: RequestLogger;
+}) {
+  const { partialAnswer, question, userId, chatSessionId, shouldGenerateTitle, log } = options;
+  const partial = partialAnswer.trim();
+  if (partial) {
+    await saveChatHistory(question, partial, [], userId, chatSessionId, log);
+    await updateChatSessionTimestamp(userId, chatSessionId, log);
+  }
+  if (shouldGenerateTitle) {
+    await storeFallbackTitle(chatSessionId, userId, question, log);
+  }
+  log?.info("stream.cancelled", { userId, sessionId: chatSessionId, partialLength: partial.length });
+}
+
 async function streamAnswer(options: {
   send: SseSend;
   jobId: string;
@@ -282,8 +329,6 @@ async function streamAnswer(options: {
 
   let lastCancelCheck = 0;
   let cancelled = false;
-  // Accumulated delta text, kept so that pressing Stop can still persist
-  // whatever portion of the answer was already generated.
   let partialAnswer = "";
 
   const isCancelled = async () => {
@@ -306,54 +351,157 @@ async function streamAnswer(options: {
     }
 
     if (event.type === "reset") {
-      // A fallback provider is restarting the answer; the client discards the
-      // partial text it already rendered.
       partialAnswer = "";
       send("reset", {});
       log?.warn("stream.reset", { errorCategory: "unknown", userId });
       continue;
     }
 
-    const answer = event.answer.trim();
-    // `chat_history.answer` has a non-empty CHECK, so an empty answer must fail
-    // the request rather than be written and rejected by the database.
-    if (!answer) throw new Error("Agent answer generation returned no content");
-
-    const sources = normalizeSourceCitations(event.sources);
-    send("sources", { sources });
-    // Persistence runs even when the client has already disconnected: the
-    // send() calls above become no-ops then, but the row has to land so the
-    // user finds the answer when they return to this session.
-    await saveChatHistory(question, answer, sources, userId, chatSessionId, log);
-    await updateChatSessionTimestamp(userId, chatSessionId, log);
-    send("done", { answer, sources, chatSessionId });
-    log?.info("stream.complete", { userId, sourceCount: sources.length, answerLength: answer.length });
-
-    // Awaited rather than fire-and-forget: a serverless function can be frozen
-    // the moment the job ends, which would leave the session titled "New chat"
-    // forever. The after() pin on the route keeps the invocation alive for it.
-    if (shouldGenerateTitle) {
-      const title = await generateAndStoreTitle(chatSessionId, userId, question, answer, log);
-      if (title) send("title", { chatSessionId, title });
-    }
+    await finalizeStreamAnswer({
+      event,
+      question,
+      userId,
+      chatSessionId,
+      shouldGenerateTitle,
+      send,
+      log,
+    });
     return "completed";
   }
 
   if (!cancelled) throw new Error("Agent answer generation returned no content");
 
-  // Stop was pressed. Keep whatever portion had already been generated so the
-  // session shows the same partial answer the user saw; sources never arrive
-  // for a partial answer. An empty partial has nothing worth storing.
-  const partial = partialAnswer.trim();
-  if (partial) {
-    await saveChatHistory(question, partial, [], userId, chatSessionId, log);
-    await updateChatSessionTimestamp(userId, chatSessionId, log);
-  }
-  if (shouldGenerateTitle) {
-    await storeFallbackTitle(chatSessionId, userId, question, log);
-  }
-  log?.info("stream.cancelled", { userId, sessionId: chatSessionId, partialLength: partial.length });
+  await handleCancelledStream({
+    partialAnswer,
+    question,
+    userId,
+    chatSessionId,
+    shouldGenerateTitle,
+    log,
+  });
   return "cancelled";
+}
+
+function getHintedDocumentCount(retrievalHint?: ChatRetrievalHint): number {
+  if (retrievalHint?.kind === "topic") {
+    return retrievalHint.documentIds.length;
+  }
+  if (retrievalHint) {
+    return 1;
+  }
+  return 0;
+}
+
+async function retrieveInitialContext(
+  retrievalHint: ChatRetrievalHint | undefined,
+  userId: string,
+  question: string,
+  log?: RequestLogger,
+): Promise<RetrievedContext[]> {
+  if (retrievalHint?.kind === "document") {
+    return retrieveDocumentContextByIds(userId, [retrievalHint.documentId], 12, log);
+  }
+  if (retrievalHint?.kind === "topic") {
+    return retrieveContextFromDocumentIds(`${retrievalHint.topic}\n${question}`, userId, retrievalHint.documentIds, 8, log);
+  }
+  return [];
+}
+
+async function resolveJobContext(options: {
+  retrievalHint?: ChatRetrievalHint;
+  userId: string;
+  question: string;
+  isSummaryRequest: boolean;
+  log: RequestLogger;
+}): Promise<RetrievedContext[]> {
+  const { retrievalHint, userId, question, isSummaryRequest, log } = options;
+  let relevantContext = await retrieveInitialContext(retrievalHint, userId, question, log);
+
+  if (retrievalHint) {
+    log.info("retrieval.strategy.complete", {
+      userId,
+      strategy: retrievalHint.kind === "topic" ? "hinted_topic_semantic" : "hinted_documents",
+      contextCount: relevantContext.length,
+    });
+  }
+
+  if (!relevantContext.length && retrievalHint?.kind === "topic") {
+    log.info("retrieval.strategy.start", { userId, strategy: "hinted_topic_fallback_documents" });
+    relevantContext = await retrieveDocumentContextByIds(userId, retrievalHint.documentIds, 10, log);
+    log.info("retrieval.strategy.complete", {
+      userId,
+      strategy: "hinted_topic_fallback_documents",
+      contextCount: relevantContext.length,
+    });
+  }
+
+  if (!relevantContext.length && isSummaryRequest) {
+    log.info("retrieval.strategy.start", { userId, strategy: "representative_summary" });
+    relevantContext = await retrieveRepresentativeDocumentContext(userId, 10, question, log);
+    log.info("retrieval.strategy.complete", {
+      userId,
+      strategy: "representative_summary",
+      contextCount: relevantContext.length,
+    });
+  }
+
+  if (!relevantContext.length) {
+    log.info("retrieval.strategy.start", { userId, strategy: "hybrid_vector_keyword" });
+    const [semanticContext, keywordContext] = await Promise.all([
+      retrieveContext(question, userId, 10, log),
+      retrieveKeywordContext(question, userId, 8, log),
+    ]);
+    relevantContext = filterRelevantContext(mergeRetrievedContext(semanticContext, keywordContext), log);
+    log.info("retrieval.strategy.complete", {
+      userId,
+      strategy: "hybrid_vector_keyword",
+      contextCount: relevantContext.length,
+    });
+  }
+
+  return relevantContext;
+}
+
+async function selectAnswerModeAndStream(options: {
+  question: string;
+  userId: string;
+  relevantContext: RetrievedContext[];
+  conversationContext: ConversationTurn[];
+  retrievalHint?: ChatRetrievalHint;
+  isSummaryRequest: boolean;
+  log: RequestLogger;
+}): Promise<{ events: AsyncGenerator<AgentAnswerStreamEvent>; answerMode: "grounded" | "agent" | "general" | "static-warning" }> {
+  const { question, userId, relevantContext, conversationContext, retrievalHint, isSummaryRequest, log } = options;
+
+  if (!relevantContext.length && isSummaryRequest && !retrievalHint && await hasIndexedDocuments(userId, log)) {
+    return {
+      answerMode: "static-warning",
+      events: streamStaticAnswer(
+        "I found indexed uploaded document metadata, but I could not load any indexed text chunks to summarize. Please re-index the document or upload it again, then try the summary request once indexing finishes.",
+      ),
+    };
+  }
+
+  if (relevantContext.length) {
+    return {
+      answerMode: "grounded",
+      events: streamGroundedAgentAnswer(question, relevantContext, conversationContext, log),
+    };
+  }
+
+  if (retrievalHint || isLikelyUploadedMaterialRequest(question)) {
+    log.info("retrieval.strategy.start", { userId, strategy: "agent_fallback" });
+    return {
+      answerMode: "agent",
+      events: streamAgentAnswer(question, userId, conversationContext),
+    };
+  }
+
+  log.info("retrieval.strategy.start", { userId, strategy: "general_answer" });
+  return {
+    answerMode: "general",
+    events: streamGeneralAgentAnswer(question, conversationContext, log),
+  };
 }
 
 /**
@@ -372,8 +520,6 @@ async function runAnswerJob(options: {
 }) {
   const { send, jobId, question, userId, requestedChatSessionId, retrievalHint, log } = options;
   try {
-    // Announce the job id first so a Stop press can cancel this answer even
-    // before the first token exists.
     send("job", { jobId });
 
     const chatSession = requestedChatSessionId
@@ -381,81 +527,31 @@ async function runAnswerJob(options: {
       : await createChatSession(userId, log);
     const conversationContext = await getRecentConversationContext(userId, chatSession.id, log);
     const shouldGenerateTitle = !requestedChatSessionId && chatSession.title_status === "pending";
+
     log.info("retrieval.hint", {
       userId,
       hintKind: retrievalHint?.kind,
-      hintedDocumentCount: retrievalHint?.kind === "topic" ? retrievalHint.documentIds.length : retrievalHint ? 1 : 0,
+      hintedDocumentCount: getHintedDocumentCount(retrievalHint),
     });
+
     const isSummaryRequest = isDocumentSummaryRequest(question);
-    let relevantContext = retrievalHint?.kind === "document"
-      ? await retrieveDocumentContextByIds(userId, [retrievalHint.documentId], 12, log)
-      : retrievalHint?.kind === "topic"
-        ? await retrieveContextFromDocumentIds(`${retrievalHint.topic}\n${question}`, userId, retrievalHint.documentIds, 8, log)
-        : [];
-    if (retrievalHint) {
-      log.info("retrieval.strategy.complete", {
-        userId,
-        strategy: retrievalHint.kind === "topic" ? "hinted_topic_semantic" : "hinted_documents",
-        contextCount: relevantContext.length,
-      });
-    }
+    const relevantContext = await resolveJobContext({
+      retrievalHint,
+      userId,
+      question,
+      isSummaryRequest,
+      log,
+    });
 
-    if (!relevantContext.length && retrievalHint?.kind === "topic") {
-      log.info("retrieval.strategy.start", { userId, strategy: "hinted_topic_fallback_documents" });
-      relevantContext = await retrieveDocumentContextByIds(userId, retrievalHint.documentIds, 10, log);
-      log.info("retrieval.strategy.complete", {
-        userId,
-        strategy: "hinted_topic_fallback_documents",
-        contextCount: relevantContext.length,
-      });
-    }
-
-    if (!relevantContext.length && isSummaryRequest) {
-      log.info("retrieval.strategy.start", { userId, strategy: "representative_summary" });
-      relevantContext = await retrieveRepresentativeDocumentContext(userId, 10, question, log);
-      log.info("retrieval.strategy.complete", {
-        userId,
-        strategy: "representative_summary",
-        contextCount: relevantContext.length,
-      });
-    }
-
-    if (!relevantContext.length) {
-      log.info("retrieval.strategy.start", { userId, strategy: "hybrid_vector_keyword" });
-      const [semanticContext, keywordContext] = await Promise.all([
-        retrieveContext(question, userId, 10, log),
-        retrieveKeywordContext(question, userId, 8, log),
-      ]);
-      relevantContext = filterRelevantContext(mergeRetrievedContext(semanticContext, keywordContext), log);
-      log.info("retrieval.strategy.complete", {
-        userId,
-        strategy: "hybrid_vector_keyword",
-        contextCount: relevantContext.length,
-      });
-    }
-
-    let events: AsyncGenerator<AgentAnswerStreamEvent>;
-    let answerMode: "grounded" | "agent" | "general" | "static-warning";
-    // The indexed-but-unreadable case is decided first: previously a model
-    // answer was started and then thrown away, paying for a request whose
-    // output was never used.
-    if (!relevantContext.length && isSummaryRequest && !retrievalHint && await hasIndexedDocuments(userId, log)) {
-      answerMode = "static-warning";
-      events = streamStaticAnswer(
-        "I found indexed uploaded document metadata, but I could not load any indexed text chunks to summarize. Please re-index the document or upload it again, then try the summary request once indexing finishes.",
-      );
-    } else if (relevantContext.length) {
-      answerMode = "grounded";
-      events = streamGroundedAgentAnswer(question, relevantContext, conversationContext, log);
-    } else if (retrievalHint || isLikelyUploadedMaterialRequest(question)) {
-      answerMode = "agent";
-      log.info("retrieval.strategy.start", { userId, strategy: "agent_fallback" });
-      events = streamAgentAnswer(question, userId, conversationContext);
-    } else {
-      answerMode = "general";
-      log.info("retrieval.strategy.start", { userId, strategy: "general_answer" });
-      events = streamGeneralAgentAnswer(question, conversationContext, log);
-    }
+    const { events, answerMode } = await selectAnswerModeAndStream({
+      question,
+      userId,
+      relevantContext,
+      conversationContext,
+      retrievalHint,
+      isSummaryRequest,
+      log,
+    });
 
     log.info("answer.mode.selected", { userId, answerMode, contextCount: relevantContext.length });
 

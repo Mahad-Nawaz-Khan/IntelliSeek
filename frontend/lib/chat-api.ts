@@ -114,6 +114,99 @@ function isSourceCitationArray(value: unknown): value is SourceCitation[] {
   return Array.isArray(value);
 }
 
+type StreamChatAccumulator = {
+  answer: string;
+  sources: SourceCitation[];
+  finalAnswer: string;
+  finalSources: SourceCitation[];
+  finalChatSessionId?: string;
+  finalTitle?: string;
+  sawDone: boolean;
+};
+
+function dispatchStreamEvent(
+  streamEvent: StreamEvent,
+  state: StreamChatAccumulator,
+  handlers: StreamChatHandlers,
+) {
+  const data = streamEvent.data as Record<string, unknown>;
+
+  switch (streamEvent.event) {
+    case "job": {
+      const jobId = typeof data.jobId === "string" ? data.jobId : "";
+      if (jobId) handlers.onJob?.(jobId);
+      break;
+    }
+    case "delta": {
+      const text = typeof data.text === "string" ? data.text : "";
+      if (text) {
+        state.answer += text;
+        handlers.onDelta(text);
+      }
+      break;
+    }
+    case "reset": {
+      state.answer = "";
+      handlers.onReset?.();
+      break;
+    }
+    case "sources": {
+      state.sources = isSourceCitationArray(data.sources) ? data.sources : [];
+      handlers.onSources?.(state.sources);
+      break;
+    }
+    case "done": {
+      state.finalAnswer = typeof data.answer === "string" ? data.answer : state.answer;
+      state.finalSources = isSourceCitationArray(data.sources) ? data.sources : state.sources;
+      state.finalChatSessionId = typeof data.chatSessionId === "string" ? data.chatSessionId : undefined;
+      state.sawDone = true;
+      handlers.onDone?.({
+        ok: true,
+        answer: state.finalAnswer,
+        sources: state.finalSources,
+        chatSessionId: state.finalChatSessionId,
+      });
+      break;
+    }
+    case "title": {
+      state.finalTitle = typeof data.title === "string" ? data.title : undefined;
+      if (state.finalTitle) handlers.onTitle?.(state.finalTitle);
+      break;
+    }
+    case "error": {
+      throw new Error(typeof data.error === "string" ? data.error : "The assistant could not answer this question.");
+    }
+  }
+}
+
+async function consumeSseReader(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  onEvent: (event: StreamEvent) => void,
+) {
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value, { stream: !done });
+
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() ?? "";
+
+    for (const frame of frames) {
+      const streamEvent = parseSseFrame(frame.trim());
+      if (streamEvent) onEvent(streamEvent);
+    }
+
+    if (done) break;
+  }
+
+  if (buffer.trim()) {
+    const streamEvent = parseSseFrame(buffer.trim());
+    if (streamEvent) onEvent(streamEvent);
+  }
+}
+
 export async function streamChatQuestion(question: string, handlers: StreamChatHandlers, options: ChatRequestOptions = {}): Promise<ChatResponse> {
   const trimmedQuestion = requireQuestion(question);
   const payload: ChatRequest = {
@@ -131,92 +224,28 @@ export async function streamChatQuestion(question: string, handlers: StreamChatH
   if (!response.ok) throw new Error(await parseJsonError(response));
   if (!response.body) throw new Error("The chat service did not return a stream.");
 
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let answer = "";
-  let sources: SourceCitation[] = [];
-  let finalAnswer = "";
-  let finalSources: SourceCitation[] = [];
-  let finalChatSessionId: string | undefined;
-  let finalTitle: string | undefined;
-  let sawDone = false;
+  const state: StreamChatAccumulator = {
+    answer: "",
+    sources: [],
+    finalAnswer: "",
+    finalSources: [],
+    sawDone: false,
+  };
 
-  function handleEvent(streamEvent: StreamEvent) {
-    const data = streamEvent.data as Record<string, unknown>;
+  await consumeSseReader(response.body.getReader(), (event) => {
+    dispatchStreamEvent(event, state, handlers);
+  });
 
-    if (streamEvent.event === "job") {
-      const jobId = typeof data.jobId === "string" ? data.jobId : "";
-      if (jobId) handlers.onJob?.(jobId);
-      return;
-    }
+  if (!state.sawDone) throw new Error("The assistant stream ended before completion.");
+  if (!state.finalAnswer.trim()) throw new Error("The assistant returned an empty answer.");
 
-    if (streamEvent.event === "delta") {
-      const text = typeof data.text === "string" ? data.text : "";
-      if (!text) return;
-      answer += text;
-      handlers.onDelta(text);
-      return;
-    }
-
-    if (streamEvent.event === "reset") {
-      answer = "";
-      handlers.onReset?.();
-      return;
-    }
-
-    if (streamEvent.event === "sources") {
-      sources = isSourceCitationArray(data.sources) ? data.sources : [];
-      handlers.onSources?.(sources);
-      return;
-    }
-
-    if (streamEvent.event === "done") {
-      finalAnswer = typeof data.answer === "string" ? data.answer : answer;
-      finalSources = isSourceCitationArray(data.sources) ? data.sources : sources;
-      const chatSessionId = typeof data.chatSessionId === "string" ? data.chatSessionId : undefined;
-      finalChatSessionId = chatSessionId;
-      sawDone = true;
-      handlers.onDone?.({ ok: true, answer: finalAnswer, sources: finalSources, chatSessionId });
-      return;
-    }
-
-    // Titles arrive after `done`, so this is not part of the returned answer.
-    if (streamEvent.event === "title") {
-      finalTitle = typeof data.title === "string" ? data.title : undefined;
-      if (finalTitle) handlers.onTitle?.(finalTitle);
-      return;
-    }
-
-    if (streamEvent.event === "error") {
-      throw new Error(typeof data.error === "string" ? data.error : "The assistant could not answer this question.");
-    }
-  }
-
-  while (true) {
-    const { done, value } = await reader.read();
-    buffer += decoder.decode(value, { stream: !done });
-
-    const frames = buffer.split("\n\n");
-    buffer = frames.pop() ?? "";
-
-    for (const frame of frames) {
-      const streamEvent = parseSseFrame(frame.trim());
-      if (streamEvent) handleEvent(streamEvent);
-    }
-
-    if (done) break;
-  }
-
-  if (buffer.trim()) {
-    const streamEvent = parseSseFrame(buffer.trim());
-    if (streamEvent) handleEvent(streamEvent);
-  }
-
-  if (!sawDone) throw new Error("The assistant stream ended before completion.");
-  if (!finalAnswer.trim()) throw new Error("The assistant returned an empty answer.");
-
-  return { ok: true, answer: finalAnswer, sources: finalSources, chatSessionId: finalChatSessionId, title: finalTitle };
+  return {
+    ok: true,
+    answer: state.finalAnswer,
+    sources: state.finalSources,
+    chatSessionId: state.finalChatSessionId,
+    title: state.finalTitle,
+  };
 }
 
 export async function streamChatQuestionDemo(question: string, handlers: StreamChatHandlers, signal?: AbortSignal): Promise<ChatResponse> {
@@ -232,72 +261,22 @@ export async function streamChatQuestionDemo(question: string, handlers: StreamC
   if (!response.ok) throw new Error(await parseJsonError(response));
   if (!response.body) throw new Error("The chat service did not return a stream.");
 
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let answer = "";
-  let sources: SourceCitation[] = [];
-  let finalAnswer = "";
-  let finalSources: SourceCitation[] = [];
-  let sawDone = false;
+  const state: StreamChatAccumulator = {
+    answer: "",
+    sources: [],
+    finalAnswer: "",
+    finalSources: [],
+    sawDone: false,
+  };
 
-  function handleEvent(streamEvent: StreamEvent) {
-    const data = streamEvent.data as Record<string, unknown>;
+  await consumeSseReader(response.body.getReader(), (event) => {
+    dispatchStreamEvent(event, state, handlers);
+  });
 
-    if (streamEvent.event === "delta") {
-      const text = typeof data.text === "string" ? data.text : "";
-      if (!text) return;
-      answer += text;
-      handlers.onDelta(text);
-      return;
-    }
+  if (!state.sawDone) throw new Error("The assistant stream ended before completion.");
+  if (!state.finalAnswer.trim()) throw new Error("The assistant returned an empty answer.");
 
-    if (streamEvent.event === "reset") {
-      answer = "";
-      handlers.onReset?.();
-      return;
-    }
-
-    if (streamEvent.event === "sources") {
-      sources = isSourceCitationArray(data.sources) ? data.sources : [];
-      handlers.onSources?.(sources);
-      return;
-    }
-
-    if (streamEvent.event === "done") {
-      finalAnswer = typeof data.answer === "string" ? data.answer : answer;
-      finalSources = isSourceCitationArray(data.sources) ? data.sources : sources;
-      sawDone = true;
-      handlers.onDone?.({ ok: true, answer: finalAnswer, sources: finalSources });
-      return;
-    }
-
-    if (streamEvent.event === "error") {
-      throw new Error(typeof data.error === "string" ? data.error : "The assistant could not answer this question.");
-    }
-  }
-
-  while (true) {
-    const { done, value } = await reader.read();
-    buffer += decoder.decode(value, { stream: !done });
-    const frames = buffer.split("\n\n");
-    buffer = frames.pop() ?? "";
-    for (const frame of frames) {
-      const streamEvent = parseSseFrame(frame.trim());
-      if (streamEvent) handleEvent(streamEvent);
-    }
-    if (done) break;
-  }
-
-  if (buffer.trim()) {
-    const streamEvent = parseSseFrame(buffer.trim());
-    if (streamEvent) handleEvent(streamEvent);
-  }
-
-  if (!sawDone) throw new Error("The assistant stream ended before completion.");
-  if (!finalAnswer.trim()) throw new Error("The assistant returned an empty answer.");
-
-  return { ok: true, answer: finalAnswer, sources: finalSources };
+  return { ok: true, answer: state.finalAnswer, sources: state.finalSources };
 }
 
 export async function fetchChatSessions(): Promise<ChatSessionSummary[]> {
@@ -314,7 +293,7 @@ export async function fetchChatSessionMessages(sessionId: string, signal?: Abort
     const error = data && "error" in data ? data.error : undefined;
     throw new Error(error ?? "Could not load chat session");
   }
-  return data as ChatSessionMessagesResponse;
+  return data;
 }
 
 export async function deleteChatSession(sessionId: string): Promise<void> {

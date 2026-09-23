@@ -189,7 +189,9 @@ async function* streamTextWithFallback(
     while (true) {
       const next = await stream.next();
       if (next.done) return requireAnswer(next.value);
-      emittedDelta = true;
+      if (!emittedDelta) {
+        emittedDelta = true;
+      }
       yield { type: "delta", text: next.value };
     }
   } catch (error) {

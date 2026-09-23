@@ -21,7 +21,7 @@ export function ChatInput({
   onSubmit,
   onStopResponse,
   onOpenUpload,
-}: ChatInputProps) {
+}: Readonly<ChatInputProps>) {
   const [value, setValue] = useState("");
   const [selectedSuggestion, setSelectedSuggestion] = useState<AutocompleteSuggestion | undefined>();
   const [isAutocompleteDismissed, setIsAutocompleteDismissed] = useState(false);

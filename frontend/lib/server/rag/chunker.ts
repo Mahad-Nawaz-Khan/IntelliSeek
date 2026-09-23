@@ -30,7 +30,7 @@ function isLikelyHeading(line: string) {
 function splitOversizedBlock(block: string): string[] {
   if (block.length <= MAX_BLOCK_SIZE) return [block];
 
-  const sentences = block.match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [block];
+  const sentences = block.match(/(?:[^.!?]+[.!?]+)|(?:[^.!?]+$)/g) ?? [block];
   const parts: string[] = [];
   let current = "";
 

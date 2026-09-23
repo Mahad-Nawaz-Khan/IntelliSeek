@@ -12,7 +12,7 @@ type SuggestedQueriesProps = {
   onSelect: (question: string) => void;
 };
 
-export function SuggestedQueries({ disabled = false, onSelect }: SuggestedQueriesProps) {
+export function SuggestedQueries({ disabled = false, onSelect }: Readonly<SuggestedQueriesProps>) {
   return (
     <div className="mx-auto flex max-w-2xl flex-col items-center text-center">
       <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-200 shadow-lg shadow-cyan-950/30">

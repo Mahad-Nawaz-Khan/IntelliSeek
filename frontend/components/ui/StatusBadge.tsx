@@ -15,7 +15,7 @@ const tones = {
   red: "border-red-300/20 bg-red-400/10 text-red-100",
 };
 
-export function StatusBadge({ children, tone = "slate", className = "" }: StatusBadgeProps) {
+export function StatusBadge({ children, tone = "slate", className = "" }: Readonly<StatusBadgeProps>) {
   return (
     <span
       className={`inline-flex max-w-full items-center rounded-full border px-2.5 py-1 text-xs font-medium ${tones[tone]} ${className}`}

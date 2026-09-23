@@ -36,7 +36,7 @@ function writeStoredState(state: { isDemo: boolean; questionsUsed: number }) {
 
 const DemoContext = createContext<DemoContextValue | null>(null);
 
-export function DemoProvider({ children }: { children: ReactNode }) {
+export function DemoProvider({ children }: Readonly<{ children: ReactNode }>) {
   const [state, setState] = useState<{ isDemo: boolean; questionsUsed: number }>(() => readStoredState());
 
   useEffect(() => {

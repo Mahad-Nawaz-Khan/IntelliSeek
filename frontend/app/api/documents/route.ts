@@ -58,7 +58,7 @@ export async function GET(request: Request) {
   });
 
   if (staleDocIds.length > 0) {
-    void supabase
+    await supabase
       .from("documents")
       .update({
         processing_status: "failed",
@@ -68,6 +68,55 @@ export async function GET(request: Request) {
   }
 
   return Response.json({ ok: true, documents }, { headers: rateLimitHeaders(rateLimit) });
+}
+
+import type { User } from "@supabase/supabase-js";
+
+function checkDocumentDeletePermission(
+  document: { source_scope: string | null; user_id: string },
+  user: User
+): { status: number; error: string } | null {
+  const isKnowledgeBaseDocument = document.source_scope === "knowledge_base";
+  if (isKnowledgeBaseDocument && !isAdminUser(user)) {
+    return { status: 403, error: "Only admins can delete knowledge-base documents" };
+  }
+  if (!isKnowledgeBaseDocument && document.user_id !== user.id) {
+    return { status: 404, error: "Document not found" };
+  }
+  return null;
+}
+
+type ServiceSupabase = NonNullable<ReturnType<typeof getSupabaseServiceClient>>;
+
+async function deleteDocumentArtifacts(
+  supabase: ServiceSupabase,
+  document: { id: string; user_id: string; storage_path: string | null }
+): Promise<string | null> {
+  const { error: topicsDeleteError } = await supabase
+    .from("document_topics")
+    .delete()
+    .eq("document_id", document.id)
+    .eq("user_id", document.user_id);
+  if (topicsDeleteError) return "Document autocomplete cleanup failed";
+
+  const { error: chunksDeleteError } = await supabase
+    .from("chunks")
+    .delete()
+    .eq("document_id", document.id);
+  if (chunksDeleteError) return "Document index cleanup failed";
+
+  const { error: deleteError } = await supabase
+    .from("documents")
+    .delete()
+    .eq("id", document.id)
+    .eq("user_id", document.user_id);
+  if (deleteError) return "Document deletion failed";
+
+  if (typeof document.storage_path === "string" && document.storage_path) {
+    await supabase.storage.from(BUCKET_NAME).remove([document.storage_path]);
+  }
+
+  return null;
 }
 
 export async function DELETE(request: Request) {
@@ -108,45 +157,14 @@ export async function DELETE(request: Request) {
     return Response.json({ ok: false, error: "Document not found" }, { status: 404 });
   }
 
-  const isKnowledgeBaseDocument = document.source_scope === "knowledge_base";
-  if (isKnowledgeBaseDocument && !isAdminUser(user)) {
-    return Response.json({ ok: false, error: "Only admins can delete knowledge-base documents" }, { status: 403 });
-  }
-  if (!isKnowledgeBaseDocument && document.user_id !== user.id) {
-    return Response.json({ ok: false, error: "Document not found" }, { status: 404 });
+  const permissionError = checkDocumentDeletePermission(document, user);
+  if (permissionError) {
+    return Response.json({ ok: false, error: permissionError.error }, { status: permissionError.status });
   }
 
-  const { error: topicsDeleteError } = await supabase
-    .from("document_topics")
-    .delete()
-    .eq("document_id", document.id)
-    .eq("user_id", document.user_id);
-
-  if (topicsDeleteError) {
-    return Response.json({ ok: false, error: "Document autocomplete cleanup failed" }, { status: 500 });
-  }
-
-  const { error: chunksDeleteError } = await supabase
-    .from("chunks")
-    .delete()
-    .eq("document_id", document.id);
-
-  if (chunksDeleteError) {
-    return Response.json({ ok: false, error: "Document index cleanup failed" }, { status: 500 });
-  }
-
-  const { error: deleteError } = await supabase
-    .from("documents")
-    .delete()
-    .eq("id", document.id)
-    .eq("user_id", document.user_id);
-
-  if (deleteError) {
-    return Response.json({ ok: false, error: "Document deletion failed" }, { status: 500 });
-  }
-
-  if (typeof document.storage_path === "string" && document.storage_path) {
-    await supabase.storage.from(BUCKET_NAME).remove([document.storage_path]);
+  const cleanupError = await deleteDocumentArtifacts(supabase, document);
+  if (cleanupError) {
+    return Response.json({ ok: false, error: cleanupError }, { status: 500 });
   }
 
   return Response.json({ ok: true }, { headers: rateLimitHeaders(rateLimit) });

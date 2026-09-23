@@ -11,10 +11,10 @@ import { useRef, useState, type CSSProperties } from "react";
 export function SessionTitleLabel({
   title,
   className = "text-xs font-medium text-slate-300",
-}: {
+}: Readonly<{
   title: string;
   className?: string;
-}) {
+}>) {
   const innerRef = useRef<HTMLSpanElement>(null);
   const [slideDistance, setSlideDistance] = useState<number | null>(null);
 
@@ -27,7 +27,13 @@ export function SessionTitleLabel({
 
   const sliding = slideDistance !== null;
   return (
-    <span className="block overflow-hidden" onMouseEnter={measure} onMouseLeave={reset}>
+    <span
+      className="block overflow-hidden"
+      onMouseEnter={measure}
+      onMouseLeave={reset}
+      onFocus={measure}
+      onBlur={reset}
+    >
       <span
         ref={innerRef}
         className={`block whitespace-nowrap ${className} ${sliding ? "chat-title-sliding" : "truncate"}`}

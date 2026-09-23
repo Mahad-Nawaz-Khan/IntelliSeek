@@ -25,7 +25,7 @@ export function UploadModal({
   onUploadToast,
   completedDocumentIds,
   failedDocuments,
-}: UploadModalProps) {
+}: Readonly<UploadModalProps>) {
   const { isLoaded, isSignedIn, user } = useAuth();
   const [isDragging, setIsDragging] = useState(false);
   const [item, setItem] = useState<UploadItem | null>(null);
@@ -94,10 +94,9 @@ export function UploadModal({
   const isWorking = displayedItem?.status === "uploading" || displayedItem?.status === "indexing";
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
+    <dialog
+      open
+      className="fixed inset-0 z-50 m-0 flex h-full max-h-full w-full max-w-full items-center justify-center border-none bg-slate-950/80 p-4 backdrop-blur-sm"
       aria-label="Upload documents"
     >
       <div className="w-full max-w-2xl rounded-[2rem] border border-white/10 bg-slate-950/95 p-5 shadow-2xl shadow-slate-950/60">
@@ -155,6 +154,6 @@ export function UploadModal({
           </div>
         )}
       </div>
-    </div>
+    </dialog>
   );
 }

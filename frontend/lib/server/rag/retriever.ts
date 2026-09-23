@@ -43,19 +43,6 @@ const NEIGHBOR_SCORE_FLOOR = 0.5;
 
 export type RetrievedContext = RetrievedChunk;
 
-type RepresentativeChunkRow = {
-  id: string;
-  document_id: string;
-  text_content: string;
-  chunk_index: number;
-  documents: Array<{
-    filename: string | null;
-    source_scope?: string | null;
-  }> | {
-    filename: string | null;
-    source_scope?: string | null;
-  } | null;
-};
 
 type IndexedDocumentRow = {
   id: string;
@@ -76,8 +63,6 @@ type DocumentChunkRow = {
     source_scope?: string | null;
   } | null;
 };
-
-type NeighborChunkRow = DocumentChunkRow;
 
 function applyAccessibleDocumentFilter<T>(query: T, userId: string): T {
   return (query as { or: (filters: string, options?: { foreignTable?: string }) => T })
@@ -169,12 +154,12 @@ function extractKeywordTerms(question: string) {
   return [...new Set(safeTerms)].slice(0, 10);
 }
 
-function getJoinedChunkDocument(row: DocumentChunkRow | NeighborChunkRow | RepresentativeChunkRow) {
+function getJoinedChunkDocument(row: DocumentChunkRow) {
   if (Array.isArray(row.documents)) return row.documents[0] ?? null;
   return row.documents;
 }
 
-function rowToContext(chunk: DocumentChunkRow | NeighborChunkRow | RepresentativeChunkRow, score: number): RetrievedContext {
+function rowToContext(chunk: DocumentChunkRow, score: number): RetrievedContext {
   return {
     chunk_id: chunk.id,
     document_id: chunk.document_id,
@@ -378,10 +363,10 @@ export async function expandContextWithNeighbors(
 
     if (error) {
       log?.warn("retrieval.neighbors.failed", { errorCategory: "supabase_query", userId, documentId, error });
-      return [] as NeighborChunkRow[];
+      return [] as DocumentChunkRow[];
     }
 
-    return (data ?? []) as NeighborChunkRow[];
+    return (data ?? []) as DocumentChunkRow[];
   }))).flat();
 
   const seedScoreByKey = new Map(seeds.map((chunk) => [`${chunk.document_id}:${chunk.chunk_index}`, chunk.score]));
@@ -644,11 +629,12 @@ export async function retrieveRepresentativeDocumentContext(
       .map((match) => match.document)
     : [];
   const hasExplicitDocumentReference = DOCUMENT_REFERENCE_PATTERNS.some((pattern) => pattern.test(question));
-  const selectedDocuments = filenameMatches.length
-    ? filenameMatches.slice(0, 4)
-    : hasExplicitDocumentReference || isDocumentSummaryRequest(question)
-      ? indexedDocuments.slice(0, 4)
-      : [];
+  let selectedDocuments: IndexedDocumentRow[] = [];
+  if (filenameMatches.length) {
+    selectedDocuments = filenameMatches.slice(0, 4);
+  } else if (hasExplicitDocumentReference || isDocumentSummaryRequest(question)) {
+    selectedDocuments = indexedDocuments.slice(0, 4);
+  }
 
   if (!selectedDocuments.length) {
     log?.info("retrieval.representative.no_match", { userId, indexedDocumentCount: indexedDocuments.length });

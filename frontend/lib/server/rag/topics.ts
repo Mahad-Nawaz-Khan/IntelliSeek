@@ -111,7 +111,7 @@ function tokenize(input: string) {
     .toLowerCase()
     .replace(/[^a-z0-9\s-]/g, " ")
     .split(/\s+/)
-    .map((token) => token.replace(/^-+|-+$/g, ""))
+    .map((token) => token.replace(/(?:^-+)|(?:-+$)/g, ""))
     .filter((token) => token.length >= 3 && !/^\d+$/.test(token) && !STOP_WORDS.has(token));
 }
 
@@ -119,7 +119,7 @@ function normalizeWord(input: string) {
   return input
     .toLowerCase()
     .replace(/[^a-z0-9-]/g, "")
-    .replace(/^-+|-+$/g, "");
+    .replace(/(?:^-+)|(?:-+$)/g, "");
 }
 
 function splitSentences(input: string) {
