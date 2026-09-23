@@ -4,7 +4,7 @@ import { ArrowRight, BookOpen, FileText, Quote, Search, UploadCloud } from "luci
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import { useDemo } from "../context/DemoContext";
+import { useDemo } from "../../context/DemoContext";
 import Image from "next/image";
 
 const features = [
@@ -30,6 +30,46 @@ const features = [
   },
 ];
 
+// Rendered on the page and mirrored in FAQPage structured data (both must
+// match for Google rich results).
+const faqItems = [
+  {
+    question: "What is IntelliSeek?",
+    answer:
+      "IntelliSeek is an AI study workspace for students. Upload your lecture notes, slides, and PDFs, then ask questions and get answers grounded in your own material with citations to the exact source.",
+  },
+  {
+    question: "Which file types can I upload?",
+    answer:
+      "You can upload PDF, DOCX, PPTX, TXT, and Markdown files up to 20 MB. Scanned image-only PDFs work too — built-in OCR reads them before indexing.",
+  },
+  {
+    question: "How are answers grounded in my documents?",
+    answer:
+      "Every upload is split into chunks, embedded, and indexed semantically. When you ask a question, IntelliSeek retrieves the most relevant chunks and cites the exact file they came from.",
+  },
+  {
+    question: "Is IntelliSeek free?",
+    answer:
+      "Yes. You can create an account, upload your notes, and ask questions for free. A demo is also available without signing in.",
+  },
+  {
+    question: "Do my documents stay private?",
+    answer:
+      "Your uploads are indexed into your personal library and only retrievable by your account. Admins can additionally publish material to a shared knowledge base for everyone.",
+  },
+];
+
+const faqStructuredData = {
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: faqItems.map((item) => ({
+    "@type": "Question",
+    name: item.question,
+    acceptedAnswer: { "@type": "Answer", text: item.answer },
+  })),
+};
+
 export default function Home() {
   const router = useRouter();
   const { startDemo } = useDemo();
@@ -51,10 +91,10 @@ export default function Home() {
             alt="IntelliSeek"
             className="w-12 h-12 sm:w-20 sm:h-20 lg:w-24 lg:h-24 object-contain"
             />
-            <h1 className="w-full text-2xl sm:text-4xl lg:text-5xl pt-3 font-semibold">
+            <div className="w-full text-2xl sm:text-4xl lg:text-5xl pt-3 font-semibold">
               <span className="text-slate-900 dark:text-white">Intelli</span>
               <span className="ml-1 bg-linear-to-br from-purple-600 to-cyan-600 bg-clip-text text-transparent dark:from-purple-600 dark:to-sky-500">Seek</span>
-            </h1>
+            </div>
           </div>
           
           <h1 className="max-w-4xl text-5xl font-semibold tracking-tight text-white sm:text-6xl lg:text-7xl">
@@ -125,6 +165,27 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      <section aria-labelledby="faq-heading" className="mx-auto w-full max-w-7xl px-6 pb-20 lg:px-10">
+        <h2 id="faq-heading" className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
+          Frequently asked questions
+        </h2>
+        <div className="mt-8 grid gap-4 md:grid-cols-2">
+          {faqItems.map((item) => (
+            <article
+              key={item.question}
+              className="glow-border rounded-3xl border border-white/10 bg-white/5 p-5 shadow-xl shadow-slate-950/20 backdrop-blur-xl transition hover:-translate-y-0.5 hover:bg-white/10"
+            >
+              <h3 className="text-base font-semibold text-white">{item.question}</h3>
+              <p className="mt-2 text-sm leading-6 text-slate-300">{item.answer}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqStructuredData) }}
+      />
     </main>
   );
 }
