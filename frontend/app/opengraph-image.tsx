@@ -43,7 +43,7 @@ export default async function OpengraphImage() {
             IS
           </div>
           <div style={{ display: "flex", fontSize: 64, fontWeight: 700, color: "#f8fafc" }}>
-            Intelli
+            <span>Intelli</span>
             <span
               style={{
                 background: "linear-gradient(90deg, #9333ea, #06b6d4)",

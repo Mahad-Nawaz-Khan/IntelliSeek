@@ -124,58 +124,89 @@ type StreamChatAccumulator = {
   sawDone: boolean;
 };
 
+function handleJobEvent(data: Record<string, unknown>, handlers: StreamChatHandlers) {
+  if (typeof data.jobId === "string" && data.jobId) {
+    handlers.onJob?.(data.jobId);
+  }
+}
+
+function handleDeltaEvent(
+  data: Record<string, unknown>,
+  state: StreamChatAccumulator,
+  handlers: StreamChatHandlers,
+) {
+  if (typeof data.text === "string" && data.text) {
+    state.answer += data.text;
+    handlers.onDelta(data.text);
+  }
+}
+
+function handleSourcesEvent(
+  data: Record<string, unknown>,
+  state: StreamChatAccumulator,
+  handlers: StreamChatHandlers,
+) {
+  state.sources = isSourceCitationArray(data.sources) ? data.sources : [];
+  handlers.onSources?.(state.sources);
+}
+
+function handleDoneEvent(
+  data: Record<string, unknown>,
+  state: StreamChatAccumulator,
+  handlers: StreamChatHandlers,
+) {
+  state.finalAnswer = typeof data.answer === "string" ? data.answer : state.answer;
+  state.finalSources = isSourceCitationArray(data.sources) ? data.sources : state.sources;
+  state.finalChatSessionId = typeof data.chatSessionId === "string" ? data.chatSessionId : undefined;
+  state.sawDone = true;
+  handlers.onDone?.({
+    ok: true,
+    answer: state.finalAnswer,
+    sources: state.finalSources,
+    chatSessionId: state.finalChatSessionId,
+  });
+}
+
+function handleTitleEvent(
+  data: Record<string, unknown>,
+  state: StreamChatAccumulator,
+  handlers: StreamChatHandlers,
+) {
+  if (typeof data.title === "string" && data.title) {
+    state.finalTitle = data.title;
+    handlers.onTitle?.(data.title);
+  }
+}
+
 function dispatchStreamEvent(
   streamEvent: StreamEvent,
   state: StreamChatAccumulator,
   handlers: StreamChatHandlers,
 ) {
-  const data = streamEvent.data as Record<string, unknown>;
+  const data = (streamEvent.data ?? {}) as Record<string, unknown>;
 
   switch (streamEvent.event) {
-    case "job": {
-      const jobId = typeof data.jobId === "string" ? data.jobId : "";
-      if (jobId) handlers.onJob?.(jobId);
+    case "job":
+      handleJobEvent(data, handlers);
       break;
-    }
-    case "delta": {
-      const text = typeof data.text === "string" ? data.text : "";
-      if (text) {
-        state.answer += text;
-        handlers.onDelta(text);
-      }
+    case "delta":
+      handleDeltaEvent(data, state, handlers);
       break;
-    }
-    case "reset": {
+    case "reset":
       state.answer = "";
       handlers.onReset?.();
       break;
-    }
-    case "sources": {
-      state.sources = isSourceCitationArray(data.sources) ? data.sources : [];
-      handlers.onSources?.(state.sources);
+    case "sources":
+      handleSourcesEvent(data, state, handlers);
       break;
-    }
-    case "done": {
-      state.finalAnswer = typeof data.answer === "string" ? data.answer : state.answer;
-      state.finalSources = isSourceCitationArray(data.sources) ? data.sources : state.sources;
-      state.finalChatSessionId = typeof data.chatSessionId === "string" ? data.chatSessionId : undefined;
-      state.sawDone = true;
-      handlers.onDone?.({
-        ok: true,
-        answer: state.finalAnswer,
-        sources: state.finalSources,
-        chatSessionId: state.finalChatSessionId,
-      });
+    case "done":
+      handleDoneEvent(data, state, handlers);
       break;
-    }
-    case "title": {
-      state.finalTitle = typeof data.title === "string" ? data.title : undefined;
-      if (state.finalTitle) handlers.onTitle?.(state.finalTitle);
+    case "title":
+      handleTitleEvent(data, state, handlers);
       break;
-    }
-    case "error": {
+    case "error":
       throw new Error(typeof data.error === "string" ? data.error : "The assistant could not answer this question.");
-    }
   }
 }
 

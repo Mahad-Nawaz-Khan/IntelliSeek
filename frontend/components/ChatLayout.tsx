@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { UploadCloud } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 
@@ -9,32 +9,28 @@ import { ChatComposer } from "./chat/ChatComposer";
 import { ChatHeader } from "./chat/ChatHeader";
 import { ChatMessage } from "./chat/ChatMessage";
 import { ChatWelcome } from "./chat/ChatWelcome";
+import { useChatDragAndDrop } from "./chat/useChatDragAndDrop";
+import { useDocumentUploadToasts } from "./chat/useDocumentUploadToasts";
+import { useKnowledgeSources } from "./chat/useKnowledgeSources";
+import { useChatSessions } from "./chat/useChatSessions";
 import { DemoLimitModal } from "./demo/DemoSignupModal";
 import { SUGGESTIONS } from "./SuggestedQueries";
 import { RetrievalStatus } from "./sources/RetrievalStatus";
-import { IndexingToast, type UploadIndexingToast } from "./upload/IndexingToast";
+import { IndexingToast } from "./upload/IndexingToast";
 import { UploadModal } from "./upload/UploadModal";
 import { useAuth } from "../context/AuthContext";
 import { useDemo } from "../context/DemoContext";
 import {
-  deleteChatSession,
-  fetchChatSessionMessages,
-  fetchChatSessions,
-  renameChatSession,
   streamChatQuestion,
   streamChatQuestionDemo,
   type ChatMessage as ChatMessageType,
   type ChatSessionSummary,
 } from "../lib/chat-api";
-import { fetchAccessibleDocuments } from "../lib/documents";
 import type { AutocompleteSuggestion } from "../lib/trie-autocomplete";
-import { uploadDocumentFile, type UploadToastPayload } from "../lib/upload-document";
-import { createSourceGroups, type KnowledgeSource } from "../lib/ui-state";
+import { uploadDocumentFile } from "../lib/upload-document";
+import { createSourceGroups } from "../lib/ui-state";
 
-type AutocompleteResponse = {
-  ok: boolean;
-  suggestions?: AutocompleteSuggestion[];
-};
+const noop = () => {};
 
 type QueuedChatMessage = {
   id: string;
@@ -70,6 +66,10 @@ function updateSessionTitleInRows(
   return rows.map((session) =>
     session.id === sessionId ? { ...session, title, title_status: "generated" as const } : session,
   );
+}
+
+function hasMatchingSession(sessions: ChatSessionSummary[], sessionId: string): boolean {
+  return sessions.some((session) => session.id === sessionId);
 }
 
 function resolveErrorMessage(
@@ -125,47 +125,20 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
   const searchParams = useSearchParams();
   const { isLoaded, isSignedIn, user } = useAuth();
   const { hasReachedLimit, decrementQuestion, remaining } = useDemo();
+
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [isLoadingSession, setIsLoadingSession] = useState(false);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [queuedMessages, setQueuedMessages] = useState<QueuedChatMessage[]>([]);
-  const [recentSessionRows, setRecentSessionRows] = useState<ChatSessionSummary[]>([]);
-  const [sources, setSources] = useState<KnowledgeSource[]>([]);
-  const [serverAutocompleteSuggestions, setServerAutocompleteSuggestions] = useState<AutocompleteSuggestion[]>([]);
-  const [sourceStatus, setSourceStatus] = useState<"loading" | "ready" | "empty" | "unavailable">(
-    "loading",
-  );
   const [isUploadOpen, setIsUploadOpen] = useState(false);
-  const [pollDocuments, setPollDocuments] = useState(false);
-  const [deletingSourceId, setDeletingSourceId] = useState<string | null>(null);
-  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
-  const [uploadToasts, setUploadToasts] = useState<UploadIndexingToast[]>([]);
-  const [isChatFileDragging, setIsChatFileDragging] = useState(false);
   const [showSignupModal, setShowSignupModal] = useState(false);
-  const loadedSessionRef = useRef<string | null>(null);
-  const activeSessionIdRef = useRef<string | null>(null);
+
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeJobIdRef = useRef<string | null>(null);
   const queuedMessagesRef = useRef<QueuedChatMessage[]>([]);
   const conversationRunRef = useRef(0);
   const isLoadingRef = useRef(false);
-  const isLoadingSessionRef = useRef(false);
-  const chatDragDepthRef = useRef(0);
-  const completedDocumentIds = useMemo(
-    () => new Set(sources.filter((source) => source.status === "indexed").map((source) => source.id)),
-    [sources],
-  );
-  const failedDocuments = useMemo(
-    () => new Map(sources.filter((source) => source.status === "failed").map((source) => [source.id, source.summary ?? "Indexing failed"])),
-    [sources],
-  );
   const bottomRef = useRef<HTMLDivElement>(null);
   const sessionParam = searchParams.get("session");
-
-  useEffect(() => {
-    activeSessionIdRef.current = activeSessionId;
-  }, [activeSessionId]);
 
   useEffect(() => {
     queuedMessagesRef.current = queuedMessages;
@@ -175,9 +148,81 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
     isLoadingRef.current = isLoading;
   }, [isLoading]);
 
-  useEffect(() => {
-    isLoadingSessionRef.current = isLoadingSession;
-  }, [isLoadingSession]);
+  // Knowledge sources management
+  const {
+    sources,
+    sourceStatus,
+    setPollDocuments,
+    serverAutocompleteSuggestions,
+    deletingSourceId,
+    handleDeleteSource,
+  } = useKnowledgeSources({ demo, isLoaded, isSignedIn });
+
+  const completedDocumentIds = useMemo(
+    () => new Set(sources.filter((source) => source.status === "indexed").map((source) => source.id)),
+    [sources],
+  );
+  const failedDocuments = useMemo(
+    () => new Map(sources.filter((source) => source.status === "failed").map((source) => [source.id, source.summary ?? "Indexing failed"])),
+    [sources],
+  );
+
+  // Upload toasts management
+  const { uploadToasts, dismissToast, handleUploadToast } = useDocumentUploadToasts({
+    completedDocumentIds,
+    failedDocuments,
+    onNewIndexingDocument: useCallback(() => setPollDocuments(true), [setPollDocuments]),
+  });
+
+  const handleClearMessages = useCallback(() => {
+    setMessages([]);
+    setQueuedMessages([]);
+    queuedMessagesRef.current = [];
+  }, []);
+
+  // Chat sessions management
+  const {
+    recentSessionRows,
+    setRecentSessionRows,
+    activeSessionId,
+    setActiveSessionId,
+    activeSessionIdRef,
+    loadedSessionRef,
+    isLoadingSession,
+    setIsLoadingSession,
+    isLoadingSessionRef,
+    deletingSessionId,
+    refreshRecentChats,
+    handleOpenSession,
+    handleRenameSession,
+    handleDeleteSession,
+  } = useChatSessions({
+    demo,
+    isLoaded,
+    isSignedIn,
+    sessionParam,
+    router,
+    isLoading,
+    onSessionLoaded: setMessages,
+    onClearMessages: handleClearMessages,
+  });
+
+  const uploadDroppedFiles = useCallback((files: File[]) => {
+    if (!files.length || demo) return;
+
+    files.forEach((file) => {
+      uploadDocumentFile({
+        file,
+        userId: user?.id,
+        isAuthLoaded: isLoaded,
+        isSignedIn,
+        toastValidationFailures: true,
+        onToast: handleUploadToast,
+      }).catch(noop);
+    });
+  }, [demo, handleUploadToast, isLoaded, isSignedIn, user]);
+
+  const { isChatFileDragging, dragProps } = useChatDragAndDrop(demo, uploadDroppedFiles);
 
   const sourceGroups = useMemo(() => createSourceGroups(sources), [sources]);
   const recentChats = useMemo(() => recentSessionRows.map((session) => ({
@@ -185,9 +230,7 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
     title: session.title || "New chat",
     status: session.id === activeSessionId ? "active" as const : "inactive" as const,
   })), [activeSessionId, recentSessionRows]);
-  // While an answer is being prepared, the pill names the actual phase: the
-  // sources event arrives before the first token, so "sources present on the
-  // streaming message" is the honest line between searching and writing.
+
   const latestMessage = messages.length ? messages[messages.length - 1] : undefined;
   const retrievalMessage =
     isLoading && latestMessage?.role === "assistant" && latestMessage.sources?.length
@@ -221,14 +264,6 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
     });
   }, [messages, serverAutocompleteSuggestions]);
 
-  const refreshRecentChats = useCallback(async () => {
-    try {
-      setRecentSessionRows(await fetchChatSessions());
-    } catch {
-      setRecentSessionRows([]);
-    }
-  }, []);
-
   useEffect(() => {
     if (demo) return;
     if (!isLoaded) return;
@@ -237,251 +272,12 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
       abortControllerRef.current?.abort();
       abortControllerRef.current = null;
       activeJobIdRef.current = null;
-      setSources([]);
-      setRecentSessionRows([]);
-      setActiveSessionId(null);
-      activeSessionIdRef.current = null;
       setMessages([]);
       setQueuedMessages([]);
       queuedMessagesRef.current = [];
-      loadedSessionRef.current = null;
-      setSourceStatus("unavailable");
       router.replace("/sign-in?next=/chat");
-      return;
     }
-
-    let active = true;
-
-    async function loadSources() {
-      try {
-        const rows = await fetchAccessibleDocuments();
-
-        if (!active) return;
-
-        setSources(rows);
-        setPollDocuments(rows.some((source) => source.status === "indexing"));
-        setSourceStatus(rows.length ? "ready" : "empty");
-      } catch {
-        if (active) setSourceStatus("unavailable");
-      }
-    }
-
-    async function loadAutocomplete() {
-      try {
-        const response = await fetch("/api/autocomplete");
-        const result = (await response.json()) as AutocompleteResponse;
-        if (active && response.ok && result.ok) setServerAutocompleteSuggestions(result.suggestions ?? []);
-      } catch {
-        if (active) setServerAutocompleteSuggestions([]);
-      }
-    }
-
-    loadSources();
-    loadAutocomplete();
-    refreshRecentChats();
-
-    return () => {
-      active = false;
-    };
-  }, [isLoaded, isSignedIn, refreshRecentChats, router, user, demo]);
-
-  useEffect(() => {
-    if (demo) return;
-    if (!isLoaded || !isSignedIn || !user) return;
-
-    const sessionId = sessionParam;
-    if (!sessionId) {
-      setActiveSessionId(null);
-      activeSessionIdRef.current = null;
-      loadedSessionRef.current = null;
-      setIsLoadingSession(false);
-      isLoadingSessionRef.current = false;
-      return;
-    }
-
-    if (sessionId === loadedSessionRef.current) return;
-
-    const requestedSessionId = sessionId;
-    let active = true;
-    const abortController = new AbortController();
-    const timeout = window.setTimeout(() => abortController.abort(), 15000);
-    setIsLoadingSession(true);
-    isLoadingSessionRef.current = true;
-
-    async function loadSession() {
-      try {
-        const result = await fetchChatSessionMessages(requestedSessionId, abortController.signal);
-        if (!active) return;
-        loadedSessionRef.current = result.session.id;
-        setActiveSessionId(result.session.id);
-        activeSessionIdRef.current = result.session.id;
-        setMessages(result.messages);
-        setIsLoadingSession(false);
-        isLoadingSessionRef.current = false;
-        refreshRecentChats().catch(() => {});
-      } catch {
-        if (!active) return;
-        setActiveSessionId(null);
-        activeSessionIdRef.current = null;
-        setMessages([]);
-        loadedSessionRef.current = null;
-        window.history.replaceState(null, "", "/chat");
-      } finally {
-        window.clearTimeout(timeout);
-        if (active) {
-          setIsLoadingSession(false);
-          isLoadingSessionRef.current = false;
-        }
-      }
-    }
-
-    loadSession();
-
-    return () => {
-      active = false;
-      window.clearTimeout(timeout);
-      abortController.abort();
-    };
-  }, [isLoaded, isSignedIn, refreshRecentChats, sessionParam, user, demo]);
-
-  useEffect(() => {
-    if (demo) return;
-    if (!pollDocuments) return;
-
-    let active = true;
-
-    async function refreshIndexedState() {
-      try {
-        const rows = await fetchAccessibleDocuments();
-        if (!active) return;
-
-        const hasIndexingSources = rows.some((source) => source.status === "indexing");
-        setSources(rows);
-        setPollDocuments(hasIndexingSources);
-
-        const autocompleteResponse = await fetch("/api/autocomplete");
-        const autocompleteResult = (await autocompleteResponse.json()) as AutocompleteResponse;
-        if (active && autocompleteResponse.ok && autocompleteResult.ok) {
-          setServerAutocompleteSuggestions(autocompleteResult.suggestions ?? []);
-        }
-      } catch {
-      }
-    }
-
-    refreshIndexedState();
-    const interval = window.setInterval(refreshIndexedState, 3000);
-
-    return () => {
-      active = false;
-      window.clearInterval(interval);
-    };
-  }, [pollDocuments, demo]);
-
-  // Update toast status from polling results
-  useEffect(() => {
-    setUploadToasts((current) =>
-      current.map((toast) => {
-        if (toast.status !== "uploading" && toast.status !== "indexing") return toast;
-
-        if (toast.documentId && completedDocumentIds.has(toast.documentId)) {
-          return { ...toast, status: "completed" as const };
-        }
-
-        const failure = toast.documentId ? failedDocuments.get(toast.documentId) : undefined;
-        if (failure) {
-          return { ...toast, status: "failed" as const, errorMessage: failure };
-        }
-
-        return toast;
-      }),
-    );
-  }, [completedDocumentIds, failedDocuments]);
-
-  // Auto-dismiss completed toasts after green flash
-  useEffect(() => {
-    const completedIds = uploadToasts
-      .filter((t) => t.status === "completed")
-      .map((t) => t.toastId);
-
-    if (completedIds.length === 0) return;
-
-    const filterCompletedToasts = (current: UploadIndexingToast[]) =>
-      current.filter((t) => !completedIds.includes(t.toastId));
-
-    const timeout = window.setTimeout(() => {
-      setUploadToasts(filterCompletedToasts);
-    }, 1800);
-
-    return () => window.clearTimeout(timeout);
-  }, [uploadToasts]);
-
-  const dismissToast = useCallback((toastId: string) => {
-    setUploadToasts((current) => current.filter((t) => t.toastId !== toastId));
-  }, []);
-
-  const handleUploadToast = useCallback(({ toastId, documentId, filename, status, queuedAt, errorMessage }: UploadToastPayload) => {
-    if (documentId) setPollDocuments(true);
-    setUploadToasts((current) => {
-      const existing = current.find((t) => t.toastId === toastId);
-      const nextToast: UploadIndexingToast = {
-        toastId,
-        documentId: documentId ?? existing?.documentId,
-        filename,
-        queuedAt: queuedAt ?? existing?.queuedAt ?? Date.now(),
-        status,
-        errorMessage,
-      };
-
-      return [...current.filter((t) => t.toastId !== toastId), nextToast];
-    });
-  }, []);
-
-  const uploadDroppedFiles = useCallback((files: File[]) => {
-    if (!files.length || demo) return;
-
-    files.forEach((file) => {
-      uploadDocumentFile({
-        file,
-        userId: user?.id,
-        isAuthLoaded: isLoaded,
-        isSignedIn,
-        toastValidationFailures: true,
-        onToast: handleUploadToast,
-      }).catch(() => {});
-    });
-  }, [demo, handleUploadToast, isLoaded, isSignedIn, user]);
-
-  function hasDraggedFiles(event: DragEvent) {
-    return Array.from(event.dataTransfer.types).includes("Files");
-  }
-
-  const handleChatDragEnter = useCallback((event: DragEvent<HTMLDivElement>) => {
-    if (!hasDraggedFiles(event)) return;
-    event.preventDefault();
-    chatDragDepthRef.current += 1;
-    setIsChatFileDragging(true);
-  }, []);
-
-  const handleChatDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
-    if (!hasDraggedFiles(event)) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "copy";
-    setIsChatFileDragging(true);
-  }, []);
-
-  const handleChatDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
-    if (!hasDraggedFiles(event)) return;
-    chatDragDepthRef.current = Math.max(0, chatDragDepthRef.current - 1);
-    if (chatDragDepthRef.current === 0) setIsChatFileDragging(false);
-  }, []);
-
-  const handleChatDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
-    if (!hasDraggedFiles(event)) return;
-    event.preventDefault();
-    chatDragDepthRef.current = 0;
-    setIsChatFileDragging(false);
-    uploadDroppedFiles(Array.from(event.dataTransfer.files));
-  }, [uploadDroppedFiles]);
+  }, [demo, isLoaded, isSignedIn, router, user]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -516,14 +312,8 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
       let streamedAnswer = "";
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
-      // The session this question belongs to as of right now. If it changes
-      // before the stream finishes, the user has navigated elsewhere and the
-      // completion must not touch the current view (see onDone below).
       const sessionAtSend = activeSessionIdRef.current;
 
-      // A fallback provider restarts the answer from the beginning, so the
-      // partial text from the failed attempt is discarded rather than prefixed
-      // to the retry.
       const resetStreamedAnswer = () => {
         streamedAnswer = "";
         setMessages((current) =>
@@ -549,9 +339,9 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
               );
             },
             onReset: resetStreamedAnswer,
-            onSources: (sources) => {
+            onSources: (demoSources) => {
               setMessages((current) =>
-                patchAssistantMessage(current, assistantId, { sources }),
+                patchAssistantMessage(current, assistantId, { sources: demoSources }),
               );
             },
             onDone: (response) => {
@@ -581,16 +371,13 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
               );
             },
             onReset: resetStreamedAnswer,
-            onSources: (sources) => {
+            onSources: (apiSources) => {
               setMessages((current) =>
-                patchAssistantMessage(current, assistantId, { sources }),
+                patchAssistantMessage(current, assistantId, { sources: apiSources }),
               );
             },
             onDone: (response) => {
               const completedSessionId = response.chatSessionId;
-              // While generating, the user may have opened another chat. The
-              // server persists the answer either way; only touch this view's
-              // state when the user is still on the conversation asked in.
               const stillAttached =
                 conversationRunRef.current === runScope && activeSessionIdRef.current === sessionAtSend;
 
@@ -610,23 +397,16 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
                   }),
                 );
               } else if (completedSessionId && loadedSessionRef.current === completedSessionId) {
-                // Invalidate the cached load so revisiting the session
-                // refetches and shows the answer that completed in the
-                // background.
                 loadedSessionRef.current = null;
               }
-              refreshRecentChats().catch(() => {});
+              refreshRecentChats().catch(noop);
             },
-            // The title is generated after the answer, so it is applied when it
-            // arrives instead of guessing at a delay and re-fetching the list.
             onTitle: (title) => {
               const sessionId = activeSessionIdRef.current;
               if (!sessionId) return;
               setRecentSessionRows((current) => {
-                // The list refresh triggered by `done` may not have landed yet;
-                // re-fetching is what picks the new session up in that case.
-                if (!current.some((session) => session.id === sessionId)) {
-                  refreshRecentChats().catch(() => {});
+                if (!hasMatchingSession(current, sessionId)) {
+                  refreshRecentChats().catch(noop);
                   return current;
                 }
                 return updateSessionTitleInRows(current, sessionId, title);
@@ -664,12 +444,12 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
           if (nextQueuedMessage) {
             queuedMessagesRef.current = remainingQueuedMessages;
             setQueuedMessages(remainingQueuedMessages);
-            runQuestion(nextQueuedMessage.question, nextQueuedMessage.selectedSuggestion, runScope).catch(() => {});
+            runQuestion(nextQueuedMessage.question, nextQueuedMessage.selectedSuggestion, runScope).catch(noop);
           }
         }
       }
     },
-    [demo, refreshRecentChats],
+    [activeSessionIdRef, demo, isLoadingSessionRef, loadedSessionRef, refreshRecentChats, setActiveSessionId, setRecentSessionRows],
   );
 
   const handleSubmit = useCallback(
@@ -690,7 +470,7 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
       }
 
       if (!isLoadingRef.current) {
-        runQuestion(trimmedQuestion, selectedSuggestion).catch(() => {});
+        runQuestion(trimmedQuestion, selectedSuggestion).catch(noop);
         return true;
       }
 
@@ -709,7 +489,7 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
 
       return true;
     },
-    [demo, hasReachedLimit, runQuestion, decrementQuestion],
+    [demo, hasReachedLimit, runQuestion, decrementQuestion, isLoadingSessionRef],
   );
 
   const handleRemoveQueuedMessage = useCallback((queuedMessageId: string) => {
@@ -725,24 +505,18 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
     const jobId = activeJobIdRef.current;
     activeJobIdRef.current = null;
     if (!jobId) return;
-    // Tearing down the fetch only stops the visible stream; this asks the
-    // server to cancel the background job too, so generation truly ends and
-    // only the partial answer seen so far is persisted.
     fetch("/api/chat/cancel", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ jobId }),
-    }).catch(() => {});
+    }).catch(noop);
   }, []);
 
   const handleNewChat = useCallback(() => {
     conversationRunRef.current += 1;
     if (demo) {
-      // The demo stream is a local fake with nothing to persist; cancel it.
       abortControllerRef.current?.abort();
     } else {
-      // Detach instead of aborting: the answer keeps generating server-side
-      // and is saved to its session even though this view is being reset.
       abortControllerRef.current = null;
       activeJobIdRef.current = null;
     }
@@ -757,70 +531,7 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
     queuedMessagesRef.current = [];
     loadedSessionRef.current = null;
     if (!demo) window.history.pushState(null, "", "/chat");
-  }, [demo]);
-
-  const handleOpenSession = useCallback((sessionId: string) => {
-    if (isLoading || demo) return;
-    router.push(`/chat?session=${encodeURIComponent(sessionId)}`);
-  }, [demo, isLoading, router]);
-
-  const handleRenameSession = useCallback(async (sessionId: string, title: string) => {
-    if (demo) return false;
-    try {
-      const updated = await renameChatSession(sessionId, title);
-      setRecentSessionRows((current) =>
-        current.map((session) => (session.id === sessionId ? { ...session, title: updated.title } : session)),
-      );
-      return true;
-    } catch {
-      return false;
-    }
-  }, [demo]);
-
-  const handleDeleteSession = useCallback(async (sessionId: string) => {
-    if (deletingSessionId || demo) return;
-
-    setDeletingSessionId(sessionId);
-    try {
-      await deleteChatSession(sessionId);
-      setRecentSessionRows((current) => current.filter((session) => session.id !== sessionId));
-      if (sessionId === activeSessionId) {
-        setActiveSessionId(null);
-        activeSessionIdRef.current = null;
-        setMessages([]);
-        setQueuedMessages([]);
-        queuedMessagesRef.current = [];
-        loadedSessionRef.current = null;
-        router.push("/chat");
-      }
-      await refreshRecentChats();
-    } catch {
-    } finally {
-      setDeletingSessionId(null);
-    }
-  }, [activeSessionId, demo, deletingSessionId, refreshRecentChats, router]);
-
-  const handleDeleteSource = useCallback(async (sourceId: string) => {
-    if (deletingSourceId || demo) return;
-
-    setDeletingSourceId(sourceId);
-    try {
-      const response = await fetch("/api/documents", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ document_id: sourceId }),
-      });
-      const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-      if (!response.ok || !result?.ok) throw new Error(result?.error ?? "Document deletion failed");
-
-      setSources((current) => current.filter((source) => source.id !== sourceId));
-      setServerAutocompleteSuggestions([]);
-    } catch {
-      setSourceStatus("unavailable");
-    } finally {
-      setDeletingSourceId(null);
-    }
-  }, [demo, deletingSourceId]);
+  }, [activeSessionIdRef, demo, loadedSessionRef, isLoadingSessionRef, setActiveSessionId, setIsLoadingSession]);
 
   if (!isLoaded || (!demo && (!isSignedIn || !user))) {
     return null;
@@ -829,13 +540,7 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
   const chatContent = (
     <>
       <ChatHeader onOpenUpload={demo ? () => setShowSignupModal(true) : () => setIsUploadOpen(true)} />
-      <div
-        className="relative flex min-h-0 flex-1"
-        onDragEnter={demo ? undefined : handleChatDragEnter}
-        onDragLeave={demo ? undefined : handleChatDragLeave}
-        onDragOver={demo ? undefined : handleChatDragOver}
-        onDrop={demo ? undefined : handleChatDrop}
-      >
+      <div className="relative flex min-h-0 flex-1" {...dragProps}>
         {isChatFileDragging && (
           <div className="pointer-events-none absolute inset-3 z-30 flex items-center justify-center rounded-3xl border-2 border-dashed border-cyan-300/70 bg-slate-950/75 text-cyan-50 shadow-2xl shadow-cyan-950/30 backdrop-blur-sm">
             <div className="flex flex-col items-center gap-3 text-center">

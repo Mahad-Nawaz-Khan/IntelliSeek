@@ -29,10 +29,9 @@ export function SessionTitleLabel({
   return (
     <span
       className="block overflow-hidden"
+      title={title}
       onMouseEnter={measure}
       onMouseLeave={reset}
-      onFocus={measure}
-      onBlur={reset}
     >
       <span
         ref={innerRef}
