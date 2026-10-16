@@ -109,7 +109,7 @@ export default function Home() {
                 priority
               />
               <div className="text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight">
-                <span className="brand-wordmark-primary">Intelli</span>
+                <span className="text-slate-900 dark:text-white">Intelli</span>
                 <span className="ml-1 bg-gradient-to-r from-purple-500 to-cyan-400 bg-clip-text text-transparent">
                   Seek
                 </span>
@@ -276,7 +276,7 @@ export default function Home() {
 
         {/* High-Impact Pre-Footer Call to Action */}
         <section className="relative mx-auto w-full max-w-7xl px-6 pb-24 lg:px-10">
-          <div className="homepage-cta-card overflow-hidden rounded-3xl border border-cyan-400/20 bg-gradient-to-r from-slate-900/90 via-purple-950/40 to-slate-900/90 p-8 sm:p-14 text-center shadow-2xl backdrop-blur-2xl">
+          <div className="overflow-hidden rounded-3xl border border-cyan-400/20 bg-gradient-to-r from-slate-900/90 via-purple-950/40 to-slate-900/90 p-8 sm:p-14 text-center shadow-2xl backdrop-blur-2xl">
             <span className="inline-flex items-center gap-1.5 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-3.5 py-1 text-xs font-semibold uppercase tracking-wider text-cyan-300">
               <Sparkles className="h-3.5 w-3.5" />
               Instant Academic Leverage

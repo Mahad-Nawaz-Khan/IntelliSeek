@@ -44,7 +44,7 @@ export function HomeNavbar() {
             />
           </div>
           <div className="text-xl font-bold tracking-tight">
-            <span className="brand-wordmark-primary">Intelli</span>
+            <span className="text-slate-900 dark:text-white">Intelli</span>
             <span className="ml-0.5 bg-gradient-to-r from-purple-500 to-cyan-400 bg-clip-text text-transparent">
               Seek
             </span>

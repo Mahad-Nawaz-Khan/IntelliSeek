@@ -18,7 +18,7 @@ export function HomeFooter() {
                 className="h-10 w-10 object-contain"
               />
               <div className="text-2xl font-bold tracking-tight">
-                <span className="brand-wordmark-primary">Intelli</span>
+                <span className="text-slate-900 dark:text-white">Intelli</span>
                 <span className="ml-0.5 bg-gradient-to-r from-purple-500 to-cyan-400 bg-clip-text text-transparent">
                   Seek
                 </span>
@@ -134,9 +134,7 @@ export function HomeFooter() {
 
         {/* Bottom Bar */}
         <div className="mt-14 flex flex-col items-center justify-between gap-4 border-t border-white/10 pt-8 text-xs text-slate-500 sm:flex-row">
-          <p>
-            © {new Date().getFullYear()} <span className="brand-wordmark-primary">Intelli</span><span className="bg-gradient-to-r from-purple-500 to-cyan-400 bg-clip-text text-transparent">Seek</span>. Engineered with mathematical rigor for curious minds.
-          </p>
+          <p>© {new Date().getFullYear()} IntelliSeek. Engineered with mathematical rigor for curious minds.</p>
           <div className="flex items-center gap-6">
             <span className="flex items-center gap-1.5 text-slate-400">
               <ShieldCheck className="h-3.5 w-3.5 text-cyan-400" />
