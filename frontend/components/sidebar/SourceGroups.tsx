@@ -149,7 +149,7 @@ export function SourceGroups({
   onOpenKnowledgeBaseUpload,
   canManageKnowledgeBase,
 }: Readonly<SourceGroupsProps>) {
-  const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set());
+  const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set(["your-uploads"]));
 
   function toggleGroup(groupId: string) {
     setOpenGroups((current) => {

@@ -1,6 +1,7 @@
 "use client";
 
-import { X } from "lucide-react";
+import { ArrowRight, X } from "lucide-react";
+import Link from "next/link";
 import { useCallback, useMemo, useState } from "react";
 
 import { useAuth } from "../../context/AuthContext";
@@ -124,6 +125,32 @@ export function UploadModal({
           </button>
         </div>
 
+        {!isLoaded ? (
+          <p className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300" role="status">
+            Checking your sign-in status…
+          </p>
+        ) : !isSignedIn && uploadTarget === "personal" ? (
+          <div className="rounded-2xl border border-cyan-300/20 bg-cyan-300/5 p-5">
+            <p className="text-sm font-semibold text-white">Sign in to upload your notes</p>
+            <p className="mt-1 text-sm leading-6 text-slate-400">Your files are kept in your private library. Sign in or create a free account to add them.</p>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <Link
+                href="/sign-in?next=/chat"
+                onClick={onClose}
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-200"
+              >
+                Sign in <ArrowRight className="h-4 w-4" />
+              </Link>
+              <Link
+                href="/sign-up?next=/chat"
+                onClick={onClose}
+                className="inline-flex min-h-10 items-center justify-center rounded-xl border border-white/15 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-200"
+              >
+                Create free account
+              </Link>
+            </div>
+          </div>
+        ) : (
         <UploadDropzone
           disabled={isWorking || !isLoaded || !isSignedIn}
           isDragging={isDragging}
@@ -144,6 +171,7 @@ export function UploadModal({
             if (files.length) processFiles(files);
           }}
         />
+        )}
 
         {displayedItem && (
           <div className="mt-4">

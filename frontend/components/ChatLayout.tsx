@@ -93,7 +93,10 @@ type ChatConversationViewProps = {
   isLoadingSession: boolean;
   messages: ChatMessageType[];
   isLoading: boolean;
+  hasPersonalSources: boolean;
+  isDemo: boolean;
   onSubmit: (question: string) => boolean;
+  onOpenUpload?: () => void;
   bottomRef: React.RefObject<HTMLDivElement | null>;
 };
 
@@ -101,14 +104,25 @@ function ChatConversationView({
   isLoadingSession,
   messages,
   isLoading,
+  hasPersonalSources,
+  isDemo,
   onSubmit,
+  onOpenUpload,
   bottomRef,
 }: Readonly<ChatConversationViewProps>) {
   if (isLoadingSession) {
     return <div className="mx-auto max-w-5xl py-10 text-sm text-slate-400">Loading conversation...</div>;
   }
   if (messages.length === 0) {
-    return <ChatWelcome disabled={isLoading} onSelect={onSubmit} />;
+    return (
+      <ChatWelcome
+        disabled={isLoading}
+        hasPersonalSources={hasPersonalSources}
+        isDemo={isDemo}
+        onSelect={onSubmit}
+        onOpenUpload={onOpenUpload}
+      />
+    );
   }
   return (
     <div className="mx-auto max-w-5xl space-y-5">
@@ -560,7 +574,10 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
                   isLoadingSession={isLoadingSession}
                   messages={messages}
                   isLoading={isLoading}
+                  hasPersonalSources={sources.some((source) => source.sourceType === "uploaded" && source.status === "indexed")}
+                  isDemo={demo}
                   onSubmit={handleSubmit}
+                  onOpenUpload={demo ? undefined : () => setIsUploadOpen(true)}
                   bottomRef={bottomRef}
                 />
               </div>

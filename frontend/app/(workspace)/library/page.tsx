@@ -86,7 +86,18 @@ export default function LibraryPage() {
           <SourceSection title="Your Uploads" items={personalSources} emptyMessage={status === "loading" ? "Loading your uploads..." : "No personal uploads yet."} />
         </section>
 
-        {status === "error" ? <p className="mt-5 rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4 text-sm text-amber-100">Could not load the document library.</p> : null}
+        {status === "error" ? (
+          <div role="alert" className="mt-5 flex flex-col gap-3 rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4 text-sm text-amber-100 sm:flex-row sm:items-center sm:justify-between">
+            <p>Could not load your document library. Your files have not been changed.</p>
+            <button
+              type="button"
+              onClick={() => refreshSources({ force: true })}
+              className="min-h-10 shrink-0 rounded-xl border border-amber-200/20 px-3 py-2 text-xs font-semibold text-amber-50 transition hover:bg-amber-200/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-200"
+            >
+              Try again
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <UploadModal
