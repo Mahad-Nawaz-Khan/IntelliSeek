@@ -2,14 +2,10 @@
 
 import { Loader2 } from "lucide-react";
 import { Suspense } from "react";
-import { useSearchParams } from "next/navigation";
 
 import { ChatLayout } from "../../../components/ChatLayout";
 
 export default function ChatPage() {
-  const searchParams = useSearchParams();
-  const sessionKey = searchParams.get("session") ?? "new";
-
   return (
     <Suspense
       fallback={
@@ -21,7 +17,7 @@ export default function ChatPage() {
         </main>
       }
     >
-      <ChatLayout key={sessionKey} embedded />
+      <ChatLayout embedded />
     </Suspense>
   );
 }
