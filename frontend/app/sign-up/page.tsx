@@ -183,7 +183,7 @@ export default function SignUpPage() {
                   className="w-10 h-10 sm:w-16 sm:h-16 lg:w-20 lg:h-20 object-contain"
                 />
                 <h1 className="w-full text-lg sm:text-2xl lg:text-4xl pt-3 font-semibold">
-                  <span className="text-slate-900 dark:text-white">
+                  <span className="brand-wordmark-primary">
                     Intelli
                   </span>
                   <span className="ml-1 bg-linear-to-br from-purple-600 to-cyan-600 bg-clip-text text-transparent dark:from-purple-600 dark:to-sky-500">
