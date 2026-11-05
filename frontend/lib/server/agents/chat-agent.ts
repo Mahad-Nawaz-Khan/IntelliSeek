@@ -11,8 +11,17 @@ import { getServerEnv } from "../env";
 import { streamGroqGeneralAnswer, streamGroqGroundedAnswer } from "../groq";
 import type { RequestLogger } from "../logger";
 import { embedText } from "../rag/embeddings";
-import { mergeRetrievedContext, retrieveKeywordContext, toSourceCitations, validateQuestion, type RetrievedContext } from "../rag/retriever";
-import { matchUserChunks, type RetrievedChunk } from "../rag/vector-store";
+import {
+  mergeRetrievedContext,
+  retrieveFullTextContext,
+  retrieveKeywordContext,
+  toSourceCitations,
+  validateQuestion,
+  type RetrievedContext,
+} from "../rag/retriever";
+import { matchUserChunks, matchUserMicroChunks, type RetrievedChunk } from "../rag/vector-store";
+import { rerankChunks } from "../rag/reranker";
+import { expandQuery } from "../rag/query-expander";
 import { accessibleDocumentFilter, toSafeLikeTerm } from "../postgrest-safe";
 import { getSupabaseServiceClient } from "../supabase";
 
@@ -307,9 +316,41 @@ function createAgentRun(userId: string) {
     execute: async ({ query, limit }) => {
       const validatedQuery = validateQuestion(query);
       const queryEmbedding = await embedText(validatedQuery);
-      const semanticChunks = await matchUserChunks(userId, queryEmbedding, Math.min(Math.max(limit * 2, 10), 20));
-      const keywordChunks = await retrieveKeywordContext(validatedQuery, userId, limit);
-      const chunks = mergeRetrievedContext(semanticChunks, keywordChunks).slice(0, limit);
+      const candidateLimit = Math.min(Math.max(limit * 2, 10), 20);
+
+      // Parallel 4-way search: macro vector + micro-chunk vector + keyword + full-text
+      const [semanticChunks, microChunks, keywordChunks, fullTextChunks] = await Promise.all([
+        matchUserChunks(userId, queryEmbedding, candidateLimit),
+        matchUserMicroChunks(userId, queryEmbedding, candidateLimit),
+        retrieveKeywordContext(validatedQuery, userId, limit),
+        retrieveFullTextContext(validatedQuery, userId, limit),
+      ]);
+
+      let candidates = mergeRetrievedContext(
+        semanticChunks,
+        microChunks,
+        keywordChunks,
+        fullTextChunks,
+      );
+
+      // Query expansion rescue if initial candidates are sparse or weak
+      if (candidates.length === 0 || candidates.every((c) => c.score < 0.5)) {
+        const expansions = await expandQuery(validatedQuery);
+        if (expansions.length > 1) {
+          const expansionSearches = await Promise.all(
+            expansions.slice(1).map(async (exp) => {
+              const expEmbedding = await embedText(exp);
+              return matchUserChunks(userId, expEmbedding, 5);
+            }),
+          );
+          candidates = mergeRetrievedContext(candidates, ...expansionSearches);
+        }
+      }
+
+      // Re-rank with cross-encoder for precision
+      const reranked = await rerankChunks(validatedQuery, candidates);
+      const chunks = reranked.slice(0, limit);
+
       usedChunks.push(...chunks);
       return JSON.stringify(chunks);
     },

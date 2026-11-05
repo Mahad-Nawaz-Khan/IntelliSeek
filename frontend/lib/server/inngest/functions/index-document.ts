@@ -1,7 +1,8 @@
 import { NonRetriableError } from "inngest";
 import { BUCKET_NAME } from "../../../upload-config";
-import { chunkText } from "../../rag/chunker";
+import { chunkText, microChunkText } from "../../rag/chunker";
 import { EMBEDDING_DIMENSION, embedTexts } from "../../rag/embeddings";
+import { extractKeyphrases } from "../../rag/keyphrase-extractor";
 import { extractTextFromBuffer } from "../../rag/parser";
 import { extractTopicsFromChunks } from "../../rag/topics";
 import { createRequestLogger, type RequestLogger } from "../../logger";
@@ -168,23 +169,28 @@ export const indexDocument = inngest.createFunction(
         return extractedTopics;
       });
 
-      // Chunks and topics are replaced in one step. Previously topics were
-      // persisted after chunks were already committed, so a topic failure left a
-      // document with chunks but no topics and no way to tell from its status.
+      const keyphrases = await step.run("Extract keyphrases", async () => {
+        const extractedKeyphrases = extractKeyphrases(chunks, { limit: 60 });
+        log.info("indexing.keyphrases.extract.complete", { userId, documentId, keyphraseCount: extractedKeyphrases.length });
+        return extractedKeyphrases;
+      });
+
+      // Chunks and metadata are replaced in one step.
       const insertedChunks = await step.run("Persist chunks and topics", async () => {
         const { error: topicDeleteError } = await supabase.from("document_topics").delete().eq("document_id", documentId);
         if (topicDeleteError) {
           log.error("indexing.topics.delete_failed", { errorCategory: "supabase_delete", userId, documentId, error: topicDeleteError });
-          // Stale rows would otherwise survive alongside the new ones and the
-          // unique (document_id, topic) constraint would reject the insert.
           throw new Error("Could not clear previous topics");
+        }
+
+        const { error: keyphraseDeleteError } = await supabase.from("document_keyphrases").delete().eq("document_id", documentId);
+        if (keyphraseDeleteError) {
+          log.warn("indexing.keyphrases.delete_failed", { errorCategory: "supabase_delete", userId, documentId, error: keyphraseDeleteError });
         }
 
         const { error: chunkDeleteError } = await supabase.from("chunks").delete().eq("document_id", documentId);
         if (chunkDeleteError) {
           log.error("indexing.chunks.delete_failed", { errorCategory: "supabase_delete", userId, documentId, error: chunkDeleteError });
-          // Keeping stale chunks would leave the document indexed against a mix
-          // of old and new text.
           throw new Error("Could not clear previous chunks");
         }
 
@@ -230,7 +236,54 @@ export const indexDocument = inngest.createFunction(
           log.info("indexing.topics.persist.skipped", { userId, documentId, topicCount: 0 });
         }
 
+        if (keyphrases.length) {
+          const keyphraseRows = keyphrases.map((kp) => ({
+            user_id: userId,
+            document_id: documentId,
+            phrase: kp.phrase,
+            score: kp.score,
+            source: kp.source,
+          }));
+
+          const { error: kpError } = await supabase.from("document_keyphrases").insert(keyphraseRows);
+          if (kpError) {
+            log.warn("indexing.keyphrases.insert_failed", { errorCategory: "supabase_insert", userId, documentId, error: kpError });
+          } else {
+            log.info("indexing.keyphrases.persist.complete", { userId, documentId, keyphraseCount: keyphrases.length });
+          }
+        }
+
         return persistedChunks;
+      });
+
+      await step.run("Create micro-chunks", async () => {
+        const microChunks = microChunkText(extracted);
+        if (!microChunks.length) {
+          log.info("indexing.micro_chunks.skipped", { userId, documentId, reason: "none_extracted" });
+          return;
+        }
+
+        // Limit micro-chunks to at most 120 per document to control embedding costs while providing granular precision
+        const targetMicroChunks = microChunks.slice(0, 120);
+        const microTexts = targetMicroChunks.map((mc) => mc.text);
+        const microEmbeddings = await embedTexts(microTexts, log);
+
+        const chunkIdByIndex = new Map(insertedChunks.map((chunk) => [chunk.chunk_index, chunk.id]));
+        const microRows = targetMicroChunks.map((mc, idx) => ({
+          document_id: documentId,
+          parent_chunk_id: chunkIdByIndex.get(mc.parentChunkIndex) ?? null,
+          text_content: mc.text,
+          chunk_index: idx,
+          embedding: toVectorLiteral(microEmbeddings[idx]),
+        }));
+
+        await supabase.from("micro_chunks").delete().eq("document_id", documentId);
+        const { error: mcError } = await supabase.from("micro_chunks").insert(microRows);
+        if (mcError) {
+          log.warn("indexing.micro_chunks.insert_failed", { errorCategory: "supabase_insert", userId, documentId, error: mcError });
+        } else {
+          log.info("indexing.micro_chunks.persist.complete", { userId, documentId, microCount: microRows.length });
+        }
       });
 
       await step.run("Mark indexed", async () => {

@@ -51,6 +51,9 @@ const structuredData = {
         "AI answers grounded in your own documents with citations",
         "OCR indexing for scanned PDFs",
         "Document library with personal and shared knowledge bases",
+        "Hybrid lexical and vector retrieval via Trie and HNSW ANN indexing",
+        "100% deterministic source attribution down to exact page and slide numbers",
+        "Cryptographic zero-training document privacy sandbox",
       ],
       creator: {
         "@type": "Organization",

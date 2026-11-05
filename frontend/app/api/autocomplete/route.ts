@@ -63,6 +63,22 @@ type HistoryRow = {
   question: string;
 };
 
+type KeyphraseRow = {
+  id: string;
+  phrase: string;
+  score: number;
+  document_id: string;
+  documents: Array<{
+    id: string;
+    filename: string;
+    source_scope?: string | null;
+  }> | {
+    id: string;
+    filename: string;
+    source_scope?: string | null;
+  } | null;
+};
+
 function toAutocompleteId(input: string) {
   return input.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(?:^-)|(?:-$)/g, "");
 }
@@ -241,15 +257,25 @@ export async function GET(request: Request) {
     user.id,
   );
 
-  const [documentsResult, topicsResult, historyResult] = await Promise.all([
+  const keyphrasesQuery = applyAccessibleDocumentFilter(
+    supabase
+      .from("document_keyphrases")
+      .select("id, phrase, score, document_id, documents!inner(id, filename, user_id, source_scope)")
+      .order("score", { ascending: false })
+      .limit(40),
+    user.id,
+  );
+
+  const [documentsResult, topicsResult, keyphrasesResult, historyResult] = await Promise.all([
     documentsQuery,
     topicsQuery,
+    keyphrasesQuery,
     supabase
       .from("chat_history")
       .select("id, question")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
-      .limit(10),
+      .limit(25),
   ]);
 
   if (documentsResult.error || topicsResult.error || historyResult.error) {
@@ -294,6 +320,37 @@ export async function GET(request: Request) {
     });
   });
 
+  ((keyphrasesResult.data ?? []) as KeyphraseRow[]).forEach((row) => {
+    const phrase = row.phrase.trim();
+    if (!phrase) return;
+
+    const doc = Array.isArray(row.documents) ? row.documents[0] : row.documents;
+    const metadata: AutocompleteSuggestionMetadata | undefined = doc?.id
+      ? {
+          source: "uploaded",
+          kind: "document",
+          documentId: doc.id,
+        }
+      : undefined;
+
+    const phraseKeywords = [phrase, ...phrase.toLowerCase().split(/\s+/)];
+
+    [
+      `What is ${phrase}?`,
+      `Explain ${phrase}`,
+      `Tell me about ${phrase}`,
+    ].forEach((value) => {
+      pushUnique(suggestions, seen, {
+        id: `kp-${row.id}-${toAutocompleteId(value)}`,
+        label: value,
+        value,
+        type: "topic",
+        keywords: phraseKeywords,
+        metadata,
+      });
+    });
+  });
+
   documents.forEach((document) => {
     [
       `Summarize ${document.filename}`,
@@ -315,11 +372,17 @@ export async function GET(request: Request) {
   });
 
   ((historyResult.data ?? []) as HistoryRow[]).forEach((row) => {
+    const historyTokens = row.question
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((t) => t.length >= 2);
+
     pushUnique(suggestions, seen, {
       id: `history-${row.id}`,
       label: row.question,
       value: row.question,
       type: "history",
+      keywords: historyTokens,
     });
   });
 
@@ -333,7 +396,7 @@ export async function GET(request: Request) {
   });
 
   return Response.json(
-    { ok: true, suggestions: suggestions.slice(0, 120) },
+    { ok: true, suggestions: suggestions.slice(0, 300) },
     { headers: rateLimitHeaders(rateLimit) },
   );
 }

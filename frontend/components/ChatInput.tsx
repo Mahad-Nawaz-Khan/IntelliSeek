@@ -1,9 +1,61 @@
 "use client";
 
-import { GitBranch, Plus, Send, Square } from "lucide-react";
+import { BookOpen, Clock, FileText, GitBranch, Plus, Send, Sparkles, Square } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { type AutocompleteSuggestion, TrieAutocomplete } from "../lib/trie-autocomplete";
+
+const TYPE_CONFIG: Record<
+  string,
+  { label: string; badgeClass: string; icon: React.ComponentType<{ className?: string }> }
+> = {
+  topic: {
+    label: "Topic",
+    badgeClass: "border-cyan-500/30 bg-cyan-500/10 text-cyan-300",
+    icon: Sparkles,
+  },
+  document: {
+    label: "Document",
+    badgeClass: "border-amber-500/30 bg-amber-500/10 text-amber-300",
+    icon: FileText,
+  },
+  history: {
+    label: "Recent",
+    badgeClass: "border-purple-500/30 bg-purple-500/10 text-purple-300",
+    icon: Clock,
+  },
+  prompt: {
+    label: "Suggested",
+    badgeClass: "border-slate-500/30 bg-slate-500/10 text-slate-400",
+    icon: BookOpen,
+  },
+};
+
+function highlightMatch(label: string, query: string) {
+  const trimmed = query.trim();
+  if (!trimmed) return label;
+
+  const tokens = trimmed
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length >= 2);
+  if (!tokens.length) return label;
+
+  const escaped = tokens.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  const regex = new RegExp(`(${escaped})`, "gi");
+  const parts = label.split(regex);
+
+  return parts.map((part, i) => {
+    if (tokens.some((t) => t.toLowerCase() === part.toLowerCase())) {
+      return (
+        <span key={i} className="font-semibold text-cyan-200">
+          {part}
+        </span>
+      );
+    }
+    return part;
+  });
+}
 
 type ChatInputProps = {
   autocompleteSuggestions?: AutocompleteSuggestion[];
@@ -80,24 +132,33 @@ export function ChatInput({
             Trie autocomplete
           </div>
           <div className="max-h-64 overflow-y-auto p-1">
-            {matches.map((match, index) => (
-              <button
-                key={match.id}
-                type="button"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => selectSuggestion(match)}
-                className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm transition ${
-                  boundedHighlightedIndex === index
-                    ? "bg-cyan-300/15 text-cyan-50"
-                    : "text-slate-300 hover:bg-white/5 hover:text-white"
-                }`}
-              >
-                <span className="truncate">{match.label}</span>
-                <span className="shrink-0 rounded-full border border-white/10 px-2 py-0.5 text-[0.65rem] uppercase tracking-[0.16em] text-slate-500">
-                  {match.type}
-                </span>
-              </button>
-            ))}
+            {matches.map((match, index) => {
+              const typeInfo = TYPE_CONFIG[match.type] ?? TYPE_CONFIG.prompt;
+              const Icon = typeInfo.icon;
+              return (
+                <button
+                  key={match.id}
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => selectSuggestion(match)}
+                  className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm transition ${
+                    boundedHighlightedIndex === index
+                      ? "bg-cyan-300/15 text-cyan-50"
+                      : "text-slate-300 hover:bg-white/5 hover:text-white"
+                  }`}
+                >
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Icon className="h-3.5 w-3.5 shrink-0 opacity-60" />
+                    <span className="truncate">{highlightMatch(match.label, value)}</span>
+                  </div>
+                  <span
+                    className={`shrink-0 rounded-full border px-2 py-0.5 text-[0.65rem] font-medium uppercase tracking-[0.16em] ${typeInfo.badgeClass}`}
+                  >
+                    {typeInfo.label}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}

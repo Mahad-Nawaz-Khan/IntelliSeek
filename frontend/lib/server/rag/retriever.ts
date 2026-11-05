@@ -1,7 +1,7 @@
 import type { SourceCitation } from "../../chat-api";
 import type { RequestLogger } from "../logger";
 import { embedText } from "./embeddings";
-import { matchUserChunks, type RetrievedChunk } from "./vector-store";
+import { matchUserChunks, matchUserMicroChunks, type RetrievedChunk } from "./vector-store";
 import { getSupabaseServiceClient } from "../supabase";
 import { DEMO_USER_ID } from "../env";
 import { accessibleDocumentFilter, filterUuids, toSafeLikeTerm } from "../postgrest-safe";
@@ -252,10 +252,23 @@ export async function retrieveContext(
     questionLength: question.length,
   });
   const queryEmbedding = await embedText(question, log);
-  const candidates = await matchUserChunks(userId, queryEmbedding, candidateLimit, log, {
-    documentIds: scopedDocumentIds,
-  });
-  const context = await expandContextWithNeighbors(userId, candidates.slice(0, limit), Math.min(limit + 4, MAX_CONTEXT_CHUNKS), log);
+  const [candidates, microCandidates] = await Promise.all([
+    matchUserChunks(userId, queryEmbedding, candidateLimit, log, {
+      documentIds: scopedDocumentIds,
+    }),
+    matchUserMicroChunks(userId, queryEmbedding, candidateLimit, log, {
+      documentIds: scopedDocumentIds,
+    }),
+  ]);
+  const combinedCandidates = dedupeContext([...microCandidates, ...candidates]).sort(
+    (a, b) => b.score - a.score,
+  );
+  const context = await expandContextWithNeighbors(
+    userId,
+    combinedCandidates.slice(0, limit),
+    Math.min(limit + 4, MAX_CONTEXT_CHUNKS),
+    log,
+  );
   log?.info("retrieval.semantic.complete", {
     userId,
     limit,
@@ -310,12 +323,26 @@ export async function retrieveKeywordContext(
     return [];
   }
 
+  const lowerQuestion = question.toLocaleLowerCase().trim();
   const lowerTerms = terms.map((term) => term.toLocaleLowerCase());
   const scored = ((data ?? []) as DocumentChunkRow[])
     .map((chunk) => {
       const lowerText = chunk.text_content.toLocaleLowerCase();
       const matchCount = lowerTerms.reduce((count, term) => count + (lowerText.includes(term) ? 1 : 0), 0);
-      return rowToContext(chunk, keywordScore(matchCount, lowerTerms.length));
+
+      // Exact-match phrase bonus (+0.15) if chunk contains the full query
+      const exactPhraseBonus = lowerQuestion.length >= 4 && lowerText.includes(lowerQuestion) ? 0.15 : 0;
+
+      // Term density bonus (up to +0.10) for frequent keyword mentions
+      const densityBonus = lowerTerms.reduce((bonus, term) => {
+        const matches = (lowerText.match(new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi")) ?? []).length;
+        return bonus + Math.min(matches * 0.02, 0.05);
+      }, 0);
+
+      const baseScore = keywordScore(matchCount, lowerTerms.length);
+      const totalScore = Math.min(baseScore + exactPhraseBonus + densityBonus, 0.98);
+
+      return rowToContext(chunk, totalScore);
     })
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
@@ -392,6 +419,68 @@ export async function expandContextWithNeighbors(
   return dedupeContext(expanded).slice(0, limit);
 }
 
+export async function retrieveFullTextContext(
+  question: string,
+  userId: string,
+  limit = DEFAULT_TOP_K,
+  log?: RequestLogger,
+  documentIds: string[] = [],
+): Promise<RetrievedContext[]> {
+  const supabase = getSupabaseServiceClient();
+  if (!supabase) return [];
+
+  const terms = extractKeywordTerms(question);
+  if (!terms.length) return [];
+
+  const startedAt = Date.now();
+  const uniqueDocumentIds = filterUuids(documentIds).slice(0, 8);
+
+  const { data, error } = await supabase.rpc("fulltext_search_chunks", {
+    search_query: question.trim(),
+    match_user_id: userId,
+    match_count: limit * 2,
+    match_document_ids: uniqueDocumentIds.length ? uniqueDocumentIds : null,
+  });
+
+  if (error) {
+    log?.warn("retrieval.fulltext.fallback", { errorCategory: "supabase_query", userId, error });
+    return [];
+  }
+
+  type FullTextRpcRow = {
+    chunk_id: string;
+    document_id: string;
+    filename: string | null;
+    text_content: string;
+    chunk_index: number;
+    rank: number | null;
+  };
+
+  const scored = ((data ?? []) as FullTextRpcRow[]).map((row) => ({
+    chunk_id: row.chunk_id,
+    document_id: row.document_id,
+    filename: row.filename ?? "Uploaded document",
+    text_content: row.text_content,
+    chunk_index: row.chunk_index,
+    score: Math.min(KEYWORD_SCORE_FLOOR + (row.rank ?? 0) * 1.5, KEYWORD_SCORE_CEILING),
+  }));
+
+  const context = await expandContextWithNeighbors(
+    userId,
+    scored.slice(0, limit),
+    Math.min(limit + 4, MAX_CONTEXT_CHUNKS),
+    log,
+  );
+  log?.info("retrieval.fulltext.complete", {
+    userId,
+    limit,
+    resultCount: context.length,
+    durationMs: Date.now() - startedAt,
+  });
+
+  return context;
+}
+
 export async function retrieveContextFromDocumentIds(
   question: string,
   userId: string,
@@ -409,14 +498,14 @@ export async function retrieveContextFromDocumentIds(
     questionLength: question.length,
   });
 
-  // Both searches are scoped to the requested documents in the database, so the
-  // whole `limit` budget is spent on rows that can actually be returned.
-  const [semanticContext, keywordContext] = await Promise.all([
+  // Parallel 3-way retrieval: semantic vector + keyword ilike + PostgreSQL full-text search
+  const [semanticContext, keywordContext, fullTextContext] = await Promise.all([
     retrieveContext(question, userId, limit, log, uniqueDocumentIds),
     retrieveKeywordContext(question, userId, limit, log, uniqueDocumentIds),
+    retrieveFullTextContext(question, userId, limit, log, uniqueDocumentIds),
   ]);
-  const context = mergeRetrievedContext(semanticContext, keywordContext).slice(0, limit);
-  const relevant = filterRelevantContext(context, log);
+  const context = mergeRetrievedContext(semanticContext, keywordContext, fullTextContext).slice(0, limit);
+  const relevant = filterRelevantContext(context, log, question.length);
 
   log?.info("retrieval.semantic_documents.complete", {
     userId,
@@ -660,24 +749,39 @@ export async function retrieveRepresentativeDocumentContext(
   return context;
 }
 
-export function filterRelevantContext(context: RetrievedContext[], log?: RequestLogger): RetrievedContext[] {
-  const strongMatches = context.filter((chunk) => chunk.score >= FILE_CONTEXT_MIN_SCORE).slice(0, MAX_CONTEXT_CHUNKS);
+export function filterRelevantContext(
+  context: RetrievedContext[],
+  log?: RequestLogger,
+  questionLength?: number,
+): RetrievedContext[] {
+  // Adaptive threshold: longer queries produce lower cosine similarity naturally
+  const adaptiveMinScore = questionLength && questionLength > 60
+    ? FILE_CONTEXT_MIN_SCORE - 0.08
+    : FILE_CONTEXT_MIN_SCORE;
+
+  const adaptiveWeakScore = questionLength && questionLength > 60
+    ? FILE_CONTEXT_WEAK_SCORE - 0.06
+    : FILE_CONTEXT_WEAK_SCORE;
+
+  const strongMatches = context.filter((chunk) => chunk.score >= adaptiveMinScore).slice(0, MAX_CONTEXT_CHUNKS);
   if (strongMatches.length) {
     log?.info("retrieval.filter.complete", {
       beforeCount: context.length,
       afterCount: strongMatches.length,
       topScore: context[0]?.score ?? 0,
+      threshold: adaptiveMinScore,
     });
     return strongMatches;
   }
 
   const topScore = context[0]?.score ?? 0;
-  if (topScore >= FILE_CONTEXT_WEAK_SCORE) {
+  if (topScore >= adaptiveWeakScore) {
     const filtered = context.slice(0, Math.min(6, MAX_CONTEXT_CHUNKS));
     log?.info("retrieval.filter.complete", {
       beforeCount: context.length,
       afterCount: filtered.length,
       topScore,
+      threshold: adaptiveWeakScore,
     });
     return filtered;
   }

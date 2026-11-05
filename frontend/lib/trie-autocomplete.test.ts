@@ -95,6 +95,13 @@ describe("TrieAutocomplete", () => {
     expect(trie.search("bin")).toHaveLength(1);
   });
 
+  it("matches suggestions despite minor typos via fuzzy walk", () => {
+    // "binary" has 6 chars; "binray" or "binari" is 1 edit away
+    expect(search("binari")).toContain("binary search");
+    // "quick" has 5 chars; "quik" is 1 edit away (deletion)
+    expect(search("quik")).toContain("How does quicksort work?");
+  });
+
   it("skips suggestions with no indexable text", () => {
     const trie = new TrieAutocomplete();
     trie.insert({ id: "junk", label: "!!!", value: "!!!", type: "prompt" });

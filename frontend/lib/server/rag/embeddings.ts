@@ -12,6 +12,48 @@ const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_ATTEMPTS = 3;
 const RETRY_BASE_DELAY_MS = 500;
 
+// Query Embedding Cache (LRU + TTL)
+const queryEmbeddingCache = new Map<string, { embedding: number[]; timestamp: number }>();
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const MAX_CACHE_SIZE = 500;
+
+function normalizeCacheKey(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[?!.,;:]+$/g, "")
+    .replace(/\s+/g, " ");
+}
+
+export function getCachedEmbedding(text: string): number[] | null {
+  const key = normalizeCacheKey(text);
+  const entry = queryEmbeddingCache.get(key);
+  if (!entry) return null;
+
+  if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
+    queryEmbeddingCache.delete(key);
+    return null;
+  }
+
+  // Refresh LRU order on access
+  queryEmbeddingCache.delete(key);
+  queryEmbeddingCache.set(key, entry);
+  return entry.embedding;
+}
+
+export function setCachedEmbedding(text: string, embedding: number[]) {
+  const key = normalizeCacheKey(text);
+  if (queryEmbeddingCache.size >= MAX_CACHE_SIZE) {
+    const oldestKey = queryEmbeddingCache.keys().next().value;
+    if (oldestKey) queryEmbeddingCache.delete(oldestKey);
+  }
+  queryEmbeddingCache.set(key, { embedding, timestamp: Date.now() });
+}
+
+export function clearEmbeddingCache() {
+  queryEmbeddingCache.clear();
+}
+
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -212,7 +254,14 @@ export async function embedTexts(texts: string[], log?: RequestLogger): Promise<
 }
 
 export async function embedText(text: string, log?: RequestLogger): Promise<number[]> {
+  const cached = getCachedEmbedding(text);
+  if (cached) {
+    log?.info("embeddings.cache.hit", { textLength: text.length });
+    return cached;
+  }
+
   const [embedding] = await embedTexts([text], log);
   if (!embedding) throw new Error("Embedding generation failed");
+  setCachedEmbedding(text, embedding);
   return embedding;
 }

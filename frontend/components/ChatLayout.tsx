@@ -261,12 +261,13 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
 
     const historySuggestions = messages
       .filter((message) => message.role === "user")
-      .slice(-5)
+      .slice(-10)
       .map((message) => ({
         id: `history-${message.id}`,
         label: message.content,
         value: message.content,
         type: "history" as const,
+        keywords: message.content.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length >= 2),
       }));
 
     const seen = new Set<string>();

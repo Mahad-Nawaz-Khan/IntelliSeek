@@ -92,3 +92,60 @@ export async function matchUserChunks(
 
   return chunks;
 }
+
+type MatchUserMicroChunkRow = {
+  micro_chunk_id: string;
+  parent_chunk_id: string | null;
+  document_id: string;
+  filename: string | null;
+  micro_text: string;
+  parent_text: string;
+  chunk_index: number;
+  similarity: number | null;
+};
+
+export async function matchUserMicroChunks(
+  userId: string,
+  queryEmbedding: number[],
+  limit: number,
+  log?: RequestLogger,
+  options: MatchUserChunksOptions = {},
+): Promise<RetrievedChunk[]> {
+  const supabase = getSupabaseServiceClient();
+  if (!supabase) return [];
+
+  const documentIds = options.documentIds?.length ? options.documentIds : null;
+  const startedAt = Date.now();
+
+  const { data, error } = await supabase.rpc("match_user_micro_chunks", {
+    query_embedding: toVectorLiteral(queryEmbedding),
+    match_user_id: userId,
+    match_count: limit,
+    match_document_ids: documentIds,
+  });
+
+  if (error) {
+    log?.warn("vector.micro_rpc.fallback", { errorCategory: "supabase_query", userId, error });
+    return [];
+  }
+
+  const chunks = ((data ?? []) as MatchUserMicroChunkRow[])
+    .filter((row) => row.parent_chunk_id && row.parent_text)
+    .map((row) => ({
+      chunk_id: row.parent_chunk_id as string,
+      document_id: row.document_id,
+      filename: row.filename ?? "Uploaded document",
+      text_content: row.parent_text,
+      chunk_index: row.chunk_index,
+      score: Math.min((row.similarity ?? 0) * 1.08, 1.0),
+    }));
+
+  log?.info("vector.micro_rpc.complete", {
+    userId,
+    limit,
+    resultCount: chunks.length,
+    durationMs: Date.now() - startedAt,
+  });
+
+  return chunks;
+}

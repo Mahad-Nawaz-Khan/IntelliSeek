@@ -1,13 +1,17 @@
-const CHUNK_SIZE = 1400;
-const CHUNK_OVERLAP = 300;
-const MIN_CHUNK_SIZE = 350;
-const MAX_BLOCK_SIZE = 900;
+export const CHUNK_SIZE = 800;
+export const CHUNK_OVERLAP = 180;
+export const MIN_CHUNK_SIZE = 200;
+export const MAX_BLOCK_SIZE = 600;
 
 const HEADING_PATTERNS = [
   /^#{1,6}\s+\S/,
   /^\d+(?:\.\d+)*\s+\S/,
-  /^(chapter|section|unit|module|topic)\s+\d*[:.\-\s]/i,
+  /^(chapter|section|unit|module|topic|part|lecture|lesson|appendix)\s+\d*[:.\-\s]/i,
+  /^[A-Z][A-Z\s]{4,60}$/,
+  /^(?:definition|theorem|lemma|corollary|proposition|example|exercise|proof)\s*[:.]/i,
 ];
+
+const SENTENCE_BOUNDARY = /(?<=[.!?])\s+(?=[A-Z0-9])|(?<=\n)\s*(?=\S)/;
 
 export function normalizeText(text: string): string {
   return text
@@ -27,25 +31,39 @@ function isLikelyHeading(line: string) {
   return HEADING_PATTERNS.some((pattern) => pattern.test(trimmed));
 }
 
-function splitOversizedBlock(block: string): string[] {
-  if (block.length <= MAX_BLOCK_SIZE) return [block];
-
-  const sentences = block.match(/(?:[^.!?]+[.!?]+)|(?:[^.!?]+$)/g) ?? [block];
+function rebuildParts(pieces: string[], maxSize: number): string[] {
   const parts: string[] = [];
   let current = "";
-
-  for (const sentence of sentences) {
-    const next = current ? `${current} ${sentence.trim()}` : sentence.trim();
-    if (next.length > MAX_BLOCK_SIZE && current) {
+  for (const piece of pieces) {
+    const next = current ? `${current} ${piece.trim()}` : piece.trim();
+    if (next.length > maxSize && current) {
       parts.push(current);
-      current = sentence.trim();
+      current = piece.trim();
     } else {
       current = next;
     }
   }
-
   if (current) parts.push(current);
   return parts;
+}
+
+function splitOversizedBlock(block: string): string[] {
+  if (block.length <= MAX_BLOCK_SIZE) return [block];
+
+  const sentences = block.match(/(?:[^.!?]+[.!?]+)|(?:[^.!?]+$)/g) ?? [block];
+  if (sentences.length <= 1) {
+    const clauses = block.split(/(?<=[,;])\s+/);
+    if (clauses.length > 1) {
+      return rebuildParts(clauses, MAX_BLOCK_SIZE);
+    }
+    const mid = Math.floor(block.length / 2);
+    const spaceIdx = block.lastIndexOf(" ", mid + 40);
+    if (spaceIdx > 0) {
+      return [block.slice(0, spaceIdx).trim(), block.slice(spaceIdx + 1).trim()];
+    }
+  }
+
+  return rebuildParts(sentences, MAX_BLOCK_SIZE);
 }
 
 function splitIntoBlocks(text: string): string[] {
@@ -106,4 +124,40 @@ export function chunkText(text: string): string[] {
   if (current) chunks.push(normalizeChunkText(current));
 
   return chunks;
+}
+
+export function splitIntoSentences(text: string): string[] {
+  return text
+    .split(SENTENCE_BOUNDARY)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 15);
+}
+
+export type MicroChunk = {
+  text: string;
+  parentChunkIndex: number;
+};
+
+export function microChunkText(text: string): MicroChunk[] {
+  const parentChunks = chunkText(text);
+  const microChunks: MicroChunk[] = [];
+
+  parentChunks.forEach((parentChunk, parentIndex) => {
+    const sentences = splitIntoSentences(parentChunk);
+    if (!sentences.length) {
+      if (parentChunk.trim()) {
+        microChunks.push({ text: parentChunk.trim(), parentChunkIndex: parentIndex });
+      }
+      return;
+    }
+
+    for (let i = 0; i < sentences.length; i += 2) {
+      const window = sentences.slice(i, i + 3).join(" ");
+      if (window.length >= 25) {
+        microChunks.push({ text: window, parentChunkIndex: parentIndex });
+      }
+    }
+  });
+
+  return microChunks;
 }
