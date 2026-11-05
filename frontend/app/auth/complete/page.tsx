@@ -1,17 +1,34 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect } from "react";
+import { getSafeReturnPath } from "../../../lib/safe-redirect";
 
-/**
- * Landing spot for the OAuth popup after the code exchange succeeds. The
- * window was opened by script, so window.close() is permitted; the message is
- * only visible if the browser refuses to close it.
- */
-export default function AuthCompletePage() {
+function AuthCompleteContent() {
+  const searchParams = useSearchParams();
+  const next = getSafeReturnPath(searchParams.get("next"));
+
   useEffect(() => {
-    window.close();
-  }, []);
+    // 1. Notify opener tab and instruct it to refresh into the target route
+    try {
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage({ type: "OAUTH_COMPLETE", next }, window.location.origin);
+        if (window.opener.location) {
+          window.opener.location.href = next;
+        }
+      }
+    } catch {
+      // Ignore if cross-origin or restricted handle
+    }
+
+    // 2. Close this popup window
+    const timer = window.setTimeout(() => {
+      window.close();
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [next]);
 
   return (
     <main className="auth-page flex min-h-screen items-center justify-center bg-slate-950 px-6 text-white">
@@ -21,12 +38,20 @@ export default function AuthCompletePage() {
           You can close this window and return to IntelliSeek.
         </p>
         <Link
-          href="/chat"
+          href={next}
           className="mt-6 inline-flex rounded-2xl bg-cyan-300 px-5 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200"
         >
           Continue to IntelliSeek
         </Link>
       </div>
     </main>
+  );
+}
+
+export default function AuthCompletePage() {
+  return (
+    <Suspense fallback={null}>
+      <AuthCompleteContent />
+    </Suspense>
   );
 }

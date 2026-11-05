@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { getSafeReturnPath } from "./safe-redirect";
 
 export type OAuthProvider = "google" | "github";
 
@@ -17,7 +18,7 @@ type StartProviderAuthOptions = {
 const POPUP_NAME = "intelliseek-oauth";
 const POPUP_FEATURES = "popup=true,width=520,height=720";
 const POPUP_TIMEOUT_MS = 300_000;
-const POLL_INTERVAL_MS = 500;
+const POLL_INTERVAL_MS = 400;
 
 /**
  * Starts a Google/GitHub sign-in.
@@ -37,13 +38,14 @@ export async function startProviderAuth({
   onError,
   onSettled,
 }: StartProviderAuthOptions): Promise<void> {
+  const targetUrl = getSafeReturnPath(next);
   const usePopup = window.matchMedia("(pointer: fine)").matches && window.innerWidth >= 640;
 
   // Opened synchronously inside the click gesture: awaiting the SDK call first
   // would break the user-activation chain and let popup blockers win.
   const popup = usePopup ? window.open("about:blank", POPUP_NAME, POPUP_FEATURES) : null;
   const redirectTo =
-    `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}` +
+    `${window.location.origin}/auth/callback?next=${encodeURIComponent(targetUrl)}` +
     (popup ? "&popup=1" : "");
 
   const { data, error } = await supabase.auth.signInWithOAuth({
@@ -65,64 +67,100 @@ export async function startProviderAuth({
 
   popup.location.href = data.url;
 
-  // Completion is detected by polling the session, NOT by watching the popup:
-  // the session cookie lands in this browser's shared jar the moment the
-  // popup's code exchange succeeds, so a local session read works even when
-  // the popup refuses to close itself, when popup.closed lies (embedded
-  // browsers return shell handles), or when the popup was closed manually at
-  // exactly the wrong moment. Closing the popup remotely and reporting a
-  // cancelled sign-in remain best-effort secondary signals.
   const startedAt = Date.now();
   let settled = false;
 
-  const poll = window.setInterval(() => {
+  const triggerAuthSuccess = () => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    try {
+      popup.close();
+    } catch {
+      // Best effort close
+    }
+    onAuthenticated();
+    onSettled();
+
+    // Auto refresh the entire webpage to guarantee cookies and server components re-sync
+    window.location.assign(targetUrl);
+  };
+
+  const handleMessage = (event: MessageEvent) => {
+    if (
+      event.origin === window.location.origin &&
+      (event.data?.type === "OAUTH_COMPLETE" || event.data?.type === "OAUTH_AUTH_COMPLETE")
+    ) {
+      triggerAuthSuccess();
+    }
+  };
+
+  window.addEventListener("message", handleMessage);
+
+  const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+    if ((event === "SIGNED_IN" || event === "TOKEN_REFRESHED") && session?.user) {
+      triggerAuthSuccess();
+    }
+  });
+
+  const cleanup = () => {
+    window.clearInterval(poll);
+    window.removeEventListener("message", handleMessage);
+    authListener.subscription.unsubscribe();
+  };
+
+  const poll = window.setInterval(async () => {
     if (settled) return;
 
-    supabase.auth
-      .getSession()
-      .then(({ data }) => {
-        if (settled || !data.session) return;
-        settled = true;
-        window.clearInterval(poll);
-        try {
-          popup.close();
-        } catch {
-          // The popup may already be gone or the handle may be a stub.
-        }
-        onAuthenticated();
-        onSettled();
-      })
-      .catch(() => {});
+    try {
+      const { data } = await supabase.auth.getSession();
+      if (!settled && data?.session) {
+        triggerAuthSuccess();
+        return;
+      }
+    } catch {
+      // Ignore transient errors
+    }
 
     if (settled) return;
 
     if (popup.closed) {
-      settled = true;
       window.clearInterval(poll);
-      supabase.auth
-        .getUser()
-        .then(({ data: { user } }) => {
+      // Popup closed: brief wait for cookies/storage to settle before reading session
+      setTimeout(async () => {
+        if (settled) return;
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
           if (user) {
-            onAuthenticated();
-          } else {
-            onError("Sign-in was cancelled before it finished.");
+            triggerAuthSuccess();
+            return;
           }
-          onSettled();
-        })
-        .catch(() => {
+          const { data: sessionData } = await supabase.auth.getSession();
+          if (sessionData?.session) {
+            triggerAuthSuccess();
+            return;
+          }
+        } catch {
+          // Fall through to error
+        }
+
+        if (!settled) {
+          settled = true;
+          cleanup();
           onError("Sign-in was cancelled before it finished.");
           onSettled();
-        });
+        }
+      }, 350);
       return;
     }
 
     if (Date.now() - startedAt > POPUP_TIMEOUT_MS) {
       settled = true;
-      window.clearInterval(poll);
+      cleanup();
       try {
         popup.close();
       } catch {
-        // Ignore: nothing more can be done with the handle.
+        // Ignore
       }
       onError("Sign-in took too long. Please try again.");
       onSettled();

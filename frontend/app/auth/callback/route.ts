@@ -19,7 +19,9 @@ export async function GET(request: Request) {
       // closes itself instead of loading the workspace inside the popup. The
       // opener tab has been polling its session and navigates on its own.
       if (requestUrl.searchParams.get("popup") === "1") {
-        return NextResponse.redirect(new URL("/auth/complete", requestUrl.origin));
+        const completeUrl = new URL("/auth/complete", requestUrl.origin);
+        completeUrl.searchParams.set("next", next);
+        return NextResponse.redirect(completeUrl);
       }
       return NextResponse.redirect(new URL(next, requestUrl.origin));
     }

@@ -45,9 +45,19 @@ export default function SignUpPage() {
     if (!supabase) return;
 
     supabase.auth.getUser().then(({ data }) => {
-      if (data.user) router.replace(getSafeReturnPath(next));
+      if (data.user) window.location.assign(getSafeReturnPath(next));
     });
-  }, [next, router]);
+
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      if ((event === "SIGNED_IN" || event === "TOKEN_REFRESHED") && session?.user) {
+        window.location.assign(getSafeReturnPath(next));
+      }
+    });
+
+    return () => {
+      listener.subscription.unsubscribe();
+    };
+  }, [next]);
 
   async function handleProvider(provider: "google" | "github") {
     setError(null);
@@ -63,7 +73,7 @@ export default function SignUpPage() {
       supabase,
       provider,
       next,
-      onAuthenticated: () => router.replace(getSafeReturnPath(next)),
+      onAuthenticated: () => window.location.assign(getSafeReturnPath(next)),
       onError: setError,
       onSettled: () => setOauthProvider(null),
     });
@@ -114,7 +124,7 @@ export default function SignUpPage() {
     }
 
     if (data.session) {
-      router.replace(getSafeReturnPath(next));
+      window.location.assign(getSafeReturnPath(next));
       return;
     }
 

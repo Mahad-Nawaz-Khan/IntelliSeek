@@ -31,7 +31,7 @@ describe("auth callback route", () => {
       callbackUrl("code=abc&popup=1&next=%2Fchat"),
     );
     expect(status).toBe(307);
-    expect(location).toBe("http://localhost:3000/auth/complete");
+    expect(location).toBe("http://localhost:3000/auth/complete?next=%2Fchat");
   });
 
   it("redirects a full-page flow to the requested next path after a successful exchange", async () => {
