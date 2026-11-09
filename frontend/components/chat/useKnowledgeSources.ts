@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { fetchAccessibleDocuments } from "../../lib/documents";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { deleteDocumentById, fetchAccessibleDocuments, invalidateDocumentsCache } from "../../lib/documents";
 import type { KnowledgeSource } from "../../lib/ui-state";
 import type { AutocompleteSuggestion } from "../../lib/trie-autocomplete";
 
@@ -16,12 +16,53 @@ type UseKnowledgeSourcesParams = {
   isSignedIn: boolean;
 };
 
+function filterAutocompleteForDeletedDocument(
+  suggestions: AutocompleteSuggestion[],
+  deletedDocumentId: string,
+): AutocompleteSuggestion[] {
+  return suggestions.flatMap((suggestion) => {
+    const meta = suggestion.metadata;
+    if (!meta) return [suggestion];
+    if (meta.kind === "document") {
+      return meta.documentId === deletedDocumentId ? [] : [suggestion];
+    }
+    if (meta.kind === "topic") {
+      const remainingDocIds = meta.documentIds.filter((id) => id !== deletedDocumentId);
+      if (remainingDocIds.length === 0) return [];
+      return [
+        {
+          ...suggestion,
+          metadata: {
+            ...meta,
+            documentIds: remainingDocIds,
+          },
+        },
+      ];
+    }
+    return [suggestion];
+  });
+}
+
 export function useKnowledgeSources({ demo, isLoaded, isSignedIn }: UseKnowledgeSourcesParams) {
   const [sources, setSources] = useState<KnowledgeSource[]>([]);
   const [sourceStatus, setSourceStatus] = useState<"loading" | "ready" | "empty" | "unavailable">("loading");
   const [pollDocuments, setPollDocuments] = useState(false);
   const [serverAutocompleteSuggestions, setServerAutocompleteSuggestions] = useState<AutocompleteSuggestion[]>([]);
   const [deletingSourceId, setDeletingSourceId] = useState<string | null>(null);
+  const inFlightDeletesRef = useRef<Set<string>>(new Set());
+
+  const refreshSources = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
+    if (demo) return;
+    try {
+      const rows = await fetchAccessibleDocuments({ force });
+      const filteredRows = rows.filter((row) => !inFlightDeletesRef.current.has(row.id));
+      setSources(filteredRows);
+      setPollDocuments(filteredRows.some((source) => source.status === "indexing"));
+      setSourceStatus(filteredRows.length ? "ready" : "empty");
+    } catch {
+      setSourceStatus("unavailable");
+    }
+  }, [demo]);
 
   useEffect(() => {
     if (demo) return;
@@ -38,9 +79,10 @@ export function useKnowledgeSources({ demo, isLoaded, isSignedIn }: UseKnowledge
       try {
         const rows = await fetchAccessibleDocuments();
         if (!active) return;
-        setSources(rows);
-        setPollDocuments(rows.some((source) => source.status === "indexing"));
-        setSourceStatus(rows.length ? "ready" : "empty");
+        const filteredRows = rows.filter((row) => !inFlightDeletesRef.current.has(row.id));
+        setSources(filteredRows);
+        setPollDocuments(filteredRows.some((source) => source.status === "indexing"));
+        setSourceStatus(filteredRows.length ? "ready" : "empty");
       } catch {
         if (active) setSourceStatus("unavailable");
       }
@@ -71,11 +113,13 @@ export function useKnowledgeSources({ demo, isLoaded, isSignedIn }: UseKnowledge
 
     async function refreshIndexedState() {
       try {
-        const rows = await fetchAccessibleDocuments();
+        const rows = await fetchAccessibleDocuments({ force: true });
         if (!active) return;
 
-        const hasIndexingSources = rows.some((source) => source.status === "indexing");
-        setSources(rows);
+        const filteredRows = rows.filter((row) => !inFlightDeletesRef.current.has(row.id));
+        const hasIndexingSources = filteredRows.some((source) => source.status === "indexing");
+        setSources(filteredRows);
+        setSourceStatus(filteredRows.length ? "ready" : "empty");
         setPollDocuments(hasIndexingSources);
 
         const autocompleteResponse = await fetch("/api/autocomplete");
@@ -97,26 +141,47 @@ export function useKnowledgeSources({ demo, isLoaded, isSignedIn }: UseKnowledge
   }, [pollDocuments, demo]);
 
   const handleDeleteSource = useCallback(async (sourceId: string) => {
-    if (deletingSourceId || demo) return;
+    if (demo || inFlightDeletesRef.current.has(sourceId)) return;
 
-    setDeletingSourceId(sourceId);
+    inFlightDeletesRef.current.add(sourceId);
+    let removedSource: KnowledgeSource | undefined;
+    let removedIndex = -1;
+
+    // Optimistically remove immediately so the sidebar feels instant
+    setSources((current) => {
+      removedIndex = current.findIndex((source) => source.id === sourceId);
+      if (removedIndex !== -1) {
+        removedSource = current[removedIndex];
+      }
+      const next = current.filter((source) => source.id !== sourceId);
+      setSourceStatus(next.length ? "ready" : "empty");
+      return next;
+    });
+    setServerAutocompleteSuggestions((current) =>
+      filterAutocompleteForDeletedDocument(current, sourceId),
+    );
+    invalidateDocumentsCache();
+
     try {
-      const response = await fetch("/api/documents", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ document_id: sourceId }),
-      });
-      const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-      if (!response.ok || !result?.ok) throw new Error(result?.error ?? "Document deletion failed");
-
-      setSources((current) => current.filter((source) => source.id !== sourceId));
-      setServerAutocompleteSuggestions([]);
+      await deleteDocumentById(sourceId);
     } catch {
-      setSourceStatus("unavailable");
+      // Roll back optimistic removal if server deletion fails
+      if (removedSource) {
+        const sourceToRestore = removedSource;
+        setSources((current) => {
+          if (current.some((s) => s.id === sourceId)) return current;
+          const next = [...current];
+          const insertAt = removedIndex >= 0 && removedIndex <= next.length ? removedIndex : 0;
+          next.splice(insertAt, 0, sourceToRestore);
+          setSourceStatus(next.length ? "ready" : "empty");
+          return next;
+        });
+      }
     } finally {
+      inFlightDeletesRef.current.delete(sourceId);
       setDeletingSourceId(null);
     }
-  }, [demo, deletingSourceId]);
+  }, [demo]);
 
   return {
     sources,
@@ -129,5 +194,6 @@ export function useKnowledgeSources({ demo, isLoaded, isSignedIn }: UseKnowledge
     setServerAutocompleteSuggestions,
     deletingSourceId,
     handleDeleteSource,
+    refreshSources,
   };
 }

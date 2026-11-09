@@ -40,6 +40,7 @@ export function useChatSessions({
   const activeSessionIdRef = useRef<string | null>(null);
   const loadedSessionRef = useRef<string | null>(null);
   const isLoadingSessionRef = useRef(false);
+  const inFlightDeletesRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     activeSessionIdRef.current = activeSessionId;
@@ -51,7 +52,8 @@ export function useChatSessions({
 
   const refreshRecentChats = useCallback(async () => {
     try {
-      setRecentSessionRows(await fetchChatSessions());
+      const sessions = await fetchChatSessions();
+      setRecentSessionRows(sessions.filter((s) => !inFlightDeletesRef.current.has(s.id)));
     } catch {
       setRecentSessionRows([]);
     }
@@ -138,13 +140,33 @@ export function useChatSessions({
   const handleRenameSession = useCallback(
     async (sessionId: string, title: string) => {
       if (demo) return false;
+      const trimmed = title.trim();
+      if (!trimmed) return false;
+
+      let previousTitle: string | undefined;
+      setRecentSessionRows((current) =>
+        current.map((session) => {
+          if (session.id === sessionId) {
+            previousTitle = session.title;
+            return { ...session, title: trimmed, title_status: "generated" as const };
+          }
+          return session;
+        }),
+      );
+
       try {
-        const updated = await renameChatSession(sessionId, title);
+        const updated = await renameChatSession(sessionId, trimmed);
         setRecentSessionRows((current) =>
           current.map((session) => (session.id === sessionId ? { ...session, title: updated.title } : session)),
         );
         return true;
       } catch {
+        if (previousTitle !== undefined) {
+          const fallback = previousTitle;
+          setRecentSessionRows((current) =>
+            current.map((session) => (session.id === sessionId ? { ...session, title: fallback } : session)),
+          );
+        }
         return false;
       }
     },
@@ -153,26 +175,49 @@ export function useChatSessions({
 
   const handleDeleteSession = useCallback(
     async (sessionId: string) => {
-      if (deletingSessionId || demo) return;
+      if (demo || inFlightDeletesRef.current.has(sessionId)) return;
 
-      setDeletingSessionId(sessionId);
+      inFlightDeletesRef.current.add(sessionId);
+      let removedSession: ChatSessionSummary | undefined;
+      let removedIndex = -1;
+
+      // Optimistically remove session immediately
+      setRecentSessionRows((current) => {
+        removedIndex = current.findIndex((session) => session.id === sessionId);
+        if (removedIndex !== -1) {
+          removedSession = current[removedIndex];
+        }
+        return current.filter((session) => session.id !== sessionId);
+      });
+
+      if (sessionId === activeSessionIdRef.current || sessionId === sessionParam) {
+        setActiveSessionId(null);
+        activeSessionIdRef.current = null;
+        onClearMessages();
+        loadedSessionRef.current = null;
+        router.push("/chat");
+      }
+
       try {
         await deleteChatSession(sessionId);
-        setRecentSessionRows((current) => current.filter((session) => session.id !== sessionId));
-        if (sessionId === activeSessionId) {
-          setActiveSessionId(null);
-          activeSessionIdRef.current = null;
-          onClearMessages();
-          loadedSessionRef.current = null;
-          router.push("/chat");
-        }
-        await refreshRecentChats();
       } catch {
+        // Restore session if deletion failed
+        if (removedSession) {
+          const sessionToRestore = removedSession;
+          setRecentSessionRows((current) => {
+            if (current.some((s) => s.id === sessionId)) return current;
+            const next = [...current];
+            const insertAt = removedIndex >= 0 && removedIndex <= next.length ? removedIndex : 0;
+            next.splice(insertAt, 0, sessionToRestore);
+            return next;
+          });
+        }
       } finally {
+        inFlightDeletesRef.current.delete(sessionId);
         setDeletingSessionId(null);
       }
     },
-    [activeSessionId, demo, deletingSessionId, onClearMessages, refreshRecentChats, router],
+    [demo, onClearMessages, router, sessionParam],
   );
 
   return {

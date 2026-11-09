@@ -92,29 +92,36 @@ async function deleteDocumentArtifacts(
   supabase: ServiceSupabase,
   document: { id: string; user_id: string; storage_path: string | null }
 ): Promise<string | null> {
-  const { error: topicsDeleteError } = await supabase
-    .from("document_topics")
-    .delete()
-    .eq("document_id", document.id)
-    .eq("user_id", document.user_id);
-  if (topicsDeleteError) return "Document autocomplete cleanup failed";
+  const [topicsResult, chunksResult] = await Promise.all([
+    supabase
+      .from("document_topics")
+      .delete()
+      .eq("document_id", document.id)
+      .eq("user_id", document.user_id),
+    supabase
+      .from("chunks")
+      .delete()
+      .eq("document_id", document.id),
+  ]);
 
-  const { error: chunksDeleteError } = await supabase
-    .from("chunks")
-    .delete()
-    .eq("document_id", document.id);
-  if (chunksDeleteError) return "Document index cleanup failed";
+  if (topicsResult.error) return "Document autocomplete cleanup failed";
+  if (chunksResult.error) return "Document index cleanup failed";
 
-  const { error: deleteError } = await supabase
-    .from("documents")
-    .delete()
-    .eq("id", document.id)
-    .eq("user_id", document.user_id);
+  const storageCleanup =
+    typeof document.storage_path === "string" && document.storage_path
+      ? supabase.storage.from(BUCKET_NAME).remove([document.storage_path])
+      : Promise.resolve();
+
+  const [{ error: deleteError }] = await Promise.all([
+    supabase
+      .from("documents")
+      .delete()
+      .eq("id", document.id)
+      .eq("user_id", document.user_id),
+    storageCleanup,
+  ]);
+
   if (deleteError) return "Document deletion failed";
-
-  if (typeof document.storage_path === "string" && document.storage_path) {
-    await supabase.storage.from(BUCKET_NAME).remove([document.storage_path]);
-  }
 
   return null;
 }

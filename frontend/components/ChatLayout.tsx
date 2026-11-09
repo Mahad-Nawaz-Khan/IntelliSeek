@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { UploadCloud } from "lucide-react";
+import { ArrowDown, UploadCloud } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { AcademicWorkspace } from "./chat/AcademicWorkspace";
@@ -18,16 +18,19 @@ import { SUGGESTIONS } from "./SuggestedQueries";
 import { RetrievalStatus } from "./sources/RetrievalStatus";
 import { IndexingToast } from "./upload/IndexingToast";
 import { UploadModal } from "./upload/UploadModal";
+import { useWorkspaceOptional } from "./workspace/WorkspaceShell";
 import { useAuth } from "../context/AuthContext";
 import { useDemo } from "../context/DemoContext";
 import {
   streamChatQuestion,
   streamChatQuestionDemo,
   type ChatMessage as ChatMessageType,
+  type ChatRetrievalHint,
   type ChatSessionSummary,
 } from "../lib/chat-api";
+import { usePreferences } from "../lib/preferences";
 import type { AutocompleteSuggestion } from "../lib/trie-autocomplete";
-import { uploadDocumentFile } from "../lib/upload-document";
+import { uploadDocumentFile, type UploadToastPayload } from "../lib/upload-document";
 import { createSourceGroups } from "../lib/ui-state";
 
 const noop = () => {};
@@ -96,6 +99,7 @@ type ChatConversationViewProps = {
   hasPersonalSources: boolean;
   isDemo: boolean;
   onSubmit: (question: string) => boolean;
+  onRetryMessage?: (assistantMessageIndex: number) => void;
   onOpenUpload?: () => void;
   bottomRef: React.RefObject<HTMLDivElement | null>;
 };
@@ -107,11 +111,17 @@ function ChatConversationView({
   hasPersonalSources,
   isDemo,
   onSubmit,
+  onRetryMessage,
   onOpenUpload,
   bottomRef,
 }: Readonly<ChatConversationViewProps>) {
   if (isLoadingSession) {
-    return <div className="mx-auto max-w-5xl py-10 text-sm text-slate-400">Loading conversation...</div>;
+    return (
+      <div className="mx-auto max-w-5xl space-y-4 py-10">
+        <div className="h-12 w-2/3 max-w-md animate-pulse rounded-3xl bg-white/5" />
+        <div className="h-24 w-full max-w-3xl animate-pulse rounded-3xl bg-white/5" />
+      </div>
+    );
   }
   if (messages.length === 0) {
     return (
@@ -126,9 +136,22 @@ function ChatConversationView({
   }
   return (
     <div className="mx-auto max-w-5xl space-y-5">
-      {messages.map((message) => (
-        <ChatMessage key={message.id} message={message} />
-      ))}
+      {messages.map((message, index) => {
+        const canRetry =
+          !isLoading &&
+          message.role === "assistant" &&
+          index > 0 &&
+          messages[index - 1]?.role === "user" &&
+          Boolean(onRetryMessage);
+
+        return (
+          <ChatMessage
+            key={message.id}
+            message={message}
+            onRetry={canRetry ? () => onRetryMessage?.(index) : undefined}
+          />
+        );
+      })}
       <div ref={bottomRef} />
     </div>
   );
@@ -139,12 +162,15 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
   const searchParams = useSearchParams();
   const { isLoaded, isSignedIn, user } = useAuth();
   const { hasReachedLimit, decrementQuestion, remaining } = useDemo();
+  const { preferences } = usePreferences();
+  const workspace = useWorkspaceOptional();
 
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [queuedMessages, setQueuedMessages] = useState<QueuedChatMessage[]>([]);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [showSignupModal, setShowSignupModal] = useState(false);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeJobIdRef = useRef<string | null>(null);
@@ -152,6 +178,8 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
   const conversationRunRef = useRef(0);
   const isLoadingRef = useRef(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const isPinnedToBottomRef = useRef(true);
   const sessionParam = searchParams.get("session");
 
   useEffect(() => {
@@ -163,30 +191,48 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
   }, [isLoading]);
 
   // Knowledge sources management
-  const {
-    sources,
-    sourceStatus,
-    setPollDocuments,
-    serverAutocompleteSuggestions,
-    deletingSourceId,
-    handleDeleteSource,
-  } = useKnowledgeSources({ demo, isLoaded, isSignedIn });
+  const localKnowledge = useKnowledgeSources({ demo, isLoaded, isSignedIn });
+  const sources = workspace && !demo ? workspace.sources : localKnowledge.sources;
+  const sourceStatus = workspace && !demo ? workspace.sourceStatus : localKnowledge.sourceStatus;
+  const deletingSourceId = workspace && !demo ? workspace.deletingSourceId : localKnowledge.deletingSourceId;
+  const handleDeleteSource = workspace && !demo ? workspace.handleDeleteSource : localKnowledge.handleDeleteSource;
+  const { setPollDocuments, serverAutocompleteSuggestions } = localKnowledge;
 
   const completedDocumentIds = useMemo(
     () => new Set(sources.filter((source) => source.status === "indexed").map((source) => source.id)),
     [sources],
   );
   const failedDocuments = useMemo(
-    () => new Map(sources.filter((source) => source.status === "failed").map((source) => [source.id, source.summary ?? "Indexing failed"])),
+    () =>
+      new Map(
+        sources
+          .filter((source) => source.status === "failed")
+          .map((source) => [source.id, source.summary ?? "Indexing failed"]),
+      ),
     [sources],
   );
 
   // Upload toasts management
-  const { uploadToasts, dismissToast, handleUploadToast } = useDocumentUploadToasts({
+  const { uploadToasts, dismissToast, handleUploadToast: localHandleUploadToast } = useDocumentUploadToasts({
     completedDocumentIds,
     failedDocuments,
-    onNewIndexingDocument: useCallback(() => setPollDocuments(true), [setPollDocuments]),
+    onNewIndexingDocument: useCallback(() => {
+      setPollDocuments(true);
+      workspace?.refreshSources({ force: true }).catch(noop);
+    }, [setPollDocuments, workspace]),
   });
+
+  const handleUploadToast = useCallback(
+    (payload: UploadToastPayload) => {
+      if (workspace && !demo) {
+        workspace.handleUploadToast(payload);
+        if (payload.documentId) setPollDocuments(true);
+      } else {
+        localHandleUploadToast(payload);
+      }
+    },
+    [demo, localHandleUploadToast, setPollDocuments, workspace],
+  );
 
   const handleClearMessages = useCallback(() => {
     setMessages([]);
@@ -206,7 +252,7 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
     setIsLoadingSession,
     isLoadingSessionRef,
     deletingSessionId,
-    refreshRecentChats,
+    refreshRecentChats: localRefreshRecentChats,
     handleOpenSession,
     handleRenameSession,
     handleDeleteSession,
@@ -221,29 +267,49 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
     onClearMessages: handleClearMessages,
   });
 
-  const uploadDroppedFiles = useCallback((files: File[]) => {
-    if (!files.length || demo) return;
+  const refreshRecentChats = useCallback(async () => {
+    await localRefreshRecentChats();
+    if (workspace && !demo) {
+      await workspace.refreshRecentChats();
+    }
+  }, [demo, localRefreshRecentChats, workspace]);
 
-    files.forEach((file) => {
-      uploadDocumentFile({
-        file,
-        userId: user?.id,
-        isAuthLoaded: isLoaded,
-        isSignedIn,
-        toastValidationFailures: true,
-        onToast: handleUploadToast,
-      }).catch(noop);
-    });
-  }, [demo, handleUploadToast, isLoaded, isSignedIn, user]);
+  // Keep WorkspaceShell active session in sync with ChatLayout
+  useEffect(() => {
+    if (!workspace || demo) return;
+    workspace.setActiveSessionId(activeSessionId);
+  }, [activeSessionId, demo, workspace]);
+
+  const uploadDroppedFiles = useCallback(
+    (files: File[]) => {
+      if (!files.length || demo) return;
+
+      files.forEach((file) => {
+        uploadDocumentFile({
+          file,
+          userId: user?.id,
+          isAuthLoaded: isLoaded,
+          isSignedIn,
+          toastValidationFailures: true,
+          onToast: handleUploadToast,
+        }).catch(noop);
+      });
+    },
+    [demo, handleUploadToast, isLoaded, isSignedIn, user],
+  );
 
   const { isChatFileDragging, dragProps } = useChatDragAndDrop(demo, uploadDroppedFiles);
 
   const sourceGroups = useMemo(() => createSourceGroups(sources), [sources]);
-  const recentChats = useMemo(() => recentSessionRows.map((session) => ({
-    id: session.id,
-    title: session.title || "New chat",
-    status: session.id === activeSessionId ? "active" as const : "inactive" as const,
-  })), [activeSessionId, recentSessionRows]);
+  const recentChats = useMemo(
+    () =>
+      recentSessionRows.map((session) => ({
+        id: session.id,
+        title: session.title || "New chat",
+        status: session.id === activeSessionId ? ("active" as const) : ("inactive" as const),
+      })),
+    [activeSessionId, recentSessionRows],
+  );
 
   const latestMessage = messages.length ? messages[messages.length - 1] : undefined;
   const retrievalMessage =
@@ -267,7 +333,10 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
         label: message.content,
         value: message.content,
         type: "history" as const,
-        keywords: message.content.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length >= 2),
+        keywords: message.content
+          .toLowerCase()
+          .split(/[^a-z0-9]+/)
+          .filter((t) => t.length >= 2),
       }));
 
     const seen = new Set<string>();
@@ -294,9 +363,40 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
     }
   }, [demo, isLoaded, isSignedIn, router, user]);
 
+  const handleScroll = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    isPinnedToBottomRef.current = distanceFromBottom < 120;
+    setShowScrollToBottom(distanceFromBottom > 240);
+  }, []);
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    const el = scrollContainerRef.current;
+    if (el) {
+      el.scrollTo({ top: el.scrollHeight, behavior });
+    } else {
+      bottomRef.current?.scrollIntoView({ behavior });
+    }
+    isPinnedToBottomRef.current = true;
+    setShowScrollToBottom(false);
+  }, []);
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    if (!messages.length) {
+      setShowScrollToBottom(false);
+      return;
+    }
+    if (!preferences.autoScrollOnStream || !isPinnedToBottomRef.current) return;
+    const el = scrollContainerRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    } else {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, preferences.autoScrollOnStream]);
+
+  const focusedDocument = workspace?.focusedDocument ?? null;
 
   const runQuestion = useCallback(
     async (question: string, selectedSuggestion?: AutocompleteSuggestion, runScope = conversationRunRef.current) => {
@@ -320,6 +420,7 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
         createdAt: now + 1,
       };
 
+      isPinnedToBottomRef.current = true;
       setMessages((current) => [...current, userMessage, assistantPlaceholder]);
       setIsLoading(true);
       isLoadingRef.current = true;
@@ -328,6 +429,16 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
       const sessionAtSend = activeSessionIdRef.current;
+
+      const effectiveRetrievalHint: ChatRetrievalHint | undefined =
+        selectedSuggestion?.metadata ??
+        (focusedDocument
+          ? {
+              source: "uploaded",
+              kind: "document",
+              documentId: focusedDocument.id,
+            }
+          : undefined);
 
       const resetStreamedAnswer = () => {
         streamedAnswer = "";
@@ -342,67 +453,26 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
 
       try {
         if (demo) {
-          await streamChatQuestionDemo(trimmedQuestion, {
-            onDelta: (text) => {
-              streamedAnswer += text;
-              setMessages((current) =>
-                patchAssistantMessage(current, assistantId, {
-                  content: streamedAnswer,
-                  displayedContent: streamedAnswer,
-                  status: "complete",
-                }),
-              );
-            },
-            onReset: resetStreamedAnswer,
-            onSources: (demoSources) => {
-              setMessages((current) =>
-                patchAssistantMessage(current, assistantId, { sources: demoSources }),
-              );
-            },
-            onDone: (response) => {
-              setMessages((current) =>
-                patchAssistantMessage(current, assistantId, {
-                  content: response.answer,
-                  displayedContent: undefined,
-                  sources: response.sources,
-                  status: "complete",
-                }),
-              );
-            },
-          }, abortController.signal);
-        } else {
-          await streamChatQuestion(trimmedQuestion, {
-            onJob: (jobId) => {
-              activeJobIdRef.current = jobId;
-            },
-            onDelta: (text) => {
-              streamedAnswer += text;
-              setMessages((current) =>
-                patchAssistantMessage(current, assistantId, {
-                  content: streamedAnswer,
-                  displayedContent: streamedAnswer,
-                  status: "complete",
-                }),
-              );
-            },
-            onReset: resetStreamedAnswer,
-            onSources: (apiSources) => {
-              setMessages((current) =>
-                patchAssistantMessage(current, assistantId, { sources: apiSources }),
-              );
-            },
-            onDone: (response) => {
-              const completedSessionId = response.chatSessionId;
-              const stillAttached =
-                conversationRunRef.current === runScope && activeSessionIdRef.current === sessionAtSend;
-
-              if (stillAttached) {
-                if (completedSessionId) {
-                  activeSessionIdRef.current = completedSessionId;
-                  setActiveSessionId(completedSessionId);
-                  loadedSessionRef.current = completedSessionId;
-                  window.history.replaceState(null, "", `/chat?session=${encodeURIComponent(completedSessionId)}`);
-                }
+          await streamChatQuestionDemo(
+            trimmedQuestion,
+            {
+              onDelta: (text) => {
+                streamedAnswer += text;
+                setMessages((current) =>
+                  patchAssistantMessage(current, assistantId, {
+                    content: streamedAnswer,
+                    displayedContent: streamedAnswer,
+                    status: "complete",
+                  }),
+                );
+              },
+              onReset: resetStreamedAnswer,
+              onSources: (demoSources) => {
+                setMessages((current) =>
+                  patchAssistantMessage(current, assistantId, { sources: demoSources }),
+                );
+              },
+              onDone: (response) => {
                 setMessages((current) =>
                   patchAssistantMessage(current, assistantId, {
                     content: response.answer,
@@ -411,32 +481,85 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
                     status: "complete",
                   }),
                 );
-              } else if (completedSessionId && loadedSessionRef.current === completedSessionId) {
-                loadedSessionRef.current = null;
-              }
-              refreshRecentChats().catch(noop);
+              },
             },
-            onTitle: (title) => {
-              const sessionId = activeSessionIdRef.current;
-              if (!sessionId) return;
-              setRecentSessionRows((current) => {
-                if (!hasMatchingSession(current, sessionId)) {
-                  refreshRecentChats().catch(noop);
-                  return current;
+            abortController.signal,
+          );
+        } else {
+          await streamChatQuestion(
+            trimmedQuestion,
+            {
+              onJob: (jobId) => {
+                activeJobIdRef.current = jobId;
+              },
+              onDelta: (text) => {
+                streamedAnswer += text;
+                setMessages((current) =>
+                  patchAssistantMessage(current, assistantId, {
+                    content: streamedAnswer,
+                    displayedContent: streamedAnswer,
+                    status: "complete",
+                  }),
+                );
+              },
+              onReset: resetStreamedAnswer,
+              onSources: (apiSources) => {
+                setMessages((current) =>
+                  patchAssistantMessage(current, assistantId, { sources: apiSources }),
+                );
+              },
+              onDone: (response) => {
+                const completedSessionId = response.chatSessionId;
+                const stillAttached =
+                  conversationRunRef.current === runScope && activeSessionIdRef.current === sessionAtSend;
+
+                if (stillAttached) {
+                  if (completedSessionId) {
+                    activeSessionIdRef.current = completedSessionId;
+                    setActiveSessionId(completedSessionId);
+                    workspace?.setActiveSessionId(completedSessionId);
+                    loadedSessionRef.current = completedSessionId;
+                    window.history.replaceState(null, "", `/chat?session=${encodeURIComponent(completedSessionId)}`);
+                  }
+                  setMessages((current) =>
+                    patchAssistantMessage(current, assistantId, {
+                      content: response.answer,
+                      displayedContent: undefined,
+                      sources: response.sources,
+                      status: "complete",
+                    }),
+                  );
+                } else if (completedSessionId && loadedSessionRef.current === completedSessionId) {
+                  loadedSessionRef.current = null;
                 }
-                return updateSessionTitleInRows(current, sessionId, title);
-              });
+                refreshRecentChats().catch(noop);
+              },
+              onTitle: (title) => {
+                const sessionId = activeSessionIdRef.current;
+                if (!sessionId) return;
+                const applyTitle = (current: ChatSessionSummary[]) => {
+                  if (!hasMatchingSession(current, sessionId)) {
+                    refreshRecentChats().catch(noop);
+                    return current;
+                  }
+                  return updateSessionTitleInRows(current, sessionId, title);
+                };
+                setRecentSessionRows(applyTitle);
+                workspace?.setRecentSessionRows(applyTitle);
+              },
             },
-          }, {
-            ...(selectedSuggestion?.metadata ? { retrievalHint: selectedSuggestion.metadata } : {}),
-            ...(activeSessionIdRef.current ? { chatSessionId: activeSessionIdRef.current } : {}),
-            signal: abortController.signal,
-          });
+            {
+              ...(effectiveRetrievalHint ? { retrievalHint: effectiveRetrievalHint } : {}),
+              ...(activeSessionIdRef.current ? { chatSessionId: activeSessionIdRef.current } : {}),
+              signal: abortController.signal,
+            },
+          );
         }
       } catch (error) {
-        const isAbort = error instanceof DOMException
-          ? error.name === "AbortError"
-          : error instanceof Error && error.name === "AbortError";
+        const isAbort =
+          error instanceof DOMException
+            ? error.name === "AbortError"
+            : error instanceof Error && error.name === "AbortError";
 
         const resolved = resolveErrorMessage(error, isAbort, streamedAnswer);
         setMessages((current) =>
@@ -464,7 +587,17 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
         }
       }
     },
-    [activeSessionIdRef, demo, isLoadingSessionRef, loadedSessionRef, refreshRecentChats, setActiveSessionId, setRecentSessionRows],
+    [
+      activeSessionIdRef,
+      demo,
+      focusedDocument,
+      isLoadingSessionRef,
+      loadedSessionRef,
+      refreshRecentChats,
+      setActiveSessionId,
+      setRecentSessionRows,
+      workspace,
+    ],
   );
 
   const handleSubmit = useCallback(
@@ -507,6 +640,19 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
     [demo, hasReachedLimit, runQuestion, decrementQuestion, isLoadingSessionRef],
   );
 
+  const handleRetryMessage = useCallback(
+    (assistantIndex: number) => {
+      if (isLoadingRef.current || isLoadingSessionRef.current) return;
+      const userMessage = messages[assistantIndex - 1];
+      if (!userMessage || userMessage.role !== "user") return;
+
+      const questionToRetry = userMessage.content;
+      setMessages((current) => current.filter((_, idx) => idx !== assistantIndex && idx !== assistantIndex - 1));
+      runQuestion(questionToRetry).catch(noop);
+    },
+    [ isLoadingSessionRef, messages, runQuestion],
+  );
+
   const handleRemoveQueuedMessage = useCallback((queuedMessageId: string) => {
     setQueuedMessages((current) => {
       const next = current.filter((message) => message.id !== queuedMessageId);
@@ -541,12 +687,41 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
     isLoadingSessionRef.current = false;
     setActiveSessionId(null);
     activeSessionIdRef.current = null;
+    workspace?.setActiveSessionId(null);
     setMessages([]);
     setQueuedMessages([]);
     queuedMessagesRef.current = [];
     loadedSessionRef.current = null;
     if (!demo) window.history.pushState(null, "", "/chat");
-  }, [activeSessionIdRef, demo, loadedSessionRef, isLoadingSessionRef, setActiveSessionId, setIsLoadingSession]);
+  }, [activeSessionIdRef, demo, loadedSessionRef, isLoadingSessionRef, setActiveSessionId, setIsLoadingSession, workspace]);
+
+  // Listen to sidebar session deletion & New Chat events from WorkspaceShell
+  useEffect(() => {
+    if (!workspace || demo) return;
+    return workspace.registerSessionLifecycle({
+      onSessionDeleted: (deletedSessionId) => {
+        setRecentSessionRows((current) => current.filter((s) => s.id !== deletedSessionId));
+        if (deletedSessionId === activeSessionIdRef.current || deletedSessionId === sessionParam) {
+          handleNewChat();
+        }
+      },
+      onNewChat: () => {
+        handleNewChat();
+      },
+    });
+  }, [activeSessionIdRef, demo, handleNewChat, sessionParam, setRecentSessionRows, workspace]);
+
+  const triggerOpenUpload = useCallback(() => {
+    if (demo) {
+      setShowSignupModal(true);
+      return;
+    }
+    if (workspace) {
+      workspace.openUploadModal("personal");
+      return;
+    }
+    setIsUploadOpen(true);
+  }, [demo, workspace]);
 
   if (!isLoaded || (!demo && (!isSignedIn || !user))) {
     return null;
@@ -554,7 +729,7 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
 
   const chatContent = (
     <>
-      <ChatHeader onOpenUpload={demo ? () => setShowSignupModal(true) : () => setIsUploadOpen(true)} />
+      <ChatHeader onOpenUpload={triggerOpenUpload} />
       <div className="relative flex min-h-0 flex-1" {...dragProps}>
         {isChatFileDragging && (
           <div className="pointer-events-none absolute inset-3 z-30 flex items-center justify-center rounded-3xl border-2 border-dashed border-cyan-300/70 bg-slate-950/75 text-cyan-50 shadow-2xl shadow-cyan-950/30 backdrop-blur-sm">
@@ -563,29 +738,52 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
                 <UploadCloud className="h-7 w-7" />
               </span>
               <span className="text-base font-semibold">Drop files to upload</span>
-              <span className="text-xs text-slate-300">PDF, DOCX, PPTX, TXT, and MD files upload directly into your sources.</span>
+              <span className="text-xs text-slate-300">
+                PDF, DOCX, PPTX, TXT, and MD files upload directly into your sources.
+              </span>
             </div>
           </div>
         )}
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
+          <div
+            ref={scrollContainerRef}
+            onScroll={handleScroll}
+            className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6"
+          >
             <div className="flex min-h-full flex-col">
               <div className="flex-1 pb-6">
                 <ChatConversationView
                   isLoadingSession={isLoadingSession}
                   messages={messages}
                   isLoading={isLoading}
-                  hasPersonalSources={sources.some((source) => source.sourceType === "uploaded" && source.status === "indexed")}
+                  hasPersonalSources={sources.some(
+                    (source) => source.sourceType === "uploaded" && source.status === "indexed",
+                  )}
                   isDemo={demo}
                   onSubmit={handleSubmit}
-                  onOpenUpload={demo ? undefined : () => setIsUploadOpen(true)}
+                  onRetryMessage={handleRetryMessage}
+                  onOpenUpload={demo ? undefined : triggerOpenUpload}
                   bottomRef={bottomRef}
                 />
               </div>
 
-              <div className="sticky bottom-0 z-20 -mx-4 px-4 pb-6 pt-6 sm:-mx-6 sm:px-6">
+              <div className="sticky bottom-0 z-20 -mx-4 px-4 pb-6 pt-4 sm:-mx-6 sm:px-6">
+                {showScrollToBottom && messages.length > 0 && (
+                  <div className="mb-3 flex justify-center">
+                    <button
+                      type="button"
+                      onClick={() => scrollToBottom("smooth")}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-cyan-300/30 bg-slate-950/90 px-3.5 py-1.5 text-xs font-medium text-cyan-100 shadow-lg shadow-cyan-950/30 backdrop-blur-xl transition hover:border-cyan-300/60 hover:bg-slate-900"
+                      aria-label="Scroll to latest message"
+                    >
+                      <ArrowDown className="h-3.5 w-3.5 text-cyan-300" />
+                      Jump to latest
+                    </button>
+                  </div>
+                )}
+
                 {demo && hasReachedLimit && (
-                  <div className="mx-auto mb-3 flex w-full max-w-5xl items-center gap-2 rounded-2xl border border-red-300/20 bg-red-400/10 px-4 py-2.5 text-sm text-red-100 shadow-lg">
+                  <div className="mx-auto mb-3 flex w-full max-w-4xl items-center gap-2 rounded-2xl border border-red-300/20 bg-red-400/10 px-4 py-2.5 text-sm text-red-100 shadow-lg">
                     <span className="font-semibold">Demo limit reached.</span>
                     <span>Sign up for free to continue chatting and unlock uploads.</span>
                     <button
@@ -603,14 +801,18 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
                   isResponding={isLoading}
                   queuedMessages={queuedMessages}
                   queueLimit={QUEUE_LIMIT}
+                  focusedDocument={focusedDocument}
+                  onClearFocusedDocument={workspace ? () => workspace.setFocusedDocument(null) : undefined}
                   onSubmit={handleSubmit}
                   onRemoveQueuedMessage={handleRemoveQueuedMessage}
                   onStopResponse={handleStopResponse}
-                  onOpenUpload={demo ? undefined : () => setIsUploadOpen(true)}
+                  onOpenUpload={demo ? undefined : triggerOpenUpload}
                 />
                 {demo && !hasReachedLimit && (
-                  <div className="mx-auto mt-2 flex w-full max-w-5xl items-center justify-between text-xs text-slate-500">
-                    <span>Demo mode — {remaining} question{remaining !== 1 ? "s" : ""} remaining</span>
+                  <div className="mx-auto mt-2 flex w-full max-w-4xl items-center justify-between text-xs text-slate-500">
+                    <span>
+                      Demo mode — {remaining} question{remaining !== 1 ? "s" : ""} remaining
+                    </span>
                     <button
                       type="button"
                       onClick={() => setShowSignupModal(true)}
@@ -625,14 +827,18 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
           </div>
         </div>
       </div>
-      <UploadModal
-        isOpen={isUploadOpen}
-        onClose={() => setIsUploadOpen(false)}
-        onUploadToast={handleUploadToast}
-        completedDocumentIds={completedDocumentIds}
-        failedDocuments={failedDocuments}
-      />
-      <IndexingToast toasts={uploadToasts} onDismiss={dismissToast} />
+      {!workspace && (
+        <>
+          <UploadModal
+            isOpen={isUploadOpen}
+            onClose={() => setIsUploadOpen(false)}
+            onUploadToast={handleUploadToast}
+            completedDocumentIds={completedDocumentIds}
+            failedDocuments={failedDocuments}
+          />
+          <IndexingToast toasts={uploadToasts} onDismiss={dismissToast} />
+        </>
+      )}
       {isLoading && <RetrievalStatus message={retrievalMessage} />}
       <DemoLimitModal isOpen={showSignupModal} onClose={() => setShowSignupModal(false)} />
     </>
@@ -652,7 +858,7 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
       onRenameSession={handleRenameSession}
       onOpenSession={handleOpenSession}
       onNewChat={handleNewChat}
-      onOpenUpload={demo ? () => setShowSignupModal(true) : () => setIsUploadOpen(true)}
+      onOpenUpload={triggerOpenUpload}
     >
       {chatContent}
     </AcademicWorkspace>

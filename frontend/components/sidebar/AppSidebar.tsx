@@ -1,11 +1,11 @@
 "use client";
 
-import { BookOpen, Library, LogOut, Menu, MessageSquarePlus, Settings, UserCircle, X } from "lucide-react";
+import { BookOpen, FileUp, Library, LogOut, Menu, MessageSquarePlus, Settings, UserCircle, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { useAuth } from "../../context/AuthContext";
-import type { ChatSession, KnowledgeSourceGroup } from "../../lib/ui-state";
+import type { ChatSession, KnowledgeSource, KnowledgeSourceGroup } from "../../lib/ui-state";
 import { PrimaryButton } from "../ui/PrimaryButton";
 import { BrandMark } from "../ui/BrandMark";
 import { RecentChats } from "./RecentChats";
@@ -17,6 +17,8 @@ type AppSidebarProps = {
   sourceStatus: "loading" | "ready" | "empty" | "unavailable";
   deletingSourceId?: string | null;
   deletingSessionId?: string | null;
+  focusedSourceId?: string | null;
+  onSelectSource?: (source: KnowledgeSource) => void;
   onClose?: () => void;
   onDeleteSource?: (sourceId: string) => void;
   onDeleteSession?: (sessionId: string) => void;
@@ -36,7 +38,26 @@ const navigation = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
-export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId, deletingSessionId, onClose, onDeleteSource, onDeleteSession, onRenameSession, onOpenSession, onNewChat, onOpenUpload, onOpenKnowledgeBaseUpload, canManageKnowledgeBase, isCollapsed, onToggleCollapsed }: Readonly<AppSidebarProps>) {
+export function AppSidebar({
+  groups,
+  recentChats,
+  sourceStatus,
+  deletingSourceId,
+  deletingSessionId,
+  focusedSourceId,
+  onSelectSource,
+  onClose,
+  onDeleteSource,
+  onDeleteSession,
+  onRenameSession,
+  onOpenSession,
+  onNewChat,
+  onOpenUpload,
+  onOpenKnowledgeBaseUpload,
+  canManageKnowledgeBase,
+  isCollapsed,
+  onToggleCollapsed,
+}: Readonly<AppSidebarProps>) {
   const pathname = usePathname();
   const { signOut, user } = useAuth();
 
@@ -59,7 +80,7 @@ export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId
           <button
             type="button"
             onClick={onNewChat}
-            className="flex h-10 w-10 items-center justify-center rounded-2xl text-slate-400 transition hover:bg-white/5 hover:text-white"
+            className="flex h-10 w-10 items-center justify-center rounded-2xl border border-violet-300/20 bg-violet-400/10 text-violet-100 transition hover:bg-violet-400/20 hover:text-white"
             aria-label="New chat"
             title="New chat"
           >
@@ -67,7 +88,19 @@ export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId
           </button>
         )}
 
-        <nav className="flex flex-col items-center gap-1">
+        {onOpenUpload && (
+          <button
+            type="button"
+            onClick={onOpenUpload}
+            className="flex h-10 w-10 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-100 transition hover:bg-cyan-300/20 hover:text-white"
+            aria-label="Upload document"
+            title="Upload document"
+          >
+            <FileUp className="h-4 w-4" />
+          </button>
+        )}
+
+        <nav className="mt-1 flex flex-col items-center gap-1">
           {navigation.map((item) => {
             const Icon = item.icon;
             const active = pathname === item.href;
@@ -77,7 +110,7 @@ export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId
                 href={item.href}
                 className={`flex h-10 w-10 items-center justify-center rounded-2xl transition ${
                   active
-                    ? "bg-cyan-300/12 text-cyan-50"
+                    ? "bg-cyan-300/15 text-cyan-50 ring-1 ring-cyan-300/25"
                     : "text-slate-400 hover:bg-white/5 hover:text-white"
                 }`}
                 aria-label={item.label}
@@ -89,10 +122,10 @@ export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId
           })}
         </nav>
 
-        <div className="mt-auto">
+        <div className="mt-auto flex flex-col items-center gap-2">
           {user?.email ? (
             <span
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-cyan-300/15 text-xs font-semibold text-cyan-200"
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-cyan-300/15 text-xs font-semibold text-cyan-200 ring-1 ring-cyan-300/25"
               title={`Signed in as ${user.email}`}
               aria-label={`Signed in as ${user.email}`}
             >
@@ -107,13 +140,22 @@ export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId
               <UserCircle className="h-5 w-5" />
             </span>
           )}
+          <button
+            type="button"
+            onClick={signOut}
+            className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-400 transition hover:bg-red-400/15 hover:text-red-200"
+            aria-label="Sign out"
+            title="Sign out"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
         </div>
       </aside>
     );
   }
 
   return (
-    <aside className="scrollbar-hidden flex h-full w-full flex-col gap-3 overflow-y-auto bg-slate-950/75 px-3 py-4 backdrop-blur-xl lg:w-58 lg:shrink-0">
+    <aside className="scrollbar-hidden flex h-full w-full flex-col gap-3 overflow-y-auto bg-slate-950/75 px-3 py-4 backdrop-blur-xl lg:w-64 lg:shrink-0">
       <div className="flex items-start justify-between gap-2 px-1 py-1">
         <Link href="/chat" className="flex min-w-0 items-center gap-2.5">
           <BrandMark />
@@ -123,18 +165,34 @@ export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId
           </span>
         </Link>
         {onClose && (
-          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-slate-300 hover:bg-white/5 lg:hidden" aria-label="Close sidebar">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-slate-300 transition hover:bg-white/10 hover:text-white lg:hidden"
+            aria-label="Close sidebar"
+          >
             <X className="h-4 w-4" />
           </button>
         )}
         {onToggleCollapsed && (
-          <button type="button" onClick={onToggleCollapsed} className="hidden rounded-lg p-1.5 text-slate-300 hover:bg-white/5 lg:inline-flex" aria-label="Collapse sidebar" title="Collapse sidebar">
+          <button
+            type="button"
+            onClick={onToggleCollapsed}
+            className="hidden rounded-lg p-1.5 text-slate-300 transition hover:bg-white/10 hover:text-white lg:inline-flex"
+            aria-label="Collapse sidebar"
+            title="Collapse sidebar"
+          >
             <Menu className="h-4 w-4" />
           </button>
         )}
       </div>
 
-      <PrimaryButton type="button" onClick={onNewChat} variant="secondary" className="h-9 w-full justify-start rounded-xl px-2.5 text-xs">
+      <PrimaryButton
+        type="button"
+        onClick={onNewChat}
+        variant="secondary"
+        className="h-9.5 w-full justify-start rounded-xl px-3 text-xs shadow-sm"
+      >
         <MessageSquarePlus className="h-3.5 w-3.5" />
         New Chat
       </PrimaryButton>
@@ -147,13 +205,17 @@ export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId
             <Link
               key={item.href}
               href={item.href}
-                className={`flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-medium transition hover:cursor-pointer ${
+              onClick={() => onClose?.()}
+              className={`relative flex items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-medium transition hover:cursor-pointer ${
                 active
-                  ? "bg-cyan-300/12 text-cyan-50"
+                  ? "bg-cyan-300/12 text-cyan-50 ring-1 ring-cyan-300/20"
                   : "text-slate-400 hover:bg-white/5 hover:text-white"
               }`}
             >
-              <Icon className="h-3.5 w-3.5" />
+              {active && (
+                <span className="absolute left-0 top-1/2 h-4 w-0.75 -translate-y-1/2 rounded-r-full bg-cyan-300" />
+              )}
+              <Icon className={`h-3.5 w-3.5 ${active ? "text-cyan-300" : ""}`} />
               {item.label}
             </Link>
           );
@@ -165,6 +227,8 @@ export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId
           groups={groups}
           status={sourceStatus}
           deletingSourceId={deletingSourceId}
+          focusedSourceId={focusedSourceId}
+          onSelectSource={onSelectSource}
           onDeleteSource={onDeleteSource}
           onOpenUpload={onOpenUpload}
           onOpenKnowledgeBaseUpload={onOpenKnowledgeBaseUpload}
@@ -173,16 +237,29 @@ export function AppSidebar({ groups, recentChats, sourceStatus, deletingSourceId
       </div>
 
       <div className="pt-1">
-        <RecentChats sessions={recentChats} deletingSessionId={deletingSessionId} onDeleteSession={onDeleteSession} onRenameSession={onRenameSession} onOpenSession={onOpenSession} />
+        <RecentChats
+          sessions={recentChats}
+          deletingSessionId={deletingSessionId}
+          onDeleteSession={onDeleteSession}
+          onRenameSession={onRenameSession}
+          onOpenSession={onOpenSession}
+        />
       </div>
 
       <div className="mt-auto border-t border-white/10 px-1 pt-3">
-        <p className="truncate text-[0.65rem] text-slate-500">Signed in as</p>
-        <p className="truncate text-xs font-medium text-white">{user?.email ?? "IntelliSeek user"}</p>
+        <div className="flex items-center gap-2.5">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-cyan-300/15 text-xs font-semibold text-cyan-200 ring-1 ring-cyan-300/20">
+            {user?.email ? user.email.charAt(0).toUpperCase() : "U"}
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[0.65rem] text-slate-500">Signed in as</p>
+            <p className="truncate text-xs font-medium text-white">{user?.email ?? "IntelliSeek user"}</p>
+          </div>
+        </div>
         <button
           type="button"
           onClick={signOut}
-          className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl px-2.5 py-2 text-xs font-medium text-slate-300 transition hover:bg-red-400/10 hover:text-red-100"
+          className="mt-2.5 flex w-full items-center justify-center gap-2 rounded-xl border border-white/5 bg-white/[0.03] px-2.5 py-2 text-xs font-medium text-slate-300 transition hover:border-red-400/20 hover:bg-red-400/10 hover:text-red-100"
         >
           <LogOut className="h-3.5 w-3.5" />
           Sign out

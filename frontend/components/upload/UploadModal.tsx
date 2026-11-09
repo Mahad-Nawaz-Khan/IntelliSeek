@@ -2,7 +2,7 @@
 
 import { ArrowRight, X } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useAuth } from "../../context/AuthContext";
 import { uploadDocumentFile, type UploadToastPayload } from "../../lib/upload-document";
@@ -90,6 +90,18 @@ export function UploadModal({
     [isLoaded, isSignedIn, onClose, onUploadToast, uploadTarget, user],
   );
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const isWorking = displayedItem?.status === "uploading" || displayedItem?.status === "indexing";
@@ -97,6 +109,9 @@ export function UploadModal({
   return (
     <dialog
       open
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
       className="fixed inset-0 z-50 m-0 flex h-full max-h-full w-full max-w-full items-center justify-center border-none bg-slate-950/80 p-4 backdrop-blur-sm"
       aria-label="Upload documents"
     >

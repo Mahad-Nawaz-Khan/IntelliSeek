@@ -54,6 +54,24 @@ const DEDUPE_WINDOW_MS = 2500;
 let documentsCache: { at: number; promise: Promise<KnowledgeSource[]> } | null = null;
 let roleCache: { at: number; promise: Promise<UserRole | null> } | null = null;
 
+export function invalidateDocumentsCache() {
+  documentsCache = null;
+}
+
+export async function deleteDocumentById(documentId: string): Promise<void> {
+  invalidateDocumentsCache();
+  const response = await fetch("/api/documents", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ document_id: documentId }),
+  });
+  const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+  if (!response.ok || !result?.ok) {
+    throw new Error(result?.error ?? "Document deletion failed");
+  }
+  invalidateDocumentsCache();
+}
+
 async function requestDocuments(): Promise<KnowledgeSource[]> {
   const response = await fetch("/api/documents");
   const result = (await response.json()) as DocumentsResponse;

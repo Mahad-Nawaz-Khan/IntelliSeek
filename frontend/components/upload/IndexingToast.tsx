@@ -80,16 +80,14 @@ function ToastCard({ toast, onDismiss }: Readonly<{ toast: UploadIndexingToast; 
             <p className="mt-1 text-xs text-red-200/80">{toast.errorMessage}</p>
           )}
         </div>
-        {(isFailed) && (
-          <button
-            type="button"
-            onClick={() => onDismiss(toast.toastId)}
-            className="rounded-lg p-1 text-slate-400 transition hover:text-white"
-            aria-label="Dismiss"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => onDismiss(toast.toastId)}
+          className="rounded-lg p-1 text-slate-400 transition hover:bg-white/10 hover:text-white"
+          aria-label="Dismiss"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
       </div>
 
       {/* Bottom progress bar */}

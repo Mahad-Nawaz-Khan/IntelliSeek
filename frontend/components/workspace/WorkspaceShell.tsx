@@ -1,15 +1,78 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from "react";
+import { usePathname, useRouter } from "next/navigation";
 
 import { useAuth } from "../../context/AuthContext";
-import { deleteChatSession, fetchChatSessions, renameChatSession, type ChatSessionSummary } from "../../lib/chat-api";
-import { fetchAccessibleDocuments, fetchMyRole } from "../../lib/documents";
+import {
+  deleteChatSession,
+  fetchChatSessions,
+  renameChatSession,
+  type ChatSessionSummary,
+} from "../../lib/chat-api";
+import {
+  deleteDocumentById,
+  fetchAccessibleDocuments,
+  fetchMyRole,
+  invalidateDocumentsCache,
+} from "../../lib/documents";
 import { createSourceGroups, type KnowledgeSource } from "../../lib/ui-state";
+import type { UploadToastPayload } from "../../lib/upload-document";
 import { AcademicWorkspace } from "../chat/AcademicWorkspace";
 import { IndexingToast, type UploadIndexingToast } from "../upload/IndexingToast";
 import { UploadModal } from "../upload/UploadModal";
+
+export type FocusedDocument = {
+  id: string;
+  filename: string;
+};
+
+type SessionLifecycleHandlers = {
+  onSessionDeleted?: (sessionId: string) => void;
+  onNewChat?: () => void;
+};
+
+export type WorkspaceContextValue = {
+  sources: KnowledgeSource[];
+  setSources: Dispatch<SetStateAction<KnowledgeSource[]>>;
+  sourceStatus: "loading" | "ready" | "empty" | "unavailable";
+  setSourceStatus: Dispatch<SetStateAction<"loading" | "ready" | "empty" | "unavailable">>;
+  refreshSources: (options?: { force?: boolean }) => Promise<void>;
+  handleDeleteSource: (sourceId: string) => Promise<void>;
+  deletingSourceId: string | null;
+  recentSessionRows: ChatSessionSummary[];
+  setRecentSessionRows: Dispatch<SetStateAction<ChatSessionSummary[]>>;
+  activeSessionId: string | null;
+  setActiveSessionId: Dispatch<SetStateAction<string | null>>;
+  refreshRecentChats: () => Promise<void>;
+  handleDeleteSession: (sessionId: string) => Promise<void>;
+  handleRenameSession: (sessionId: string, title: string) => Promise<boolean>;
+  deletingSessionId: string | null;
+  isAdmin: boolean;
+  focusedDocument: FocusedDocument | null;
+  setFocusedDocument: Dispatch<SetStateAction<FocusedDocument | null>>;
+  focusDocumentInChat: (doc: FocusedDocument) => void;
+  openUploadModal: (target?: "personal" | "knowledge_base") => void;
+  handleUploadToast: (toast: UploadToastPayload) => void;
+  registerSessionLifecycle: (handlers: SessionLifecycleHandlers) => () => void;
+};
+
+const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
+
+export function useWorkspaceOptional() {
+  return useContext(WorkspaceContext);
+}
 
 type WorkspaceShellProps = {
   children: ReactNode;
@@ -17,36 +80,60 @@ type WorkspaceShellProps = {
 
 export function WorkspaceShell({ children }: Readonly<WorkspaceShellProps>) {
   const router = useRouter();
+  const pathname = usePathname();
   const { isLoaded, isSignedIn, user } = useAuth();
   const [sources, setSources] = useState<KnowledgeSource[]>([]);
   const [sourceStatus, setSourceStatus] = useState<"loading" | "ready" | "empty" | "unavailable">("loading");
   const [recentSessionRows, setRecentSessionRows] = useState<ChatSessionSummary[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [focusedDocument, setFocusedDocument] = useState<FocusedDocument | null>(null);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [uploadTarget, setUploadTarget] = useState<"personal" | "knowledge_base">("personal");
   const [isAdmin, setIsAdmin] = useState(false);
   const [deletingSourceId, setDeletingSourceId] = useState<string | null>(null);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [uploadToasts, setUploadToasts] = useState<UploadIndexingToast[]>([]);
+
   const didLoadSidebarRef = useRef(false);
+  const inFlightSourceDeletesRef = useRef<Set<string>>(new Set());
+  const inFlightSessionDeletesRef = useRef<Set<string>>(new Set());
+  const lifecycleHandlersRef = useRef<Set<SessionLifecycleHandlers>>(new Set());
+
+  const registerSessionLifecycle = useCallback((handlers: SessionLifecycleHandlers) => {
+    lifecycleHandlersRef.current.add(handlers);
+    return () => {
+      lifecycleHandlersRef.current.delete(handlers);
+    };
+  }, []);
 
   const sourceGroups = useMemo(() => createSourceGroups(sources), [sources]);
-  const recentChats = useMemo(() => recentSessionRows.map((session) => ({
-    id: session.id,
-    title: session.title || "New chat",
-    status: "inactive" as const,
-  })), [recentSessionRows]);
+  const recentChats = useMemo(
+    () =>
+      recentSessionRows.map((session) => ({
+        id: session.id,
+        title: session.title || "New chat",
+        status: session.id === activeSessionId ? ("active" as const) : ("inactive" as const),
+      })),
+    [activeSessionId, recentSessionRows],
+  );
   const completedDocumentIds = useMemo(
     () => new Set(sources.filter((source) => source.status === "indexed").map((source) => source.id)),
     [sources],
   );
   const failedDocuments = useMemo(
-    () => new Map(sources.filter((source) => source.status === "failed").map((source) => [source.id, source.summary ?? "Indexing failed"])),
+    () =>
+      new Map(
+        sources
+          .filter((source) => source.status === "failed")
+          .map((source) => [source.id, source.summary ?? "Indexing failed"]),
+      ),
     [sources],
   );
 
   const refreshRecentChats = useCallback(async () => {
     try {
-      setRecentSessionRows(await fetchChatSessions());
+      const sessions = await fetchChatSessions();
+      setRecentSessionRows(sessions.filter((s) => !inFlightSessionDeletesRef.current.has(s.id)));
     } catch {
       setRecentSessionRows([]);
     }
@@ -55,8 +142,9 @@ export function WorkspaceShell({ children }: Readonly<WorkspaceShellProps>) {
   const refreshSources = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
     try {
       const rows = await fetchAccessibleDocuments({ force });
-      setSources(rows);
-      setSourceStatus(rows.length ? "ready" : "empty");
+      const filteredRows = rows.filter((row) => !inFlightSourceDeletesRef.current.has(row.id));
+      setSources(filteredRows);
+      setSourceStatus(filteredRows.length ? "ready" : "empty");
     } catch {
       setSourceStatus("unavailable");
     }
@@ -106,7 +194,7 @@ export function WorkspaceShell({ children }: Readonly<WorkspaceShellProps>) {
     if (!hasIndexing) return;
 
     const interval = window.setInterval(() => {
-      refreshSources().catch(() => {});
+      refreshSources({ force: true }).catch(() => {});
     }, 3000);
     return () => window.clearInterval(interval);
   }, [refreshSources, sources]);
@@ -127,108 +215,263 @@ export function WorkspaceShell({ children }: Readonly<WorkspaceShellProps>) {
     return () => window.clearTimeout(timeout);
   }, [uploadToasts]);
 
-  const handleDeleteSource = useCallback(async (sourceId: string) => {
-    if (deletingSourceId) return;
+  const handleDeleteSource = useCallback(
+    async (sourceId: string) => {
+      if (inFlightSourceDeletesRef.current.has(sourceId)) return;
 
-    setDeletingSourceId(sourceId);
-    try {
-      const response = await fetch("/api/documents", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ document_id: sourceId }),
+      inFlightSourceDeletesRef.current.add(sourceId);
+      let removedSource: KnowledgeSource | undefined;
+      let removedIndex = -1;
+
+      // Instant optimistic removal from the sidebar and workspace
+      setSources((current) => {
+        removedIndex = current.findIndex((source) => source.id === sourceId);
+        if (removedIndex !== -1) {
+          removedSource = current[removedIndex];
+        }
+        const next = current.filter((source) => source.id !== sourceId);
+        setSourceStatus(next.length ? "ready" : "empty");
+        return next;
       });
-      const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-      if (!response.ok || !result?.ok) throw new Error(result?.error ?? "Document deletion failed");
+      setFocusedDocument((current) => (current?.id === sourceId ? null : current));
+      invalidateDocumentsCache();
 
-      setSources((current) => current.filter((source) => source.id !== sourceId));
-    } catch {
-      setSourceStatus("unavailable");
-    } finally {
-      setDeletingSourceId(null);
-    }
-  }, [deletingSourceId]);
+      try {
+        await deleteDocumentById(sourceId);
+      } catch {
+        if (removedSource) {
+          const restored = removedSource;
+          setSources((current) => {
+            if (current.some((s) => s.id === sourceId)) return current;
+            const next = [...current];
+            const insertAt = removedIndex >= 0 && removedIndex <= next.length ? removedIndex : 0;
+            next.splice(insertAt, 0, restored);
+            setSourceStatus(next.length ? "ready" : "empty");
+            return next;
+          });
+        }
+      } finally {
+        inFlightSourceDeletesRef.current.delete(sourceId);
+        setDeletingSourceId(null);
+      }
+    },
+    [],
+  );
 
   const handleRenameSession = useCallback(async (sessionId: string, title: string) => {
+    const trimmed = title.trim();
+    if (!trimmed) return false;
+
+    let previousTitle: string | undefined;
+    setRecentSessionRows((current) =>
+      current.map((session) => {
+        if (session.id === sessionId) {
+          previousTitle = session.title;
+          return { ...session, title: trimmed, title_status: "generated" as const };
+        }
+        return session;
+      }),
+    );
+
     try {
-      const updated = await renameChatSession(sessionId, title);
+      const updated = await renameChatSession(sessionId, trimmed);
       setRecentSessionRows((current) =>
         current.map((session) => (session.id === sessionId ? { ...session, title: updated.title } : session)),
       );
       return true;
     } catch {
+      if (previousTitle !== undefined) {
+        const fallback = previousTitle;
+        setRecentSessionRows((current) =>
+          current.map((session) => (session.id === sessionId ? { ...session, title: fallback } : session)),
+        );
+      }
       return false;
     }
   }, []);
 
-  const handleDeleteSession = useCallback(async (sessionId: string) => {
-    if (deletingSessionId) return;
+  const handleDeleteSession = useCallback(
+    async (sessionId: string) => {
+      if (inFlightSessionDeletesRef.current.has(sessionId)) return;
 
-    setDeletingSessionId(sessionId);
-    try {
-      await deleteChatSession(sessionId);
-      setRecentSessionRows((current) => current.filter((session) => session.id !== sessionId));
-      await refreshRecentChats();
-    } catch {
-    } finally {
-      setDeletingSessionId(null);
+      inFlightSessionDeletesRef.current.add(sessionId);
+      let removedSession: ChatSessionSummary | undefined;
+      let removedIndex = -1;
+
+      // Instant optimistic removal from the sidebar
+      setRecentSessionRows((current) => {
+        removedIndex = current.findIndex((session) => session.id === sessionId);
+        if (removedIndex !== -1) {
+          removedSession = current[removedIndex];
+        }
+        return current.filter((session) => session.id !== sessionId);
+      });
+
+      if (activeSessionId === sessionId) {
+        setActiveSessionId(null);
+      }
+
+      lifecycleHandlersRef.current.forEach((handlers) => {
+        handlers.onSessionDeleted?.(sessionId);
+      });
+
+      try {
+        await deleteChatSession(sessionId);
+      } catch {
+        if (removedSession) {
+          const restored = removedSession;
+          setRecentSessionRows((current) => {
+            if (current.some((s) => s.id === sessionId)) return current;
+            const next = [...current];
+            const insertAt = removedIndex >= 0 && removedIndex <= next.length ? removedIndex : 0;
+            next.splice(insertAt, 0, restored);
+            return next;
+          });
+        }
+      } finally {
+        inFlightSessionDeletesRef.current.delete(sessionId);
+        setDeletingSessionId(null);
+      }
+    },
+    [activeSessionId],
+  );
+
+  const openUploadModal = useCallback((target: "personal" | "knowledge_base" = "personal") => {
+    setUploadTarget(target);
+    setIsUploadOpen(true);
+  }, []);
+
+  const handleUploadToast = useCallback(
+    (toast: UploadToastPayload) => {
+      if (toast.documentId) {
+        refreshSources({ force: true }).catch(() => {});
+      }
+      setUploadToasts((current) => {
+        const existing = current.find((item) => item.toastId === toast.toastId);
+        return [
+          ...current.filter((item) => item.toastId !== toast.toastId),
+          {
+            toastId: toast.toastId,
+            documentId: toast.documentId ?? existing?.documentId,
+            filename: toast.filename,
+            queuedAt: toast.queuedAt ?? existing?.queuedAt ?? Date.now(),
+            status: toast.status,
+            errorMessage: toast.errorMessage,
+          },
+        ];
+      });
+    },
+    [refreshSources],
+  );
+
+  const focusDocumentInChat = useCallback(
+    (doc: FocusedDocument) => {
+      setFocusedDocument(doc);
+      if (pathname !== "/chat") {
+        router.push("/chat");
+      }
+    },
+    [pathname, router],
+  );
+
+  const handleNewChatClick = useCallback(() => {
+    setActiveSessionId(null);
+    lifecycleHandlersRef.current.forEach((handlers) => {
+      handlers.onNewChat?.();
+    });
+    if (pathname !== "/chat") {
+      router.push("/chat");
     }
-  }, [deletingSessionId, refreshRecentChats]);
+  }, [pathname, router]);
+
+  const workspaceContextValue = useMemo<WorkspaceContextValue>(
+    () => ({
+      sources,
+      setSources,
+      sourceStatus,
+      setSourceStatus,
+      refreshSources,
+      handleDeleteSource,
+      deletingSourceId,
+      recentSessionRows,
+      setRecentSessionRows,
+      activeSessionId,
+      setActiveSessionId,
+      refreshRecentChats,
+      handleDeleteSession,
+      handleRenameSession,
+      deletingSessionId,
+      isAdmin,
+      focusedDocument,
+      setFocusedDocument,
+      focusDocumentInChat,
+      openUploadModal,
+      handleUploadToast,
+      registerSessionLifecycle,
+    }),
+    [
+      activeSessionId,
+      deletingSessionId,
+      deletingSourceId,
+      focusDocumentInChat,
+      focusedDocument,
+      handleDeleteSession,
+      handleDeleteSource,
+      handleRenameSession,
+      handleUploadToast,
+      isAdmin,
+      openUploadModal,
+      recentSessionRows,
+      refreshRecentChats,
+      refreshSources,
+      registerSessionLifecycle,
+      sourceStatus,
+      sources,
+    ],
+  );
 
   if (isLoaded && (!isSignedIn || !user)) return null;
 
   return (
-    <AcademicWorkspace
-      groups={sourceGroups}
-      recentChats={recentChats}
-      sourceStatus={sourceStatus}
-      deletingSourceId={deletingSourceId}
-      deletingSessionId={deletingSessionId}
-      onDeleteSource={handleDeleteSource}
-      onDeleteSession={handleDeleteSession}
-      onRenameSession={handleRenameSession}
-      onOpenSession={(sessionId) => router.push(`/chat?session=${encodeURIComponent(sessionId)}`)}
-      onNewChat={() => router.push("/chat")}
-      onOpenUpload={() => {
-        setUploadTarget("personal");
-        setIsUploadOpen(true);
-      }}
-      onOpenKnowledgeBaseUpload={isAdmin ? () => {
-        setUploadTarget("knowledge_base");
-        setIsUploadOpen(true);
-      } : undefined}
-      canManageKnowledgeBase={isAdmin}
-    >
-      {children}
-      <UploadModal
-        isOpen={isUploadOpen}
-        onClose={() => {
-          setIsUploadOpen(false);
-          setUploadTarget("personal");
-        }}
-        uploadTarget={uploadTarget}
-        onUploadToast={(toast) => {
-          if (toast.documentId) {
-            refreshSources({ force: true }).catch(() => {});
+    <WorkspaceContext.Provider value={workspaceContextValue}>
+      <AcademicWorkspace
+        groups={sourceGroups}
+        recentChats={recentChats}
+        sourceStatus={sourceStatus}
+        deletingSourceId={deletingSourceId}
+        deletingSessionId={deletingSessionId}
+        focusedSourceId={focusedDocument?.id ?? null}
+        onSelectSource={(source) => {
+          if (source.status === "indexed") {
+            focusDocumentInChat({ id: source.id, filename: source.filename });
           }
-          setUploadToasts((current) => {
-            const existing = current.find((item) => item.toastId === toast.toastId);
-            return [
-              ...current.filter((item) => item.toastId !== toast.toastId),
-              {
-                toastId: toast.toastId,
-                documentId: toast.documentId ?? existing?.documentId,
-                filename: toast.filename,
-                queuedAt: toast.queuedAt ?? existing?.queuedAt ?? Date.now(),
-                status: toast.status,
-                errorMessage: toast.errorMessage,
-              },
-            ];
-          });
         }}
-        completedDocumentIds={completedDocumentIds}
-        failedDocuments={failedDocuments}
-      />
-      <IndexingToast toasts={uploadToasts} onDismiss={(toastId) => setUploadToasts((current) => current.filter((toast) => toast.toastId !== toastId))} />
-    </AcademicWorkspace>
+        onDeleteSource={handleDeleteSource}
+        onDeleteSession={handleDeleteSession}
+        onRenameSession={handleRenameSession}
+        onOpenSession={(sessionId) => router.push(`/chat?session=${encodeURIComponent(sessionId)}`)}
+        onNewChat={handleNewChatClick}
+        onOpenUpload={() => openUploadModal("personal")}
+        onOpenKnowledgeBaseUpload={isAdmin ? () => openUploadModal("knowledge_base") : undefined}
+        canManageKnowledgeBase={isAdmin}
+      >
+        {children}
+        <UploadModal
+          isOpen={isUploadOpen}
+          onClose={() => {
+            setIsUploadOpen(false);
+            setUploadTarget("personal");
+          }}
+          uploadTarget={uploadTarget}
+          onUploadToast={handleUploadToast}
+          completedDocumentIds={completedDocumentIds}
+          failedDocuments={failedDocuments}
+        />
+        <IndexingToast
+          toasts={uploadToasts}
+          onDismiss={(toastId) => setUploadToasts((current) => current.filter((toast) => toast.toastId !== toastId))}
+        />
+      </AcademicWorkspace>
+    </WorkspaceContext.Provider>
   );
 }
