@@ -7,6 +7,7 @@ import { BrandMark } from "../ui/BrandMark";
 type ChatWelcomeProps = {
   disabled?: boolean;
   hasPersonalSources?: boolean;
+  includeKnowledgeBase?: boolean;
   isDemo?: boolean;
   onSelect: (question: string) => void;
   onOpenUpload?: () => void;
@@ -15,10 +16,21 @@ type ChatWelcomeProps = {
 export function ChatWelcome({
   disabled = false,
   hasPersonalSources = false,
+  includeKnowledgeBase = true,
   isDemo = false,
   onSelect,
   onOpenUpload,
 }: Readonly<ChatWelcomeProps>) {
+  const description = isDemo
+    ? "Try a question using sample course material. Answers include sources so you can check the details."
+    : !includeKnowledgeBase
+      ? hasPersonalSources
+        ? "Knowledge Base is off — searching only your uploaded notes. Answers include sources so you can check the details."
+        : "Knowledge Base is turned off. Upload your own notes to ground answers in your files, or re-enable Knowledge Base below."
+      : hasPersonalSources
+        ? "Ask a question about your notes, or try one of these prompts. Answers include sources so you can check the details."
+        : "Try a question about the shared course material, or upload your own notes to get answers grounded in your files.";
+
   return (
     <section className="mx-auto my-0 flex w-full min-w-0 flex-col items-center px-0 py-0 text-center lg:max-w-4xl lg:px-4">
       <BrandMark size="lg" className="mb-5" />
@@ -27,11 +39,7 @@ export function ChatWelcome({
         What would you like to learn today?
       </h1>
       <p className="mt-4 w-full max-w-full text-sm leading-7 text-slate-400 md:text-base lg:max-w-2xl">
-        {isDemo
-          ? "Try a question using sample course material. Answers include sources so you can check the details."
-          : hasPersonalSources
-            ? "Ask a question about your notes, or try one of these prompts. Answers include sources so you can check the details."
-            : "Try a question about the shared course material, or upload your own notes to get answers grounded in your files."}
+        {description}
       </p>
 
       {!isDemo && !hasPersonalSources && (

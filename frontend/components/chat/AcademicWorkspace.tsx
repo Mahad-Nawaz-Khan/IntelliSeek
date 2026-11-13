@@ -16,6 +16,8 @@ type AcademicWorkspaceProps = {
   deletingSourceId?: string | null;
   deletingSessionId?: string | null;
   focusedSourceId?: string | null;
+  includeKnowledgeBase?: boolean;
+  onToggleKnowledgeBase?: () => void;
   onSelectSource?: (source: KnowledgeSource) => void;
   onDeleteSource?: (sourceId: string) => void;
   onDeleteSession?: (sessionId: string) => void;
@@ -37,6 +39,8 @@ export function AcademicWorkspace({
   deletingSourceId,
   deletingSessionId,
   focusedSourceId,
+  includeKnowledgeBase = true,
+  onToggleKnowledgeBase,
   onSelectSource,
   onDeleteSource,
   onDeleteSession,
@@ -82,6 +86,8 @@ export function AcademicWorkspace({
             deletingSourceId={deletingSourceId}
             deletingSessionId={deletingSessionId}
             focusedSourceId={focusedSourceId}
+            includeKnowledgeBase={includeKnowledgeBase}
+            onToggleKnowledgeBase={onToggleKnowledgeBase}
             onSelectSource={onSelectSource}
             onDeleteSource={onDeleteSource}
             onDeleteSession={onDeleteSession}
@@ -105,6 +111,8 @@ export function AcademicWorkspace({
               deletingSourceId={deletingSourceId}
               deletingSessionId={deletingSessionId}
               focusedSourceId={focusedSourceId}
+              includeKnowledgeBase={includeKnowledgeBase}
+              onToggleKnowledgeBase={onToggleKnowledgeBase}
               onClose={() => setIsSidebarOpen(false)}
               onSelectSource={
                 onSelectSource

@@ -4,7 +4,7 @@ import { embedText } from "./embeddings";
 import { matchUserChunks, matchUserMicroChunks, type RetrievedChunk } from "./vector-store";
 import { getSupabaseServiceClient } from "../supabase";
 import { DEMO_USER_ID } from "../env";
-import { accessibleDocumentFilter, filterUuids, toSafeLikeTerm } from "../postgrest-safe";
+import { applyDocumentScopeFilter, assertUuid, filterUuids, toSafeLikeTerm } from "../postgrest-safe";
 
 const DEFAULT_TOP_K = 10;
 /** Floor for how many rows the vector search returns before re-ranking. */
@@ -43,6 +43,11 @@ const NEIGHBOR_SCORE_FLOOR = 0.5;
 
 export type RetrievedContext = RetrievedChunk;
 
+export type RetrievalScopeOptions = {
+  includeKnowledgeBase?: boolean;
+  /** Optional pre-resolved personal indexed document ids to avoid duplicate lookups across parallel strategies. */
+  personalDocumentIds?: string[];
+};
 
 type IndexedDocumentRow = {
   id: string;
@@ -64,9 +69,79 @@ type DocumentChunkRow = {
   } | null;
 };
 
-function applyAccessibleDocumentFilter<T>(query: T, userId: string): T {
-  return (query as { or: (filters: string, options?: { foreignTable?: string }) => T })
-    .or(accessibleDocumentFilter(userId), { foreignTable: "documents" });
+export async function listPersonalIndexedDocumentIds(
+  userId: string,
+  log?: RequestLogger,
+): Promise<string[]> {
+  const supabase = getSupabaseServiceClient();
+  if (!supabase) {
+    log?.error("retrieval.personal_docs.client_unavailable", { errorCategory: "supabase_query", userId });
+    return [];
+  }
+
+  const safeUserId = assertUuid(userId, "userId");
+  const { data, error } = await supabase
+    .from("documents")
+    .select("id")
+    .eq("user_id", safeUserId)
+    .eq("source_scope", "personal")
+    .eq("processing_status", "indexed")
+    .order("created_at", { ascending: false })
+    .limit(500);
+
+  if (error) {
+    log?.error("retrieval.personal_docs.failed", { errorCategory: "supabase_query", userId, error });
+    return [];
+  }
+
+  return ((data ?? []) as Array<{ id: string }>).map((row) => row.id);
+}
+
+type ResolvedRpcScope =
+  | { skip: true }
+  | { skip: false; documentIds?: string[]; strictDocumentIds: boolean };
+
+async function resolveRpcScopedDocumentIds(
+  userId: string,
+  requestedDocumentIds: string[],
+  options: RetrievalScopeOptions,
+  maxHinted?: number,
+  log?: RequestLogger,
+): Promise<ResolvedRpcScope> {
+  const cleanHinted = filterUuids(requestedDocumentIds);
+  const hintedIds = typeof maxHinted === "number" ? cleanHinted.slice(0, maxHinted) : cleanHinted;
+  const includeKnowledgeBase = options.includeKnowledgeBase !== false;
+
+  if (includeKnowledgeBase) {
+    return {
+      skip: false,
+      documentIds: hintedIds.length ? hintedIds : undefined,
+      strictDocumentIds: false,
+    };
+  }
+
+  const personalIds = options.personalDocumentIds ?? await listPersonalIndexedDocumentIds(userId, log);
+  if (!personalIds.length) {
+    return { skip: true };
+  }
+
+  if (hintedIds.length) {
+    const personalSet = new Set(personalIds);
+    const allowed = hintedIds.filter((id) => personalSet.has(id));
+    if (!allowed.length) return { skip: true };
+    return { skip: false, documentIds: allowed, strictDocumentIds: true };
+  }
+
+  return { skip: false, documentIds: personalIds, strictDocumentIds: true };
+}
+
+function enforceAllowedDocuments<T extends { document_id: string }>(
+  rows: T[],
+  scope: Extract<ResolvedRpcScope, { skip: false }>,
+): T[] {
+  if (!scope.strictDocumentIds || !scope.documentIds) return rows;
+  const allowedSet = new Set(scope.documentIds);
+  return rows.filter((row) => allowedSet.has(row.document_id));
 }
 
 const SUMMARY_INTENT_PATTERN = /\b(summarize|summerize|summarise|summary|summery|overview|outline|key points|main points|topics covered)\b/i;
@@ -237,37 +312,49 @@ export async function retrieveContext(
   limit = DEFAULT_TOP_K,
   log?: RequestLogger,
   documentIds: string[] = [],
+  options: RetrievalScopeOptions = {},
 ): Promise<RetrievedContext[]> {
   const startedAt = Date.now();
   const candidateLimit = Math.min(
     Math.max(limit * 3, SEMANTIC_CANDIDATE_FLOOR),
     SEMANTIC_CANDIDATE_CEILING,
   );
-  const scopedDocumentIds = filterUuids(documentIds);
+  const scope = await resolveRpcScopedDocumentIds(userId, documentIds, options, undefined, log);
+  if (scope.skip) {
+    log?.info("retrieval.semantic.skipped_empty_scope", {
+      userId,
+      includeKnowledgeBase: options.includeKnowledgeBase !== false,
+    });
+    return [];
+  }
+
   log?.info("retrieval.semantic.start", {
     userId,
     limit,
     candidateLimit,
-    documentCount: scopedDocumentIds.length,
+    documentCount: scope.documentIds?.length ?? 0,
+    includeKnowledgeBase: options.includeKnowledgeBase !== false,
     questionLength: question.length,
   });
   const queryEmbedding = await embedText(question, log);
+  const rpcOptions = {
+    documentIds: scope.documentIds,
+    strictDocumentIds: scope.strictDocumentIds,
+  };
   const [candidates, microCandidates] = await Promise.all([
-    matchUserChunks(userId, queryEmbedding, candidateLimit, log, {
-      documentIds: scopedDocumentIds,
-    }),
-    matchUserMicroChunks(userId, queryEmbedding, candidateLimit, log, {
-      documentIds: scopedDocumentIds,
-    }),
+    matchUserChunks(userId, queryEmbedding, candidateLimit, log, rpcOptions),
+    matchUserMicroChunks(userId, queryEmbedding, candidateLimit, log, rpcOptions),
   ]);
-  const combinedCandidates = dedupeContext([...microCandidates, ...candidates]).sort(
-    (a, b) => b.score - a.score,
-  );
+  const combinedCandidates = enforceAllowedDocuments(
+    dedupeContext([...microCandidates, ...candidates]),
+    scope,
+  ).sort((a, b) => b.score - a.score);
   const context = await expandContextWithNeighbors(
     userId,
     combinedCandidates.slice(0, limit),
     Math.min(limit + 4, MAX_CONTEXT_CHUNKS),
     log,
+    options,
   );
   log?.info("retrieval.semantic.complete", {
     userId,
@@ -285,7 +372,13 @@ export async function retrieveKeywordContext(
   limit = DEFAULT_TOP_K,
   log?: RequestLogger,
   documentIds: string[] = [],
+  options: RetrievalScopeOptions = {},
 ): Promise<RetrievedContext[]> {
+  const includeKnowledgeBase = options.includeKnowledgeBase !== false;
+  if (!includeKnowledgeBase && options.personalDocumentIds && options.personalDocumentIds.length === 0) {
+    return [];
+  }
+
   const supabase = getSupabaseServiceClient();
   if (!supabase) {
     log?.error("retrieval.keyword.client_unavailable", { errorCategory: "supabase_query", userId });
@@ -303,6 +396,7 @@ export async function retrieveKeywordContext(
     limit,
     termCount: terms.length,
     documentCount: uniqueDocumentIds.length,
+    includeKnowledgeBase,
   });
 
   let query = supabase
@@ -313,7 +407,7 @@ export async function retrieveKeywordContext(
     .order("chunk_index", { ascending: true })
     .limit(Math.min(Math.max(limit * 2, 8), 20));
 
-  query = applyAccessibleDocumentFilter(query, userId);
+  query = applyDocumentScopeFilter(query, userId, includeKnowledgeBase, { foreignTable: "documents" });
 
   if (uniqueDocumentIds.length) query = query.in("document_id", uniqueDocumentIds);
 
@@ -347,7 +441,7 @@ export async function retrieveKeywordContext(
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
 
-  const context = await expandContextWithNeighbors(userId, scored, Math.min(limit + 4, MAX_CONTEXT_CHUNKS), log);
+  const context = await expandContextWithNeighbors(userId, scored, Math.min(limit + 4, MAX_CONTEXT_CHUNKS), log, options);
   log?.info("retrieval.keyword.complete", {
     userId,
     limit,
@@ -363,11 +457,13 @@ export async function expandContextWithNeighbors(
   context: RetrievedContext[],
   limit = MAX_CONTEXT_CHUNKS,
   log?: RequestLogger,
+  options: RetrievalScopeOptions = {},
 ): Promise<RetrievedContext[]> {
   const supabase = getSupabaseServiceClient();
   const seeds = dedupeContext(context).slice(0, limit);
   if (!supabase || !seeds.length) return seeds;
 
+  const includeKnowledgeBase = options.includeKnowledgeBase !== false;
   const neighborLookups = new Map<string, Set<number>>();
   seeds.forEach((chunk) => {
     const indexes = neighborLookups.get(chunk.document_id) ?? new Set<number>();
@@ -386,7 +482,7 @@ export async function expandContextWithNeighbors(
       .in("chunk_index", [...indexes])
       .order("chunk_index", { ascending: true });
 
-    const { data, error } = await applyAccessibleDocumentFilter(query, userId);
+    const { data, error } = await applyDocumentScopeFilter(query, userId, includeKnowledgeBase, { foreignTable: "documents" });
 
     if (error) {
       log?.warn("retrieval.neighbors.failed", { errorCategory: "supabase_query", userId, documentId, error });
@@ -425,6 +521,7 @@ export async function retrieveFullTextContext(
   limit = DEFAULT_TOP_K,
   log?: RequestLogger,
   documentIds: string[] = [],
+  options: RetrievalScopeOptions = {},
 ): Promise<RetrievedContext[]> {
   const supabase = getSupabaseServiceClient();
   if (!supabase) return [];
@@ -432,14 +529,16 @@ export async function retrieveFullTextContext(
   const terms = extractKeywordTerms(question);
   if (!terms.length) return [];
 
+  const scope = await resolveRpcScopedDocumentIds(userId, documentIds, options, 8, log);
+  if (scope.skip) return [];
+
   const startedAt = Date.now();
-  const uniqueDocumentIds = filterUuids(documentIds).slice(0, 8);
 
   const { data, error } = await supabase.rpc("fulltext_search_chunks", {
     search_query: question.trim(),
     match_user_id: userId,
     match_count: limit * 2,
-    match_document_ids: uniqueDocumentIds.length ? uniqueDocumentIds : null,
+    match_document_ids: scope.documentIds ?? null,
   });
 
   if (error) {
@@ -456,20 +555,24 @@ export async function retrieveFullTextContext(
     rank: number | null;
   };
 
-  const scored = ((data ?? []) as FullTextRpcRow[]).map((row) => ({
-    chunk_id: row.chunk_id,
-    document_id: row.document_id,
-    filename: row.filename ?? "Uploaded document",
-    text_content: row.text_content,
-    chunk_index: row.chunk_index,
-    score: Math.min(KEYWORD_SCORE_FLOOR + (row.rank ?? 0) * 1.5, KEYWORD_SCORE_CEILING),
-  }));
+  const scored = enforceAllowedDocuments(
+    ((data ?? []) as FullTextRpcRow[]).map((row) => ({
+      chunk_id: row.chunk_id,
+      document_id: row.document_id,
+      filename: row.filename ?? "Uploaded document",
+      text_content: row.text_content,
+      chunk_index: row.chunk_index,
+      score: Math.min(KEYWORD_SCORE_FLOOR + (row.rank ?? 0) * 1.5, KEYWORD_SCORE_CEILING),
+    })),
+    scope,
+  );
 
   const context = await expandContextWithNeighbors(
     userId,
     scored.slice(0, limit),
     Math.min(limit + 4, MAX_CONTEXT_CHUNKS),
     log,
+    options,
   );
   log?.info("retrieval.fulltext.complete", {
     userId,
@@ -487,22 +590,33 @@ export async function retrieveContextFromDocumentIds(
   documentIds: string[],
   limit = DEFAULT_TOP_K,
   log?: RequestLogger,
+  options: RetrievalScopeOptions = {},
 ): Promise<RetrievedContext[]> {
   const uniqueDocumentIds = filterUuids(documentIds);
   if (!uniqueDocumentIds.length) return [];
+
+  const includeKnowledgeBase = options.includeKnowledgeBase !== false;
+  const personalDocumentIds = !includeKnowledgeBase
+    ? options.personalDocumentIds ?? await listPersonalIndexedDocumentIds(userId, log)
+    : undefined;
+  const scopedOptions: RetrievalScopeOptions = {
+    includeKnowledgeBase,
+    personalDocumentIds,
+  };
 
   log?.info("retrieval.semantic_documents.start", {
     userId,
     documentCount: uniqueDocumentIds.length,
     limit,
+    includeKnowledgeBase,
     questionLength: question.length,
   });
 
   // Parallel 3-way retrieval: semantic vector + keyword ilike + PostgreSQL full-text search
   const [semanticContext, keywordContext, fullTextContext] = await Promise.all([
-    retrieveContext(question, userId, limit, log, uniqueDocumentIds),
-    retrieveKeywordContext(question, userId, limit, log, uniqueDocumentIds),
-    retrieveFullTextContext(question, userId, limit, log, uniqueDocumentIds),
+    retrieveContext(question, userId, limit, log, uniqueDocumentIds, scopedOptions),
+    retrieveKeywordContext(question, userId, limit, log, uniqueDocumentIds, scopedOptions),
+    retrieveFullTextContext(question, userId, limit, log, uniqueDocumentIds, scopedOptions),
   ]);
   const context = mergeRetrievedContext(semanticContext, keywordContext, fullTextContext).slice(0, limit);
   const relevant = filterRelevantContext(context, log, question.length);
@@ -550,19 +664,29 @@ export function isDocumentSummaryRequest(question: string) {
   return SUMMARY_INTENT_PATTERN.test(normalized);
 }
 
-export async function hasIndexedDocuments(userId: string, log?: RequestLogger) {
+export async function hasIndexedDocuments(
+  userId: string,
+  log?: RequestLogger,
+  options: RetrievalScopeOptions = {},
+) {
+  const includeKnowledgeBase = options.includeKnowledgeBase !== false;
+  if (!includeKnowledgeBase && options.personalDocumentIds) {
+    return options.personalDocumentIds.length > 0;
+  }
+
   const supabase = getSupabaseServiceClient();
   if (!supabase) {
     log?.error("retrieval.indexed_documents.client_unavailable", { errorCategory: "supabase_query", userId });
     return false;
   }
 
-  const { data, error } = await supabase
+  const baseQuery = supabase
     .from("documents")
     .select("id")
-    .or(accessibleDocumentFilter(userId))
     .eq("processing_status", "indexed")
     .limit(1);
+
+  const { data, error } = await applyDocumentScopeFilter(baseQuery, userId, includeKnowledgeBase);
 
   if (error) {
     log?.error("retrieval.indexed_documents.failed", { errorCategory: "supabase_query", userId, error });
@@ -570,7 +694,7 @@ export async function hasIndexedDocuments(userId: string, log?: RequestLogger) {
   }
 
   const hasDocuments = Boolean(data?.length);
-  log?.info("retrieval.indexed_documents.complete", { userId, hasDocuments });
+  log?.info("retrieval.indexed_documents.complete", { userId, hasDocuments, includeKnowledgeBase });
   return hasDocuments;
 }
 
@@ -579,7 +703,13 @@ export async function retrieveDocumentContextByIds(
   documentIds: string[],
   limit = 10,
   log?: RequestLogger,
+  options: RetrievalScopeOptions = {},
 ): Promise<RetrievedContext[]> {
+  const includeKnowledgeBase = options.includeKnowledgeBase !== false;
+  if (!includeKnowledgeBase && options.personalDocumentIds && options.personalDocumentIds.length === 0) {
+    return [];
+  }
+
   const supabase = getSupabaseServiceClient();
   if (!supabase) {
     log?.error("retrieval.documents.client_unavailable", { errorCategory: "supabase_query", userId });
@@ -593,14 +723,24 @@ export async function retrieveDocumentContextByIds(
   }
 
   const startedAt = Date.now();
-  log?.info("retrieval.documents.start", { userId, documentCount: uniqueDocumentIds.length, limit });
+  log?.info("retrieval.documents.start", {
+    userId,
+    documentCount: uniqueDocumentIds.length,
+    limit,
+    includeKnowledgeBase,
+  });
 
-  const { data: documents, error: documentsError } = await supabase
+  const lookupQuery = supabase
     .from("documents")
     .select("id, filename, source_scope")
-    .or(accessibleDocumentFilter(userId))
     .eq("processing_status", "indexed")
     .in("id", uniqueDocumentIds);
+
+  const { data: documents, error: documentsError } = await applyDocumentScopeFilter(
+    lookupQuery,
+    userId,
+    includeKnowledgeBase,
+  );
 
   if (documentsError || !documents?.length) {
     log?.error("retrieval.documents.lookup_failed", {
@@ -682,7 +822,13 @@ export async function retrieveRepresentativeDocumentContext(
   limit = 8,
   question = "",
   log?: RequestLogger,
+  options: RetrievalScopeOptions = {},
 ): Promise<RetrievedContext[]> {
+  const includeKnowledgeBase = options.includeKnowledgeBase !== false;
+  if (!includeKnowledgeBase && options.personalDocumentIds && options.personalDocumentIds.length === 0) {
+    return [];
+  }
+
   const supabase = getSupabaseServiceClient();
   if (!supabase) {
     log?.error("retrieval.representative.client_unavailable", { errorCategory: "supabase_query", userId });
@@ -690,15 +836,25 @@ export async function retrieveRepresentativeDocumentContext(
   }
 
   const startedAt = Date.now();
-  log?.info("retrieval.representative.start", { userId, limit, questionLength: question.length });
+  log?.info("retrieval.representative.start", {
+    userId,
+    limit,
+    questionLength: question.length,
+    includeKnowledgeBase,
+  });
 
-  const { data: documents, error: documentsError } = await supabase
+  const baseQuery = supabase
     .from("documents")
     .select("id, filename, source_scope")
-    .or(accessibleDocumentFilter(userId))
     .eq("processing_status", "indexed")
     .order("created_at", { ascending: false })
     .limit(12);
+
+  const { data: documents, error: documentsError } = await applyDocumentScopeFilter(
+    baseQuery,
+    userId,
+    includeKnowledgeBase,
+  );
 
   if (documentsError || !documents?.length) {
     log?.error("retrieval.representative.documents_failed", {

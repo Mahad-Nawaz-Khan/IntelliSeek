@@ -18,6 +18,7 @@ import {
   filterRelevantContext,
   hasIndexedDocuments,
   isDocumentSummaryRequest,
+  listPersonalIndexedDocumentIds,
   mergeRetrievedContext,
   retrieveContext,
   retrieveContextFromDocumentIds,
@@ -25,6 +26,7 @@ import {
   retrieveKeywordContext,
   retrieveRepresentativeDocumentContext,
   validateQuestion,
+  type RetrievalScopeOptions,
   type RetrievedContext,
 } from "../../../lib/server/rag/retriever";
 import { getSupabaseServiceClient } from "../../../lib/server/supabase";
@@ -35,6 +37,7 @@ type ChatRequestBody = {
   question?: unknown;
   retrievalHint?: unknown;
   chatSessionId?: unknown;
+  includeKnowledgeBase?: unknown;
 };
 
 type ChatSessionRow = {
@@ -94,6 +97,12 @@ function parseRetrievalHint(value: unknown): ChatRetrievalHint | undefined {
   }
 
   return undefined;
+}
+
+function parseIncludeKnowledgeBase(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (typeof value !== "boolean") throw new Error("Invalid knowledge base availability flag");
+  return value;
 }
 
 function isLikelyUploadedMaterialRequest(question: string) {
@@ -397,12 +406,13 @@ async function retrieveInitialContext(
   userId: string,
   question: string,
   log?: RequestLogger,
+  retrievalOptions: RetrievalScopeOptions = {},
 ): Promise<RetrievedContext[]> {
   if (retrievalHint?.kind === "document") {
-    return retrieveDocumentContextByIds(userId, [retrievalHint.documentId], 12, log);
+    return retrieveDocumentContextByIds(userId, [retrievalHint.documentId], 12, log, retrievalOptions);
   }
   if (retrievalHint?.kind === "topic") {
-    return retrieveContextFromDocumentIds(`${retrievalHint.topic}\n${question}`, userId, retrievalHint.documentIds, 8, log);
+    return retrieveContextFromDocumentIds(`${retrievalHint.topic}\n${question}`, userId, retrievalHint.documentIds, 8, log, retrievalOptions);
   }
   return [];
 }
@@ -412,10 +422,11 @@ async function resolveJobContext(options: {
   userId: string;
   question: string;
   isSummaryRequest: boolean;
+  retrievalOptions: RetrievalScopeOptions;
   log: RequestLogger;
 }): Promise<RetrievedContext[]> {
-  const { retrievalHint, userId, question, isSummaryRequest, log } = options;
-  let relevantContext = await retrieveInitialContext(retrievalHint, userId, question, log);
+  const { retrievalHint, userId, question, isSummaryRequest, retrievalOptions, log } = options;
+  let relevantContext = await retrieveInitialContext(retrievalHint, userId, question, log, retrievalOptions);
 
   if (retrievalHint) {
     log.info("retrieval.strategy.complete", {
@@ -427,7 +438,7 @@ async function resolveJobContext(options: {
 
   if (!relevantContext.length && retrievalHint?.kind === "topic") {
     log.info("retrieval.strategy.start", { userId, strategy: "hinted_topic_fallback_documents" });
-    relevantContext = await retrieveDocumentContextByIds(userId, retrievalHint.documentIds, 10, log);
+    relevantContext = await retrieveDocumentContextByIds(userId, retrievalHint.documentIds, 10, log, retrievalOptions);
     log.info("retrieval.strategy.complete", {
       userId,
       strategy: "hinted_topic_fallback_documents",
@@ -437,7 +448,7 @@ async function resolveJobContext(options: {
 
   if (!relevantContext.length && isSummaryRequest) {
     log.info("retrieval.strategy.start", { userId, strategy: "representative_summary" });
-    relevantContext = await retrieveRepresentativeDocumentContext(userId, 10, question, log);
+    relevantContext = await retrieveRepresentativeDocumentContext(userId, 10, question, log, retrievalOptions);
     log.info("retrieval.strategy.complete", {
       userId,
       strategy: "representative_summary",
@@ -448,8 +459,8 @@ async function resolveJobContext(options: {
   if (!relevantContext.length) {
     log.info("retrieval.strategy.start", { userId, strategy: "hybrid_vector_keyword" });
     const [semanticContext, keywordContext] = await Promise.all([
-      retrieveContext(question, userId, 10, log),
-      retrieveKeywordContext(question, userId, 8, log),
+      retrieveContext(question, userId, 10, log, [], retrievalOptions),
+      retrieveKeywordContext(question, userId, 8, log, [], retrievalOptions),
     ]);
     relevantContext = filterRelevantContext(mergeRetrievedContext(semanticContext, keywordContext), log);
     log.info("retrieval.strategy.complete", {
@@ -469,11 +480,12 @@ async function selectAnswerModeAndStream(options: {
   conversationContext: ConversationTurn[];
   retrievalHint?: ChatRetrievalHint;
   isSummaryRequest: boolean;
+  retrievalOptions: RetrievalScopeOptions;
   log: RequestLogger;
 }): Promise<{ events: AsyncGenerator<AgentAnswerStreamEvent>; answerMode: "grounded" | "agent" | "general" | "static-warning" }> {
-  const { question, userId, relevantContext, conversationContext, retrievalHint, isSummaryRequest, log } = options;
+  const { question, userId, relevantContext, conversationContext, retrievalHint, isSummaryRequest, retrievalOptions, log } = options;
 
-  if (!relevantContext.length && isSummaryRequest && !retrievalHint && await hasIndexedDocuments(userId, log)) {
+  if (!relevantContext.length && isSummaryRequest && !retrievalHint && await hasIndexedDocuments(userId, log, retrievalOptions)) {
     return {
       answerMode: "static-warning",
       events: streamStaticAnswer(
@@ -493,14 +505,16 @@ async function selectAnswerModeAndStream(options: {
     log.info("retrieval.strategy.start", { userId, strategy: "agent_fallback" });
     return {
       answerMode: "agent",
-      events: streamAgentAnswer(question, userId, conversationContext),
+      events: streamAgentAnswer(question, userId, conversationContext, retrievalOptions),
     };
   }
 
   log.info("retrieval.strategy.start", { userId, strategy: "general_answer" });
   return {
     answerMode: "general",
-    events: streamGeneralAgentAnswer(question, conversationContext, log),
+    events: streamGeneralAgentAnswer(question, conversationContext, log, {
+      includeKnowledgeBase: retrievalOptions.includeKnowledgeBase,
+    }),
   };
 }
 
@@ -516,9 +530,10 @@ async function runAnswerJob(options: {
   userId: string;
   requestedChatSessionId?: string;
   retrievalHint?: ChatRetrievalHint;
+  includeKnowledgeBase: boolean;
   log: RequestLogger;
 }) {
-  const { send, jobId, question, userId, requestedChatSessionId, retrievalHint, log } = options;
+  const { send, jobId, question, userId, requestedChatSessionId, retrievalHint, includeKnowledgeBase, log } = options;
   try {
     send("job", { jobId });
 
@@ -527,11 +542,19 @@ async function runAnswerJob(options: {
       : await createChatSession(userId, log);
     const conversationContext = await getRecentConversationContext(userId, chatSession.id, log);
     const shouldGenerateTitle = !requestedChatSessionId && chatSession.title_status === "pending";
+    const personalDocumentIds = !includeKnowledgeBase
+      ? await listPersonalIndexedDocumentIds(userId, log)
+      : undefined;
+    const retrievalOptions: RetrievalScopeOptions = {
+      includeKnowledgeBase,
+      personalDocumentIds,
+    };
 
     log.info("retrieval.hint", {
       userId,
       hintKind: retrievalHint?.kind,
       hintedDocumentCount: getHintedDocumentCount(retrievalHint),
+      includeKnowledgeBase,
     });
 
     const isSummaryRequest = isDocumentSummaryRequest(question);
@@ -540,6 +563,7 @@ async function runAnswerJob(options: {
       userId,
       question,
       isSummaryRequest,
+      retrievalOptions,
       log,
     });
 
@@ -550,6 +574,7 @@ async function runAnswerJob(options: {
       conversationContext,
       retrievalHint,
       isSummaryRequest,
+      retrievalOptions,
       log,
     });
 
@@ -613,14 +638,16 @@ export async function POST(request: Request) {
 
   let question: string;
   let requestedChatSessionId: string | undefined;
+  let includeKnowledgeBase: boolean;
   try {
     question = validateQuestion(body.question);
     requestedChatSessionId = parseChatSessionId(body.chatSessionId);
+    includeKnowledgeBase = parseIncludeKnowledgeBase(body.includeKnowledgeBase);
   } catch (error) {
     return failure(400, error instanceof Error ? error.message : "Invalid question", log, { errorCategory: "validation", userId: user.id, error });
   }
 
-  log.info("request.validated", { userId: user.id, questionLength: question.length });
+  log.info("request.validated", { userId: user.id, questionLength: question.length, includeKnowledgeBase });
 
   const retrievalHint = parseRetrievalHint(body.retrievalHint);
 
@@ -646,6 +673,7 @@ export async function POST(request: Request) {
         userId: user.id,
         requestedChatSessionId,
         retrievalHint,
+        includeKnowledgeBase,
         log,
       }).finally(() => {
         try {

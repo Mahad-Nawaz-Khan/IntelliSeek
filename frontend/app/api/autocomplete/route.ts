@@ -1,7 +1,7 @@
 import { SUGGESTIONS } from "../../../components/SuggestedQueries";
 import { getAuthenticatedUser } from "../../../lib/server/auth";
 import { checkRateLimit, getClientIp, rateLimitHeaders, rateLimitResponse } from "../../../lib/server/rate-limit";
-import { accessibleDocumentFilter } from "../../../lib/server/postgrest-safe";
+import { applyDocumentScopeFilter } from "../../../lib/server/postgrest-safe";
 import { extractTopicsFromChunks } from "../../../lib/server/rag/topics";
 import { getSupabaseServiceClient } from "../../../lib/server/supabase";
 import type { AutocompleteSuggestionMetadata, AutocompleteSuggestionType } from "../../../lib/trie-autocomplete";
@@ -53,9 +53,8 @@ type ChunkRow = {
   } | null;
 };
 
-function applyAccessibleDocumentFilter<T>(query: T, userId: string): T {
-  return (query as { or: (filters: string, options?: { foreignTable?: string }) => T })
-    .or(accessibleDocumentFilter(userId), { foreignTable: "documents" });
+function applyScopeToChunkDocuments<T>(query: T, userId: string, includeKnowledgeBase = true): T {
+  return applyDocumentScopeFilter(query, userId, includeKnowledgeBase, { foreignTable: "documents" });
 }
 
 type HistoryRow = {
@@ -239,31 +238,39 @@ export async function GET(request: Request) {
     return Response.json({ ok: false, error: "Supabase service client is not configured" }, { status: 500 });
   }
 
-  const documentsQuery = supabase
+  const includeKnowledgeBase =
+    new URL(request.url).searchParams.get("includeKnowledgeBase") !== "false";
+
+  const documentsQuery = applyDocumentScopeFilter(
+    supabase
       .from("documents")
       .select("id, filename, source_scope")
-      .or(accessibleDocumentFilter(user.id))
       .eq("processing_status", "indexed")
       .order("created_at", { ascending: false })
-      .limit(8);
+      .limit(8),
+    user.id,
+    includeKnowledgeBase,
+  );
   // `user_id` is selected only because the join filters on it; it is never
   // returned to the client.
-  const topicsQuery = applyAccessibleDocumentFilter(
+  const topicsQuery = applyScopeToChunkDocuments(
     supabase
       .from("document_topics")
       .select("id, topic, documents!inner(id, filename, user_id, source_scope)")
       .order("score", { ascending: false })
       .limit(20),
     user.id,
+    includeKnowledgeBase,
   );
 
-  const keyphrasesQuery = applyAccessibleDocumentFilter(
+  const keyphrasesQuery = applyScopeToChunkDocuments(
     supabase
       .from("document_keyphrases")
       .select("id, phrase, score, document_id, documents!inner(id, filename, user_id, source_scope)")
       .order("score", { ascending: false })
       .limit(40),
     user.id,
+    includeKnowledgeBase,
   );
 
   const [documentsResult, topicsResult, keyphrasesResult, historyResult] = await Promise.all([

@@ -24,4 +24,13 @@ describe("user preferences store", () => {
     const reset = resetUserPreferences();
     expect(reset).toEqual(DEFAULT_PREFERENCES);
   });
+
+  it("defaults Knowledge Base availability to enabled and persists toggling it off", () => {
+    expect(DEFAULT_PREFERENCES.includeKnowledgeBase).toBe(true);
+    const updated = updateUserPreferences({ includeKnowledgeBase: false });
+    expect(updated.includeKnowledgeBase).toBe(false);
+
+    const reset = resetUserPreferences();
+    expect(reset.includeKnowledgeBase).toBe(true);
+  });
 });

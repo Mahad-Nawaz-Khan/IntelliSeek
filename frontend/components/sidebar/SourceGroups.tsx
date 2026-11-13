@@ -12,6 +12,8 @@ type SourceGroupsProps = {
   status: "loading" | "ready" | "empty" | "unavailable";
   deletingSourceId?: string | null;
   focusedSourceId?: string | null;
+  includeKnowledgeBase?: boolean;
+  onToggleKnowledgeBase?: () => void;
   onSelectSource?: (source: KnowledgeSource) => void;
   onDeleteSource?: (sourceId: string) => void;
   onOpenUpload?: () => void;
@@ -66,6 +68,7 @@ type SourceGroupListProps = {
   status: "loading" | "ready" | "empty" | "unavailable";
   deletingSourceId?: string | null;
   focusedSourceId?: string | null;
+  isExcluded?: boolean;
   onSelectSource?: (source: KnowledgeSource) => void;
   onDeleteSource?: (sourceId: string) => void;
   canManageKnowledgeBase?: boolean;
@@ -76,6 +79,7 @@ function SourceGroupList({
   status,
   deletingSourceId,
   focusedSourceId,
+  isExcluded = false,
   onSelectSource,
   onDeleteSource,
   canManageKnowledgeBase,
@@ -97,13 +101,13 @@ function SourceGroupList({
   }
 
   return (
-    <ul className="space-y-1.5">
+    <ul className={`space-y-1.5 transition-opacity duration-200 ${isExcluded ? "opacity-50" : ""}`}>
       {group.sources.map((source) => {
         const canDelete =
           (source.sourceType === "uploaded" || (source.sourceType === "knowledge-base" && canManageKnowledgeBase)) &&
           onDeleteSource;
-        const isFocused = focusedSourceId === source.id;
-        const canFocus = source.status === "indexed" && Boolean(onSelectSource);
+        const isFocused = !isExcluded && focusedSourceId === source.id;
+        const canFocus = !isExcluded && source.status === "indexed" && Boolean(onSelectSource);
 
         return (
           <li
@@ -194,6 +198,8 @@ export function SourceGroups({
   status,
   deletingSourceId,
   focusedSourceId,
+  includeKnowledgeBase = true,
+  onToggleKnowledgeBase,
   onSelectSource,
   onDeleteSource,
   onOpenUpload,
@@ -218,35 +224,87 @@ export function SourceGroups({
     <div className="space-y-1.5">
       {groups.map((group) => {
         const isOpen = openGroups.has(group.id);
+        const isKnowledgeBaseGroup = group.id === "knowledge-base";
+        const isExcluded = isKnowledgeBaseGroup && !includeKnowledgeBase;
 
         return (
           <section key={group.id}>
-            <button
-              type="button"
-              onClick={() => toggleGroup(group.id)}
-              className="group/header flex w-full items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-left transition hover:bg-white/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
-              aria-expanded={isOpen}
-            >
-              <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden font-semibold uppercase text-slate-400">
-                <Database className="h-3.5 w-3.5 shrink-0 text-cyan-200" />
-                <span className="block min-w-0 whitespace-nowrap text-[clamp(0.48rem,0.72vw,0.68rem)] leading-4 tracking-[clamp(0.02em,0.18vw,0.16em)]">
-                  {group.title}
-                </span>
-              </span>
-              <span className="relative flex h-5 min-w-7 items-center justify-center">
-                <span className="transition group-hover/header:opacity-0 group-focus-visible/header:opacity-0">
-                  <StatusBadge tone="slate">{group.sources.length}</StatusBadge>
-                </span>
-                <ChevronDown
-                  className={`absolute h-4 w-4 text-slate-400 opacity-0 transition group-hover/header:opacity-100 group-focus-visible/header:opacity-100 ${
-                    isOpen ? "rotate-180 text-cyan-200" : ""
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => toggleGroup(group.id)}
+                className="group/header flex min-w-0 flex-1 items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-left transition hover:bg-white/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
+                aria-expanded={isOpen}
+              >
+                <span
+                  className={`flex min-w-0 flex-1 items-center gap-2 overflow-hidden font-semibold uppercase ${
+                    isExcluded ? "text-slate-500" : "text-slate-400"
                   }`}
-                />
-              </span>
-            </button>
+                >
+                  <Database className={`h-3.5 w-3.5 shrink-0 ${isExcluded ? "text-slate-500" : "text-cyan-200"}`} />
+                  <span className="block min-w-0 truncate whitespace-nowrap text-[clamp(0.48rem,0.72vw,0.68rem)] leading-4 tracking-[clamp(0.02em,0.18vw,0.16em)]">
+                    {group.title}
+                  </span>
+                </span>
+                <span className="relative flex h-5 min-w-6 shrink-0 items-center justify-center">
+                  <span className="transition group-hover/header:opacity-0 group-focus-visible/header:opacity-0">
+                    <StatusBadge tone="slate">{group.sources.length}</StatusBadge>
+                  </span>
+                  <ChevronDown
+                    className={`absolute h-4 w-4 text-slate-400 opacity-0 transition group-hover/header:opacity-100 group-focus-visible/header:opacity-100 ${
+                      isOpen ? "rotate-180 text-cyan-200" : ""
+                    }`}
+                  />
+                </span>
+              </button>
+
+              {isKnowledgeBaseGroup && onToggleKnowledgeBase && (
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={includeKnowledgeBase}
+                  aria-label={
+                    includeKnowledgeBase
+                      ? "Exclude Knowledge Base from chat AI"
+                      : "Include Knowledge Base in chat AI"
+                  }
+                  title={
+                    includeKnowledgeBase
+                      ? "Knowledge Base active in chat (click to turn off)"
+                      : "Knowledge Base off (click to enable in chat)"
+                  }
+                  onClick={onToggleKnowledgeBase}
+                  className={`relative mr-1 inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 ${
+                    includeKnowledgeBase
+                      ? "border-cyan-300/50 bg-cyan-400"
+                      : "border-white/15 bg-slate-800/80"
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full transition-transform duration-200 ${
+                      includeKnowledgeBase ? "translate-x-4.5 bg-slate-950" : "translate-x-0.5 bg-slate-300"
+                    }`}
+                  />
+                </button>
+              )}
+            </div>
 
             {isOpen ? (
               <div className="mt-1.5 pl-2">
+                {isExcluded && (
+                  <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-amber-300/20 bg-amber-400/8 px-2.5 py-1.5 text-[0.68rem] text-amber-100/90">
+                    <span>Off for chat AI</span>
+                    {onToggleKnowledgeBase && (
+                      <button
+                        type="button"
+                        onClick={onToggleKnowledgeBase}
+                        className="font-semibold text-amber-200 underline decoration-amber-300/50 underline-offset-2 transition hover:text-white"
+                      >
+                        Enable
+                      </button>
+                    )}
+                  </div>
+                )}
                 <SourceGroupUploadButton
                   groupId={group.id}
                   canManageKnowledgeBase={canManageKnowledgeBase}
@@ -258,6 +316,7 @@ export function SourceGroups({
                   status={status}
                   deletingSourceId={deletingSourceId}
                   focusedSourceId={focusedSourceId}
+                  isExcluded={isExcluded}
                   onSelectSource={onSelectSource}
                   onDeleteSource={onDeleteSource}
                   canManageKnowledgeBase={canManageKnowledgeBase}

@@ -1,4 +1,4 @@
-import { FileText, Sparkles, X } from "lucide-react";
+import { Database, FileText, Sparkles, X } from "lucide-react";
 
 import type { AutocompleteSuggestion } from "../../lib/trie-autocomplete";
 import { ChatInput } from "../ChatInput";
@@ -17,6 +17,9 @@ type ChatComposerProps = {
   queuedMessages?: QueuedChatMessage[];
   queueLimit?: number;
   focusedDocument?: FocusedDocument | null;
+  includeKnowledgeBase?: boolean;
+  knowledgeBaseCount?: number;
+  onToggleKnowledgeBase?: () => void;
   onClearFocusedDocument?: () => void;
   onSubmit: (question: string, selectedSuggestion?: AutocompleteSuggestion) => boolean;
   onRemoveQueuedMessage?: (queuedMessageId: string) => void;
@@ -31,6 +34,9 @@ export function ChatComposer({
   queuedMessages = [],
   queueLimit = 3,
   focusedDocument = null,
+  includeKnowledgeBase = true,
+  knowledgeBaseCount,
+  onToggleKnowledgeBase,
   onClearFocusedDocument,
   onSubmit,
   onRemoveQueuedMessage,
@@ -129,11 +135,84 @@ export function ChatComposer({
           ))}
         </div>
       )}
+      {onToggleKnowledgeBase && (
+        <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={includeKnowledgeBase}
+            disabled={disabled}
+            onClick={onToggleKnowledgeBase}
+            aria-label={
+              includeKnowledgeBase
+                ? "Knowledge Base enabled — turn off to use only your uploaded documents"
+                : "Knowledge Base disabled — turn on to include Knowledge Base documents"
+            }
+            title={
+              includeKnowledgeBase
+                ? "Knowledge Base context is ON (click to use only your uploaded docs)"
+                : "Knowledge Base context is OFF — answering from your uploaded docs only (click to turn on)"
+            }
+            className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium shadow-lg backdrop-blur-xl transition-all active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 disabled:cursor-not-allowed disabled:opacity-60 ${
+              includeKnowledgeBase
+                ? "border-cyan-300/30 bg-slate-950/85 text-cyan-100 hover:border-cyan-300/50 hover:bg-slate-900/95"
+                : "border-amber-300/30 bg-slate-950/85 text-amber-100 hover:border-amber-300/50 hover:bg-slate-900/95"
+            }`}
+          >
+            <Database
+              className={`h-3.5 w-3.5 shrink-0 transition ${
+                includeKnowledgeBase ? "text-cyan-300" : "text-amber-300"
+              }`}
+            />
+            <span>Knowledge Base</span>
+            {typeof knowledgeBaseCount === "number" && (
+              <span
+                className={`rounded-full px-1.5 py-0.5 text-[0.65rem] font-semibold leading-none ${
+                  includeKnowledgeBase
+                    ? "bg-cyan-300/15 text-cyan-200"
+                    : "bg-white/10 text-slate-400"
+                }`}
+              >
+                {knowledgeBaseCount}
+              </span>
+            )}
+            <span
+              className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full border transition-colors duration-200 ${
+                includeKnowledgeBase
+                  ? "border-cyan-300/50 bg-cyan-400"
+                  : "border-white/15 bg-slate-800/80"
+              }`}
+            >
+              <span
+                className={`inline-block h-2.5 w-2.5 transform rounded-full transition-transform duration-200 ${
+                  includeKnowledgeBase ? "translate-x-3.5 bg-slate-950" : "translate-x-0.5 bg-slate-300"
+                }`}
+              />
+            </span>
+            <span
+              className={`text-[0.68rem] font-semibold uppercase tracking-wider ${
+                includeKnowledgeBase ? "text-cyan-300" : "text-amber-300"
+              }`}
+            >
+              {includeKnowledgeBase ? "On" : "Off"}
+            </span>
+          </button>
+
+          {!includeKnowledgeBase && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-slate-950/85 px-3 py-1 text-[0.7rem] text-slate-300 shadow-lg backdrop-blur-xl">
+              <FileText className="h-3 w-3 text-cyan-300" />
+              Your uploaded docs only
+            </span>
+          )}
+        </div>
+      )}
+
       <ChatInput
         autocompleteSuggestions={autocompleteSuggestions}
         disabled={disabled}
         isResponding={isResponding}
         focusedDocumentName={focusedDocument?.filename}
+        includeKnowledgeBase={includeKnowledgeBase}
         onSubmit={onSubmit}
         onStopResponse={onStopResponse}
         onOpenUpload={onOpenUpload}

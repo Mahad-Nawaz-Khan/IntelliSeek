@@ -27,6 +27,7 @@ import {
   fetchMyRole,
   invalidateDocumentsCache,
 } from "../../lib/documents";
+import { usePreferences } from "../../lib/preferences";
 import { createSourceGroups, type KnowledgeSource } from "../../lib/ui-state";
 import type { UploadToastPayload } from "../../lib/upload-document";
 import { AcademicWorkspace } from "../chat/AcademicWorkspace";
@@ -60,6 +61,8 @@ export type WorkspaceContextValue = {
   handleRenameSession: (sessionId: string, title: string) => Promise<boolean>;
   deletingSessionId: string | null;
   isAdmin: boolean;
+  includeKnowledgeBase: boolean;
+  toggleKnowledgeBase: () => void;
   focusedDocument: FocusedDocument | null;
   setFocusedDocument: Dispatch<SetStateAction<FocusedDocument | null>>;
   focusDocumentInChat: (doc: FocusedDocument) => void;
@@ -82,6 +85,7 @@ export function WorkspaceShell({ children }: Readonly<WorkspaceShellProps>) {
   const router = useRouter();
   const pathname = usePathname();
   const { isLoaded, isSignedIn, user } = useAuth();
+  const { preferences, updatePreference } = usePreferences();
   const [sources, setSources] = useState<KnowledgeSource[]>([]);
   const [sourceStatus, setSourceStatus] = useState<"loading" | "ready" | "empty" | "unavailable">("loading");
   const [recentSessionRows, setRecentSessionRows] = useState<ChatSessionSummary[]>([]);
@@ -366,13 +370,38 @@ export function WorkspaceShell({ children }: Readonly<WorkspaceShellProps>) {
 
   const focusDocumentInChat = useCallback(
     (doc: FocusedDocument) => {
+      const matched = sources.find((source) => source.id === doc.id);
+      if (matched?.sourceType === "knowledge-base" && !preferences.includeKnowledgeBase) {
+        updatePreference("includeKnowledgeBase", true);
+      }
       setFocusedDocument(doc);
       if (pathname !== "/chat") {
         router.push("/chat");
       }
     },
-    [pathname, router],
+    [pathname, preferences.includeKnowledgeBase, router, sources, updatePreference],
   );
+
+  const activeFocusedDocument = useMemo(() => {
+    if (!focusedDocument) return null;
+    if (!preferences.includeKnowledgeBase) {
+      const matched = sources.find((source) => source.id === focusedDocument.id);
+      if (matched?.sourceType === "knowledge-base") return null;
+    }
+    return focusedDocument;
+  }, [focusedDocument, preferences.includeKnowledgeBase, sources]);
+
+  const toggleKnowledgeBase = useCallback(() => {
+    const next = !preferences.includeKnowledgeBase;
+    updatePreference("includeKnowledgeBase", next);
+    if (!next) {
+      setFocusedDocument((current) => {
+        if (!current) return null;
+        const matched = sources.find((source) => source.id === current.id);
+        return matched?.sourceType === "knowledge-base" ? null : current;
+      });
+    }
+  }, [preferences.includeKnowledgeBase, sources, updatePreference]);
 
   const handleNewChatClick = useCallback(() => {
     setActiveSessionId(null);
@@ -402,7 +431,9 @@ export function WorkspaceShell({ children }: Readonly<WorkspaceShellProps>) {
       handleRenameSession,
       deletingSessionId,
       isAdmin,
-      focusedDocument,
+      includeKnowledgeBase: preferences.includeKnowledgeBase,
+      toggleKnowledgeBase,
+      focusedDocument: activeFocusedDocument,
       setFocusedDocument,
       focusDocumentInChat,
       openUploadModal,
@@ -410,23 +441,25 @@ export function WorkspaceShell({ children }: Readonly<WorkspaceShellProps>) {
       registerSessionLifecycle,
     }),
     [
+      activeFocusedDocument,
       activeSessionId,
       deletingSessionId,
       deletingSourceId,
       focusDocumentInChat,
-      focusedDocument,
       handleDeleteSession,
       handleDeleteSource,
       handleRenameSession,
       handleUploadToast,
       isAdmin,
       openUploadModal,
+      preferences.includeKnowledgeBase,
       recentSessionRows,
       refreshRecentChats,
       refreshSources,
       registerSessionLifecycle,
       sourceStatus,
       sources,
+      toggleKnowledgeBase,
     ],
   );
 
@@ -440,8 +473,13 @@ export function WorkspaceShell({ children }: Readonly<WorkspaceShellProps>) {
         sourceStatus={sourceStatus}
         deletingSourceId={deletingSourceId}
         deletingSessionId={deletingSessionId}
-        focusedSourceId={focusedDocument?.id ?? null}
+        focusedSourceId={activeFocusedDocument?.id ?? null}
+        includeKnowledgeBase={preferences.includeKnowledgeBase}
+        onToggleKnowledgeBase={toggleKnowledgeBase}
         onSelectSource={(source) => {
+          if (source.sourceType === "knowledge-base" && !preferences.includeKnowledgeBase) {
+            return;
+          }
           if (source.status === "indexed") {
             focusDocumentInChat({ id: source.id, filename: source.filename });
           }

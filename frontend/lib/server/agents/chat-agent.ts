@@ -12,17 +12,19 @@ import { streamGroqGeneralAnswer, streamGroqGroundedAnswer } from "../groq";
 import type { RequestLogger } from "../logger";
 import { embedText } from "../rag/embeddings";
 import {
+  listPersonalIndexedDocumentIds,
   mergeRetrievedContext,
   retrieveFullTextContext,
   retrieveKeywordContext,
   toSourceCitations,
   validateQuestion,
+  type RetrievalScopeOptions,
   type RetrievedContext,
 } from "../rag/retriever";
 import { matchUserChunks, matchUserMicroChunks, type RetrievedChunk } from "../rag/vector-store";
 import { rerankChunks } from "../rag/reranker";
 import { expandQuery } from "../rag/query-expander";
-import { accessibleDocumentFilter, toSafeLikeTerm } from "../postgrest-safe";
+import { applyDocumentScopeFilter, toSafeLikeTerm } from "../postgrest-safe";
 import { getSupabaseServiceClient } from "../supabase";
 
 const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
@@ -77,6 +79,22 @@ Do not cite uploaded files or imply that this answer came from the user's files.
 
 ${PRIMARY_STYLE_GUIDE}`;
 
+function buildGeneralInstructions(includeKnowledgeBase = true) {
+  if (includeKnowledgeBase) return GENERAL_SYSTEM_PROMPT;
+  return `You are IntelliSeek, an academic assistant.
+The shared Knowledge Base is currently turned off for this request, so only the user's personal uploaded files were searched and no relevant content was found.
+If it matters, briefly mention that Knowledge Base is disabled and no relevant personal uploaded files matched. Do not use a fixed opening sentence.
+Answer from general knowledge in a helpful study-assistant style.
+Do not cite uploaded or knowledge-base files or imply that this answer came from retrieved files.
+
+${PRIMARY_STYLE_GUIDE}`;
+}
+
+function buildAgentInstructions(includeKnowledgeBase = true) {
+  if (includeKnowledgeBase) return SYSTEM_PROMPT;
+  return `${SYSTEM_PROMPT}\n\nNote: The shared Knowledge Base is currently turned off by the user. Only search and reference the user's personal uploaded documents.`;
+}
+
 type AgentToolChunk = RetrievedChunk;
 
 type AgentRunResult = {
@@ -117,9 +135,8 @@ type ChunkRow = {
   } | null;
 };
 
-function applyAccessibleDocumentFilter<T>(query: T, userId: string): T {
-  return (query as { or: (filters: string, options?: { foreignTable?: string }) => T })
-    .or(accessibleDocumentFilter(userId), { foreignTable: "documents" });
+function applyScopeToChunkDocuments<T>(query: T, userId: string, includeKnowledgeBase = true): T {
+  return applyDocumentScopeFilter(query, userId, includeKnowledgeBase, { foreignTable: "documents" });
 }
 
 function getOpenRouterBaseUrl() {
@@ -216,7 +233,12 @@ async function* streamTextWithFallback(
   }
 }
 
-async function findUserDocuments(userId: string, query: string, limit: number): Promise<DocumentRow[]> {
+async function findUserDocuments(
+  userId: string,
+  query: string,
+  limit: number,
+  includeKnowledgeBase = true,
+): Promise<DocumentRow[]> {
   const supabase = getSupabaseServiceClient();
   if (!supabase) throw new Error("Supabase service client is not configured");
 
@@ -224,12 +246,15 @@ async function findUserDocuments(userId: string, query: string, limit: number): 
   // stripped rather than escaped: a pattern of `%` would match every document.
   const safeQuery = toSafeLikeTerm(query);
 
-  let request = supabase
-    .from("documents")
-    .select("id, filename, created_at, source_scope")
-    .or(accessibleDocumentFilter(userId))
-    .order("created_at", { ascending: false })
-    .limit(Math.min(Math.max(limit, 1), 10));
+  let request = applyDocumentScopeFilter(
+    supabase
+      .from("documents")
+      .select("id, filename, created_at, source_scope")
+      .order("created_at", { ascending: false })
+      .limit(Math.min(Math.max(limit, 1), 10)),
+    userId,
+    includeKnowledgeBase,
+  );
 
   if (safeQuery) request = request.ilike("filename", `%${safeQuery}%`);
 
@@ -238,7 +263,12 @@ async function findUserDocuments(userId: string, query: string, limit: number): 
   return (data ?? []) as DocumentRow[];
 }
 
-async function getUserDocumentChunks(userId: string, documentId: string, limit: number): Promise<AgentToolChunk[]> {
+async function getUserDocumentChunks(
+  userId: string,
+  documentId: string,
+  limit: number,
+  includeKnowledgeBase = true,
+): Promise<AgentToolChunk[]> {
   const supabase = getSupabaseServiceClient();
   if (!supabase) throw new Error("Supabase service client is not configured");
 
@@ -249,7 +279,7 @@ async function getUserDocumentChunks(userId: string, documentId: string, limit: 
     .order("chunk_index", { ascending: true })
     .limit(Math.min(Math.max(limit, 1), MAX_DOCUMENT_CHUNKS));
 
-  const { data, error } = await applyAccessibleDocumentFilter(query, userId);
+  const { data, error } = await applyScopeToChunkDocuments(query, userId, includeKnowledgeBase);
 
   if (error) throw new Error("Could not load document chunks");
 
@@ -301,29 +331,44 @@ async function* streamAgentText(agent: Agent, input: string): AsyncGenerator<str
   return requireAnswer(stream.finalOutput);
 }
 
-function createAgentRun(userId: string) {
+function createAgentRun(userId: string, scopeOptions: RetrievalScopeOptions = {}) {
   configureAgentClient();
 
+  const includeKnowledgeBase = scopeOptions.includeKnowledgeBase !== false;
   const usedChunks: AgentToolChunk[] = [];
 
   const searchChunks = tool({
     name: "search_chunks",
-    description: "Search the user's uploaded document chunks semantically for a specific question or concept.",
+    description: "Search the user's accessible document chunks semantically for a specific question or concept.",
     parameters: z.object({
       query: z.string().describe("The search query to match against uploaded document chunks."),
       limit: z.number().int().min(1).max(10).default(5).describe("Maximum chunks to return."),
     }),
     execute: async ({ query, limit }) => {
+      const personalDocumentIds = !includeKnowledgeBase
+        ? scopeOptions.personalDocumentIds ?? await listPersonalIndexedDocumentIds(userId)
+        : undefined;
+      if (!includeKnowledgeBase && !personalDocumentIds?.length) {
+        return JSON.stringify([]);
+      }
+
       const validatedQuery = validateQuestion(query);
       const queryEmbedding = await embedText(validatedQuery);
       const candidateLimit = Math.min(Math.max(limit * 2, 10), 20);
+      const vectorOptions = !includeKnowledgeBase
+        ? { documentIds: personalDocumentIds, strictDocumentIds: true }
+        : {};
+      const ragScope: RetrievalScopeOptions = {
+        includeKnowledgeBase,
+        personalDocumentIds,
+      };
 
       // Parallel 4-way search: macro vector + micro-chunk vector + keyword + full-text
       const [semanticChunks, microChunks, keywordChunks, fullTextChunks] = await Promise.all([
-        matchUserChunks(userId, queryEmbedding, candidateLimit),
-        matchUserMicroChunks(userId, queryEmbedding, candidateLimit),
-        retrieveKeywordContext(validatedQuery, userId, limit),
-        retrieveFullTextContext(validatedQuery, userId, limit),
+        matchUserChunks(userId, queryEmbedding, candidateLimit, undefined, vectorOptions),
+        matchUserMicroChunks(userId, queryEmbedding, candidateLimit, undefined, vectorOptions),
+        retrieveKeywordContext(validatedQuery, userId, limit, undefined, [], ragScope),
+        retrieveFullTextContext(validatedQuery, userId, limit, undefined, [], ragScope),
       ]);
 
       let candidates = mergeRetrievedContext(
@@ -340,7 +385,7 @@ function createAgentRun(userId: string) {
           const expansionSearches = await Promise.all(
             expansions.slice(1).map(async (exp) => {
               const expEmbedding = await embedText(exp);
-              return matchUserChunks(userId, expEmbedding, 5);
+              return matchUserChunks(userId, expEmbedding, 5, undefined, vectorOptions);
             }),
           );
           candidates = mergeRetrievedContext(candidates, ...expansionSearches);
@@ -358,23 +403,24 @@ function createAgentRun(userId: string) {
 
   const findDocuments = tool({
     name: "find_documents",
-    description: "Find the user's uploaded documents by filename or partial filename before answering document-specific questions.",
+    description: "Find accessible uploaded documents by filename or partial filename before answering document-specific questions.",
     parameters: z.object({
       filename: z.string().describe("Filename or partial filename to search for."),
       limit: z.number().int().min(1).max(10).default(5).describe("Maximum documents to return."),
     }),
-    execute: async ({ filename, limit }) => JSON.stringify(await findUserDocuments(userId, filename, limit)),
+    execute: async ({ filename, limit }) =>
+      JSON.stringify(await findUserDocuments(userId, filename, limit, includeKnowledgeBase)),
   });
 
   const getDocumentChunks = tool({
     name: "get_document_chunks",
-    description: "Read representative chunks from one user-owned document for summaries, outlines, topic lists, or exam prep questions.",
+    description: "Read representative chunks from one accessible document for summaries, outlines, topic lists, or exam prep questions.",
     parameters: z.object({
       document_id: z.string().uuid().describe("The document ID returned by find_documents."),
       limit: z.number().int().min(1).max(MAX_DOCUMENT_CHUNKS).default(12).describe("Maximum chunks to read from the document."),
     }),
     execute: async ({ document_id, limit }) => {
-      const chunks = await getUserDocumentChunks(userId, document_id, limit);
+      const chunks = await getUserDocumentChunks(userId, document_id, limit, includeKnowledgeBase);
       usedChunks.push(...chunks);
       return JSON.stringify(chunks);
     },
@@ -383,7 +429,7 @@ function createAgentRun(userId: string) {
   return {
     agent: new Agent({
       name: "IntelliSeek Academic Assistant",
-      instructions: SYSTEM_PROMPT,
+      instructions: buildAgentInstructions(includeKnowledgeBase),
       model: getChatModel(),
       tools: [searchChunks, findDocuments, getDocumentChunks],
     }),
@@ -391,8 +437,13 @@ function createAgentRun(userId: string) {
   };
 }
 
-export async function generateAgentAnswer(question: string, userId: string, conversationContext: ConversationTurn[] = []): Promise<AgentRunResult> {
-  const { agent, getSources } = createAgentRun(userId);
+export async function generateAgentAnswer(
+  question: string,
+  userId: string,
+  conversationContext: ConversationTurn[] = [],
+  scopeOptions: RetrievalScopeOptions = {},
+): Promise<AgentRunResult> {
+  const { agent, getSources } = createAgentRun(userId, scopeOptions);
   const result = await run(agent, buildConversationInput(question, conversationContext), { maxTurns: 6 });
   const answer = requireAnswer(result.finalOutput);
 
@@ -402,8 +453,13 @@ export async function generateAgentAnswer(question: string, userId: string, conv
   };
 }
 
-export async function* streamAgentAnswer(question: string, userId: string, conversationContext: ConversationTurn[] = []): AsyncGenerator<AgentAnswerStreamEvent> {
-  const { agent, getSources } = createAgentRun(userId);
+export async function* streamAgentAnswer(
+  question: string,
+  userId: string,
+  conversationContext: ConversationTurn[] = [],
+  scopeOptions: RetrievalScopeOptions = {},
+): AsyncGenerator<AgentAnswerStreamEvent> {
+  const { agent, getSources } = createAgentRun(userId, scopeOptions);
   const stream = await run(agent, buildConversationInput(question, conversationContext), { maxTurns: 6, stream: true });
 
   for await (const event of stream) {
@@ -449,7 +505,9 @@ export async function* streamGeneralAgentAnswer(
   question: string,
   conversationContext: ConversationTurn[] = [],
   log?: RequestLogger,
+  options: { includeKnowledgeBase?: boolean } = {},
 ): AsyncGenerator<AgentAnswerStreamEvent> {
+  const includeKnowledgeBase = options.includeKnowledgeBase !== false;
   const conversationInput = buildConversationInput(question, conversationContext);
 
   const answer = yield* streamTextWithFallback(
@@ -457,12 +515,12 @@ export async function* streamGeneralAgentAnswer(
       configureAgentClient();
       const agent = new Agent({
         name: "IntelliSeek General Assistant",
-        instructions: GENERAL_SYSTEM_PROMPT,
+        instructions: buildGeneralInstructions(includeKnowledgeBase),
         model: getChatModel(),
       });
       return streamAgentText(agent, conversationInput);
     },
-    () => streamGroqGeneralAnswer(conversationInput),
+    () => streamGroqGeneralAnswer(conversationInput, { includeKnowledgeBase }),
     log,
   );
 

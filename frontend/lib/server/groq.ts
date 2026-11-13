@@ -71,6 +71,21 @@ The user's uploaded files were searched before this answer and no relevant uploa
 
 ${STYLE_GUIDE}`;
 
+function buildGeneralSystemPrompt(includeKnowledgeBase = true) {
+  if (includeKnowledgeBase) return GENERAL_SYSTEM_PROMPT;
+  return `You are IntelliSeek, an academic assistant.
+
+The shared Knowledge Base is currently turned off for this request, so only the user's personal uploaded files were searched and no relevant content was found.
+
+- Answer from general knowledge in a helpful study-assistant style.
+- Briefly mention missing uploaded context only if it helps the user understand why there are no citations. Do not use a fixed opening sentence.
+- Do not cite uploaded or knowledge-base files.
+- Do not imply that this answer came from retrieved documents.
+- Make the answer practical for a student: define terms, explain intuition, and give examples when helpful.
+
+${STYLE_GUIDE}`;
+}
+
 function getGroqModel() {
   return getServerEnv("GROQ_CHAT_MODEL") ?? DEFAULT_GROQ_MODEL;
 }
@@ -132,9 +147,12 @@ export async function* streamGroqGroundedAnswer(
   ]);
 }
 
-export async function* streamGroqGeneralAnswer(question: string): AsyncGenerator<string, string> {
+export async function* streamGroqGeneralAnswer(
+  question: string,
+  options: { includeKnowledgeBase?: boolean } = {},
+): AsyncGenerator<string, string> {
   return yield* streamGroqText([
-    { role: "system", content: GENERAL_SYSTEM_PROMPT },
+    { role: "system", content: buildGeneralSystemPrompt(options.includeKnowledgeBase !== false) },
     { role: "user", content: question },
   ]);
 }

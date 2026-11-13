@@ -39,6 +39,37 @@ export function accessibleDocumentFilter(userId: string): string {
   return `user_id.eq.${assertUuid(userId, "userId")},source_scope.eq.knowledge_base`;
 }
 
+type PostgrestFilterable<T> = {
+  or: (filters: string, options?: { foreignTable?: string }) => T;
+  eq: (column: string, value: string) => T;
+};
+
+/**
+ * Restricts a query on `documents` (or a foreign join to `documents`) to either
+ * the user's uploads + shared knowledge base, or solely the user's personal
+ * uploaded documents (`source_scope = 'personal'`).
+ */
+export function applyDocumentScopeFilter<T>(
+  query: T,
+  userId: string,
+  includeKnowledgeBase = true,
+  options?: { foreignTable?: "documents" },
+): T {
+  const safeUserId = assertUuid(userId, "userId");
+  const filterable = query as PostgrestFilterable<T>;
+  const foreignTable = options?.foreignTable;
+
+  if (includeKnowledgeBase) {
+    return foreignTable
+      ? filterable.or(accessibleDocumentFilter(safeUserId), { foreignTable })
+      : filterable.or(accessibleDocumentFilter(safeUserId));
+  }
+
+  const userCol = foreignTable ? `${foreignTable}.user_id` : "user_id";
+  const scopeCol = foreignTable ? `${foreignTable}.source_scope` : "source_scope";
+  return (filterable.eq(userCol, safeUserId) as PostgrestFilterable<T>).eq(scopeCol, "personal");
+}
+
 /**
  * Reduces a user-supplied search term to characters that carry no meaning to
  * the PostgREST filter grammar or to `ilike` pattern matching. Returns an empty

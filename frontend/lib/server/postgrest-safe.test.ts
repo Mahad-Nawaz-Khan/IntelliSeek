@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   accessibleDocumentFilter,
+  applyDocumentScopeFilter,
   assertUuid,
   filterUuids,
   isUuid,
@@ -51,6 +52,66 @@ describe("accessibleDocumentFilter", () => {
 
   it("refuses to interpolate a value that could widen the scope", () => {
     expect(() => accessibleDocumentFilter("x,role.eq.admin")).toThrow("Invalid userId");
+  });
+});
+
+describe("applyDocumentScopeFilter", () => {
+  function createMockQuery() {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const query = {
+      or(...args: unknown[]) {
+        calls.push({ method: "or", args });
+        return query;
+      },
+      eq(...args: unknown[]) {
+        calls.push({ method: "eq", args });
+        return query;
+      },
+    };
+    return { query, calls };
+  }
+
+  it("includes personal and knowledge_base documents when Knowledge Base is enabled", () => {
+    const { query, calls } = createMockQuery();
+    applyDocumentScopeFilter(query, USER_ID, true);
+    expect(calls).toEqual([
+      { method: "or", args: [`user_id.eq.${USER_ID},source_scope.eq.knowledge_base`] },
+    ]);
+  });
+
+  it("restricts to personal documents owned by the user when Knowledge Base is disabled", () => {
+    const { query, calls } = createMockQuery();
+    applyDocumentScopeFilter(query, USER_ID, false);
+    expect(calls).toEqual([
+      { method: "eq", args: ["user_id", USER_ID] },
+      { method: "eq", args: ["source_scope", "personal"] },
+    ]);
+  });
+
+  it("applies foreignTable scoping for embedded documents queries", () => {
+    const { query: kbEnabledQuery, calls: kbEnabledCalls } = createMockQuery();
+    applyDocumentScopeFilter(kbEnabledQuery, USER_ID, true, { foreignTable: "documents" });
+    expect(kbEnabledCalls).toEqual([
+      {
+        method: "or",
+        args: [
+          `user_id.eq.${USER_ID},source_scope.eq.knowledge_base`,
+          { foreignTable: "documents" },
+        ],
+      },
+    ]);
+
+    const { query: kbDisabledQuery, calls: kbDisabledCalls } = createMockQuery();
+    applyDocumentScopeFilter(kbDisabledQuery, USER_ID, false, { foreignTable: "documents" });
+    expect(kbDisabledCalls).toEqual([
+      { method: "eq", args: ["documents.user_id", USER_ID] },
+      { method: "eq", args: ["documents.source_scope", "personal"] },
+    ]);
+  });
+
+  it("rejects invalid userId values in both modes", () => {
+    const { query } = createMockQuery();
+    expect(() => applyDocumentScopeFilter(query, "bad-id", false)).toThrow("Invalid userId");
   });
 });
 

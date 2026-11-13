@@ -23,11 +23,13 @@ export type ChatRequest = {
   question: string;
   retrievalHint?: ChatRetrievalHint;
   chatSessionId?: string;
+  includeKnowledgeBase?: boolean;
 };
 
 type ChatRequestOptions = {
   retrievalHint?: ChatRetrievalHint;
   chatSessionId?: string | null;
+  includeKnowledgeBase?: boolean;
   signal?: AbortSignal;
 };
 
@@ -244,6 +246,9 @@ export async function streamChatQuestion(question: string, handlers: StreamChatH
     question: trimmedQuestion,
     ...(options.retrievalHint ? { retrievalHint: options.retrievalHint } : {}),
     ...(options.chatSessionId ? { chatSessionId: options.chatSessionId } : {}),
+    ...(typeof options.includeKnowledgeBase === "boolean"
+      ? { includeKnowledgeBase: options.includeKnowledgeBase }
+      : {}),
   };
   const response = await fetch(CHAT_ENDPOINT, {
     method: "POST",

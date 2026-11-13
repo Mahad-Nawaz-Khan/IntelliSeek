@@ -18,6 +18,8 @@ type AppSidebarProps = {
   deletingSourceId?: string | null;
   deletingSessionId?: string | null;
   focusedSourceId?: string | null;
+  includeKnowledgeBase?: boolean;
+  onToggleKnowledgeBase?: () => void;
   onSelectSource?: (source: KnowledgeSource) => void;
   onClose?: () => void;
   onDeleteSource?: (sourceId: string) => void;
@@ -45,6 +47,8 @@ export function AppSidebar({
   deletingSourceId,
   deletingSessionId,
   focusedSourceId,
+  includeKnowledgeBase = true,
+  onToggleKnowledgeBase,
   onSelectSource,
   onClose,
   onDeleteSource,
@@ -228,6 +232,8 @@ export function AppSidebar({
           status={sourceStatus}
           deletingSourceId={deletingSourceId}
           focusedSourceId={focusedSourceId}
+          includeKnowledgeBase={includeKnowledgeBase}
+          onToggleKnowledgeBase={onToggleKnowledgeBase}
           onSelectSource={onSelectSource}
           onDeleteSource={onDeleteSource}
           onOpenUpload={onOpenUpload}

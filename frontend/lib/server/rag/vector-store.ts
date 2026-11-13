@@ -30,6 +30,11 @@ export type MatchUserChunksOptions = {
    * search return `limit` rows instead of whatever survives a global Top-K.
    */
   documentIds?: string[];
+  /**
+   * When true, an empty `documentIds` array yields zero results instead of
+   * falling back to an unconstrained (`null`) search across all accessible docs.
+   */
+  strictDocumentIds?: boolean;
 };
 
 export async function matchUserChunks(
@@ -39,6 +44,10 @@ export async function matchUserChunks(
   log?: RequestLogger,
   options: MatchUserChunksOptions = {},
 ): Promise<RetrievedChunk[]> {
+  if (options.strictDocumentIds && (!options.documentIds || options.documentIds.length === 0)) {
+    return [];
+  }
+
   const supabase = getSupabaseServiceClient();
   if (!supabase) {
     log?.error("vector.rpc.client_unavailable", { errorCategory: "supabase_query", userId });
@@ -111,6 +120,10 @@ export async function matchUserMicroChunks(
   log?: RequestLogger,
   options: MatchUserChunksOptions = {},
 ): Promise<RetrievedChunk[]> {
+  if (options.strictDocumentIds && (!options.documentIds || options.documentIds.length === 0)) {
+    return [];
+  }
+
   const supabase = getSupabaseServiceClient();
   if (!supabase) return [];
 

@@ -7,6 +7,7 @@ export type UserPreferences = {
   compactMessages: boolean;
   sendOnEnter: boolean;
   autoScrollOnStream: boolean;
+  includeKnowledgeBase: boolean;
 };
 
 export const DEFAULT_PREFERENCES: UserPreferences = {
@@ -14,6 +15,7 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
   compactMessages: false,
   sendOnEnter: true,
   autoScrollOnStream: true,
+  includeKnowledgeBase: true,
 };
 
 const STORAGE_KEY = "intelliseek-preferences-v1";
@@ -47,6 +49,10 @@ function parsePreferences(raw: string | null): UserPreferences {
         typeof parsed.autoScrollOnStream === "boolean"
           ? parsed.autoScrollOnStream
           : DEFAULT_PREFERENCES.autoScrollOnStream,
+      includeKnowledgeBase:
+        typeof parsed.includeKnowledgeBase === "boolean"
+          ? parsed.includeKnowledgeBase
+          : DEFAULT_PREFERENCES.includeKnowledgeBase,
     };
   } catch {
     return DEFAULT_PREFERENCES;

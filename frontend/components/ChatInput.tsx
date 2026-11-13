@@ -63,6 +63,7 @@ type ChatInputProps = {
   disabled?: boolean;
   isResponding?: boolean;
   focusedDocumentName?: string | null;
+  includeKnowledgeBase?: boolean;
   onSubmit: (question: string, selectedSuggestion?: AutocompleteSuggestion) => boolean;
   onStopResponse?: () => void;
   onOpenUpload?: () => void;
@@ -73,6 +74,7 @@ export function ChatInput({
   disabled = false,
   isResponding = false,
   focusedDocumentName = null,
+  includeKnowledgeBase = true,
   onSubmit,
   onStopResponse,
   onOpenUpload,
@@ -154,7 +156,9 @@ export function ChatInput({
 
   const placeholderText = focusedDocumentName
     ? `Ask about ${focusedDocumentName}...`
-    : "Ask IntelliSeek about your uploaded material... (Press / to focus)";
+    : includeKnowledgeBase
+      ? "Ask IntelliSeek about your uploaded material... (Press / to focus)"
+      : "Ask only from your uploaded documents... (Press / to focus)";
 
   return (
     <div className="relative mx-auto min-h-16 w-full max-w-4xl place-self-center rounded-full border border-white/10 bg-slate-950/75 p-2 shadow-[0_18px_45px_rgba(0,0,0,0.38)] backdrop-blur-xl transition-[border-color,box-shadow] focus-within:border-cyan-400/50 focus-within:shadow-[0_20px_55px_rgba(8,145,178,0.22)]">

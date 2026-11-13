@@ -97,6 +97,7 @@ type ChatConversationViewProps = {
   messages: ChatMessageType[];
   isLoading: boolean;
   hasPersonalSources: boolean;
+  includeKnowledgeBase: boolean;
   isDemo: boolean;
   onSubmit: (question: string) => boolean;
   onRetryMessage?: (assistantMessageIndex: number) => void;
@@ -109,6 +110,7 @@ function ChatConversationView({
   messages,
   isLoading,
   hasPersonalSources,
+  includeKnowledgeBase,
   isDemo,
   onSubmit,
   onRetryMessage,
@@ -128,6 +130,7 @@ function ChatConversationView({
       <ChatWelcome
         disabled={isLoading}
         hasPersonalSources={hasPersonalSources}
+        includeKnowledgeBase={includeKnowledgeBase}
         isDemo={isDemo}
         onSelect={onSubmit}
         onOpenUpload={onOpenUpload}
@@ -162,8 +165,9 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
   const searchParams = useSearchParams();
   const { isLoaded, isSignedIn, user } = useAuth();
   const { hasReachedLimit, decrementQuestion, remaining } = useDemo();
-  const { preferences } = usePreferences();
+  const { preferences, updatePreference } = usePreferences();
   const workspace = useWorkspaceOptional();
+  const includeKnowledgeBase = demo ? true : (workspace ? workspace.includeKnowledgeBase : preferences.includeKnowledgeBase);
 
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -315,7 +319,33 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
   const retrievalMessage =
     isLoading && latestMessage?.role === "assistant" && latestMessage.sources?.length
       ? "Writing your answer..."
-      : "Searching your indexed documents...";
+      : includeKnowledgeBase
+        ? "Searching your indexed documents..."
+        : "Searching your uploaded documents only...";
+
+  const knowledgeBaseDocumentIds = useMemo(
+    () => new Set(sources.filter((source) => source.sourceType === "knowledge-base").map((source) => source.id)),
+    [sources],
+  );
+
+  const knowledgeBaseCount = knowledgeBaseDocumentIds.size;
+
+  const filteredServerAutocompleteSuggestions = useMemo(() => {
+    if (includeKnowledgeBase) return serverAutocompleteSuggestions;
+    return serverAutocompleteSuggestions.flatMap((suggestion) => {
+      const meta = suggestion.metadata;
+      if (!meta) return [suggestion];
+      if (meta.kind === "document") {
+        return knowledgeBaseDocumentIds.has(meta.documentId) ? [] : [suggestion];
+      }
+      if (meta.kind === "topic") {
+        const remainingDocIds = meta.documentIds.filter((id) => !knowledgeBaseDocumentIds.has(id));
+        if (!remainingDocIds.length) return [];
+        return [{ ...suggestion, metadata: { ...meta, documentIds: remainingDocIds } }];
+      }
+      return [suggestion];
+    });
+  }, [includeKnowledgeBase, knowledgeBaseDocumentIds, serverAutocompleteSuggestions]);
 
   const autocompleteSuggestions = useMemo<AutocompleteSuggestion[]>(() => {
     const promptSuggestions = SUGGESTIONS.map((suggestion) => ({
@@ -340,13 +370,13 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
       }));
 
     const seen = new Set<string>();
-    return [...promptSuggestions, ...serverAutocompleteSuggestions, ...historySuggestions].filter((suggestion) => {
+    return [...promptSuggestions, ...filteredServerAutocompleteSuggestions, ...historySuggestions].filter((suggestion) => {
       const key = `${suggestion.type}:${suggestion.value.toLocaleLowerCase().replace(/\s+/g, " ").trim()}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     });
-  }, [messages, serverAutocompleteSuggestions]);
+  }, [filteredServerAutocompleteSuggestions, messages]);
 
   useEffect(() => {
     if (demo) return;
@@ -551,6 +581,7 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
             {
               ...(effectiveRetrievalHint ? { retrievalHint: effectiveRetrievalHint } : {}),
               ...(activeSessionIdRef.current ? { chatSessionId: activeSessionIdRef.current } : {}),
+              includeKnowledgeBase,
               signal: abortController.signal,
             },
           );
@@ -591,6 +622,7 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
       activeSessionIdRef,
       demo,
       focusedDocument,
+      includeKnowledgeBase,
       isLoadingSessionRef,
       loadedSessionRef,
       refreshRecentChats,
@@ -711,6 +743,15 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
     });
   }, [activeSessionIdRef, demo, handleNewChat, sessionParam, setRecentSessionRows, workspace]);
 
+  const handleToggleKnowledgeBase = useCallback(() => {
+    if (demo) return;
+    if (workspace) {
+      workspace.toggleKnowledgeBase();
+      return;
+    }
+    updatePreference("includeKnowledgeBase", !preferences.includeKnowledgeBase);
+  }, [demo, preferences.includeKnowledgeBase, updatePreference, workspace]);
+
   const triggerOpenUpload = useCallback(() => {
     if (demo) {
       setShowSignupModal(true);
@@ -759,6 +800,7 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
                   hasPersonalSources={sources.some(
                     (source) => source.sourceType === "uploaded" && source.status === "indexed",
                   )}
+                  includeKnowledgeBase={includeKnowledgeBase}
                   isDemo={demo}
                   onSubmit={handleSubmit}
                   onRetryMessage={handleRetryMessage}
@@ -802,6 +844,9 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
                   queuedMessages={queuedMessages}
                   queueLimit={QUEUE_LIMIT}
                   focusedDocument={focusedDocument}
+                  includeKnowledgeBase={includeKnowledgeBase}
+                  knowledgeBaseCount={knowledgeBaseCount}
+                  onToggleKnowledgeBase={demo ? undefined : handleToggleKnowledgeBase}
                   onClearFocusedDocument={workspace ? () => workspace.setFocusedDocument(null) : undefined}
                   onSubmit={handleSubmit}
                   onRemoveQueuedMessage={handleRemoveQueuedMessage}
@@ -853,6 +898,8 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
       sourceStatus={sourceStatus}
       deletingSourceId={deletingSourceId}
       deletingSessionId={deletingSessionId}
+      includeKnowledgeBase={includeKnowledgeBase}
+      onToggleKnowledgeBase={handleToggleKnowledgeBase}
       onDeleteSource={handleDeleteSource}
       onDeleteSession={handleDeleteSession}
       onRenameSession={handleRenameSession}
