@@ -463,6 +463,28 @@ button:hover,
   background-color: var(--chat-workspace-bg, #f1f5f9);
 }
 
+/* Gemini-style centered radial glow shown only on the empty new-chat screen */
+.chat-new-gradient {
+  background-image:
+    radial-gradient(
+      ellipse 68% 58% at 50% 50%,
+      rgba(29, 78, 216, 0.24) 0%,
+      rgba(30, 58, 138, 0.16) 38%,
+      rgba(15, 23, 66, 0.08) 60%,
+      rgba(10, 14, 34, 0) 80%
+    );
+}
+
+:root[data-theme="light"] .chat-new-gradient {
+  background-image:
+    radial-gradient(
+      ellipse 68% 58% at 50% 50%,
+      rgba(56, 189, 248, 0.14) 0%,
+      rgba(99, 102, 241, 0.08) 42%,
+      rgba(241, 245, 249, 0) 78%
+    );
+}
+
 .chat-input-surface {
   background-color: var(--chat-input-bg, #161f33);
 }

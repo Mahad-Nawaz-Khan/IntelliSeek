@@ -869,8 +869,10 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
     return null;
   }
 
+  const isNewChatEmpty = messages.length === 0 && !isLoadingSession;
+
   const chatContent = (
-    <>
+    <div className={`relative flex min-h-0 flex-1 flex-col ${isNewChatEmpty ? "chat-new-gradient" : ""}`}>
       <ChatHeader onOpenUpload={triggerOpenUpload} />
       <div className="relative flex min-h-0 flex-1" {...dragProps}>
         {isChatFileDragging && (
@@ -895,8 +897,8 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
             onTouchMove={handleTouchMove}
             className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-4 pt-4 pb-2 sm:px-6"
           >
-            <div className="flex min-h-full flex-col">
-              <div className={`flex-1 pb-4 ${messages.length === 0 && !isLoadingSession ? "flex items-center justify-center" : ""}`}>
+            <div className={`flex min-h-full flex-col ${isNewChatEmpty ? "justify-center py-6" : ""}`}>
+              <div className={isNewChatEmpty ? "pb-6" : "flex-1 pb-4"}>
                 <ChatConversationView
                   isLoadingSession={isLoadingSession}
                   messages={messages}
@@ -912,7 +914,13 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
                 />
               </div>
 
-              <div className="sticky bottom-0 z-20 -mx-4 px-4 pb-3 pt-2 sm:-mx-6 sm:px-6">
+              <div
+                className={
+                  isNewChatEmpty
+                    ? "z-20 -mx-4 px-4 pb-2 pt-1 sm:-mx-6 sm:px-6"
+                    : "sticky bottom-0 z-20 -mx-4 px-4 pb-3 pt-2 sm:-mx-6 sm:px-6"
+                }
+              >
                 {showScrollToBottom && messages.length > 0 && (
                   <div className="mb-3 flex justify-center">
                     <button
@@ -989,7 +997,7 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
       )}
       {isLoading && <RetrievalStatus message={retrievalMessage} />}
       <DemoLimitModal isOpen={showSignupModal} onClose={() => setShowSignupModal(false)} />
-    </>
+    </div>
   );
 
   if (demo) {
