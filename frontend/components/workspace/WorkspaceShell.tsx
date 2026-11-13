@@ -42,6 +42,7 @@ export type FocusedDocument = {
 type SessionLifecycleHandlers = {
   onSessionDeleted?: (sessionId: string) => void;
   onNewChat?: () => void;
+  onToggleTemporaryChat?: () => void;
 };
 
 export type WorkspaceContextValue = {
@@ -56,6 +57,8 @@ export type WorkspaceContextValue = {
   setRecentSessionRows: Dispatch<SetStateAction<ChatSessionSummary[]>>;
   activeSessionId: string | null;
   setActiveSessionId: Dispatch<SetStateAction<string | null>>;
+  isTemporaryChat: boolean;
+  setIsTemporaryChat: Dispatch<SetStateAction<boolean>>;
   refreshRecentChats: () => Promise<void>;
   handleDeleteSession: (sessionId: string) => Promise<void>;
   handleRenameSession: (sessionId: string, title: string) => Promise<boolean>;
@@ -90,6 +93,7 @@ export function WorkspaceShell({ children }: Readonly<WorkspaceShellProps>) {
   const [sourceStatus, setSourceStatus] = useState<"loading" | "ready" | "empty" | "unavailable">("loading");
   const [recentSessionRows, setRecentSessionRows] = useState<ChatSessionSummary[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [isTemporaryChat, setIsTemporaryChat] = useState(false);
   const [focusedDocument, setFocusedDocument] = useState<FocusedDocument | null>(null);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [uploadTarget, setUploadTarget] = useState<"personal" | "knowledge_base">("personal");
@@ -405,6 +409,7 @@ export function WorkspaceShell({ children }: Readonly<WorkspaceShellProps>) {
 
   const handleNewChatClick = useCallback(() => {
     setActiveSessionId(null);
+    setIsTemporaryChat(false);
     lifecycleHandlersRef.current.forEach((handlers) => {
       handlers.onNewChat?.();
     });
@@ -412,6 +417,12 @@ export function WorkspaceShell({ children }: Readonly<WorkspaceShellProps>) {
       router.push("/chat");
     }
   }, [pathname, router]);
+
+  const handleToggleTemporaryChatClick = useCallback(() => {
+    lifecycleHandlersRef.current.forEach((handlers) => {
+      handlers.onToggleTemporaryChat?.();
+    });
+  }, []);
 
   const workspaceContextValue = useMemo<WorkspaceContextValue>(
     () => ({
@@ -426,6 +437,8 @@ export function WorkspaceShell({ children }: Readonly<WorkspaceShellProps>) {
       setRecentSessionRows,
       activeSessionId,
       setActiveSessionId,
+      isTemporaryChat,
+      setIsTemporaryChat,
       refreshRecentChats,
       handleDeleteSession,
       handleRenameSession,
@@ -451,6 +464,7 @@ export function WorkspaceShell({ children }: Readonly<WorkspaceShellProps>) {
       handleRenameSession,
       handleUploadToast,
       isAdmin,
+      isTemporaryChat,
       openUploadModal,
       preferences.includeKnowledgeBase,
       recentSessionRows,
@@ -475,6 +489,8 @@ export function WorkspaceShell({ children }: Readonly<WorkspaceShellProps>) {
         deletingSessionId={deletingSessionId}
         focusedSourceId={activeFocusedDocument?.id ?? null}
         includeKnowledgeBase={preferences.includeKnowledgeBase}
+        isTemporaryChat={pathname === "/chat" && isTemporaryChat}
+        onToggleTemporaryChat={pathname === "/chat" ? handleToggleTemporaryChatClick : undefined}
         onToggleKnowledgeBase={toggleKnowledgeBase}
         onSelectSource={(source) => {
           if (source.sourceType === "knowledge-base" && !preferences.includeKnowledgeBase) {
@@ -487,7 +503,10 @@ export function WorkspaceShell({ children }: Readonly<WorkspaceShellProps>) {
         onDeleteSource={handleDeleteSource}
         onDeleteSession={handleDeleteSession}
         onRenameSession={handleRenameSession}
-        onOpenSession={(sessionId) => router.push(`/chat?session=${encodeURIComponent(sessionId)}`)}
+        onOpenSession={(sessionId) => {
+          setIsTemporaryChat(false);
+          router.push(`/chat?session=${encodeURIComponent(sessionId)}`);
+        }}
         onNewChat={handleNewChatClick}
         onOpenUpload={() => openUploadModal("personal")}
         onOpenKnowledgeBaseUpload={isAdmin ? () => openUploadModal("knowledge_base") : undefined}

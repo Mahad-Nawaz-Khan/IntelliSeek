@@ -19,17 +19,26 @@ export type ChatMessage = {
   createdAt: number;
 };
 
+export type ChatConversationTurn = {
+  question: string;
+  answer: string;
+};
+
 export type ChatRequest = {
   question: string;
   retrievalHint?: ChatRetrievalHint;
   chatSessionId?: string;
   includeKnowledgeBase?: boolean;
+  temporary?: boolean;
+  conversationHistory?: ChatConversationTurn[];
 };
 
 type ChatRequestOptions = {
   retrievalHint?: ChatRetrievalHint;
   chatSessionId?: string | null;
   includeKnowledgeBase?: boolean;
+  temporary?: boolean;
+  conversationHistory?: ChatConversationTurn[];
   signal?: AbortSignal;
 };
 
@@ -243,12 +252,17 @@ export async function consumeSseReader(
 
 export async function streamChatQuestion(question: string, handlers: StreamChatHandlers, options: ChatRequestOptions = {}): Promise<ChatResponse> {
   const trimmedQuestion = requireQuestion(question);
+  const isTemporary = options.temporary === true;
   const payload: ChatRequest = {
     question: trimmedQuestion,
     ...(options.retrievalHint ? { retrievalHint: options.retrievalHint } : {}),
-    ...(options.chatSessionId ? { chatSessionId: options.chatSessionId } : {}),
+    ...(!isTemporary && options.chatSessionId ? { chatSessionId: options.chatSessionId } : {}),
     ...(typeof options.includeKnowledgeBase === "boolean"
       ? { includeKnowledgeBase: options.includeKnowledgeBase }
+      : {}),
+    ...(isTemporary ? { temporary: true } : {}),
+    ...(isTemporary && options.conversationHistory?.length
+      ? { conversationHistory: options.conversationHistory }
       : {}),
   };
   const response = await fetch(CHAT_ENDPOINT, {

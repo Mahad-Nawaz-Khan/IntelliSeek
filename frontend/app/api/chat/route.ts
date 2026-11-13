@@ -38,6 +38,8 @@ type ChatRequestBody = {
   retrievalHint?: unknown;
   chatSessionId?: unknown;
   includeKnowledgeBase?: unknown;
+  temporary?: unknown;
+  conversationHistory?: unknown;
 };
 
 type ChatSessionRow = {
@@ -97,6 +99,38 @@ function parseRetrievalHint(value: unknown): ChatRetrievalHint | undefined {
   }
 
   return undefined;
+}
+
+const MAX_TEMPORARY_HISTORY_TURNS = 6;
+const MAX_HISTORY_QUESTION_CHARS = 4_000;
+const MAX_HISTORY_ANSWER_CHARS = 12_000;
+
+function parseTemporary(value: unknown): boolean {
+  if (value === undefined) return false;
+  if (typeof value !== "boolean") throw new Error("Invalid temporary chat flag");
+  return value;
+}
+
+function parseConversationHistory(value: unknown): ConversationTurn[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new Error("Invalid conversation history");
+
+  const turns: ConversationTurn[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") {
+      throw new Error("Invalid conversation history");
+    }
+    const candidate = item as Record<string, unknown>;
+    if (typeof candidate.question !== "string" || typeof candidate.answer !== "string") {
+      throw new Error("Invalid conversation history");
+    }
+    const question = candidate.question.trim().slice(0, MAX_HISTORY_QUESTION_CHARS);
+    const answer = candidate.answer.trim().slice(0, MAX_HISTORY_ANSWER_CHARS);
+    if (question && answer) {
+      turns.push({ question, answer });
+    }
+  }
+  return turns.slice(-MAX_TEMPORARY_HISTORY_TURNS);
 }
 
 function parseIncludeKnowledgeBase(value: unknown): boolean {
@@ -282,23 +316,26 @@ async function finalizeStreamAnswer(options: {
   event: Extract<AgentAnswerStreamEvent, { type: "done" }>;
   question: string;
   userId: string;
-  chatSessionId: string;
+  chatSessionId?: string;
+  temporary: boolean;
   shouldGenerateTitle: boolean;
   send: SseSend;
   log?: RequestLogger;
 }) {
-  const { event, question, userId, chatSessionId, shouldGenerateTitle, send, log } = options;
+  const { event, question, userId, chatSessionId, temporary, shouldGenerateTitle, send, log } = options;
   const answer = event.answer.trim();
   if (!answer) throw new Error("Agent answer generation returned no content");
 
   const sources = normalizeSourceCitations(event.sources);
   send("sources", { sources });
-  await saveChatHistory(question, answer, sources, userId, chatSessionId, log);
-  await updateChatSessionTimestamp(userId, chatSessionId, log);
-  send("done", { answer, sources, chatSessionId });
-  log?.info("stream.complete", { userId, sourceCount: sources.length, answerLength: answer.length });
+  if (!temporary && chatSessionId) {
+    await saveChatHistory(question, answer, sources, userId, chatSessionId, log);
+    await updateChatSessionTimestamp(userId, chatSessionId, log);
+  }
+  send("done", temporary ? { answer, sources } : { answer, sources, chatSessionId });
+  log?.info("stream.complete", { userId, temporary, sourceCount: sources.length, answerLength: answer.length });
 
-  if (shouldGenerateTitle) {
+  if (!temporary && chatSessionId && shouldGenerateTitle) {
     const title = await generateAndStoreTitle(chatSessionId, userId, question, answer, log);
     if (title) send("title", { chatSessionId, title });
   }
@@ -308,20 +345,23 @@ async function handleCancelledStream(options: {
   partialAnswer: string;
   question: string;
   userId: string;
-  chatSessionId: string;
+  chatSessionId?: string;
+  temporary: boolean;
   shouldGenerateTitle: boolean;
   log?: RequestLogger;
 }) {
-  const { partialAnswer, question, userId, chatSessionId, shouldGenerateTitle, log } = options;
+  const { partialAnswer, question, userId, chatSessionId, temporary, shouldGenerateTitle, log } = options;
   const partial = partialAnswer.trim();
-  if (partial) {
-    await saveChatHistory(question, partial, [], userId, chatSessionId, log);
-    await updateChatSessionTimestamp(userId, chatSessionId, log);
+  if (!temporary && chatSessionId) {
+    if (partial) {
+      await saveChatHistory(question, partial, [], userId, chatSessionId, log);
+      await updateChatSessionTimestamp(userId, chatSessionId, log);
+    }
+    if (shouldGenerateTitle) {
+      await storeFallbackTitle(chatSessionId, userId, question, log);
+    }
   }
-  if (shouldGenerateTitle) {
-    await storeFallbackTitle(chatSessionId, userId, question, log);
-  }
-  log?.info("stream.cancelled", { userId, sessionId: chatSessionId, partialLength: partial.length });
+  log?.info("stream.cancelled", { userId, temporary, sessionId: chatSessionId, partialLength: partial.length });
 }
 
 async function streamAnswer(options: {
@@ -329,12 +369,13 @@ async function streamAnswer(options: {
   jobId: string;
   userId: string;
   question: string;
-  chatSessionId: string;
+  chatSessionId?: string;
+  temporary: boolean;
   shouldGenerateTitle: boolean;
   events: AsyncGenerator<AgentAnswerStreamEvent>;
   log?: RequestLogger;
 }): Promise<"completed" | "cancelled"> {
-  const { send, jobId, userId, question, chatSessionId, shouldGenerateTitle, events, log } = options;
+  const { send, jobId, userId, question, chatSessionId, temporary, shouldGenerateTitle, events, log } = options;
 
   let lastCancelCheck = 0;
   let cancelled = false;
@@ -371,6 +412,7 @@ async function streamAnswer(options: {
       question,
       userId,
       chatSessionId,
+      temporary,
       shouldGenerateTitle,
       send,
       log,
@@ -385,6 +427,7 @@ async function streamAnswer(options: {
     question,
     userId,
     chatSessionId,
+    temporary,
     shouldGenerateTitle,
     log,
   });
@@ -531,17 +574,34 @@ async function runAnswerJob(options: {
   requestedChatSessionId?: string;
   retrievalHint?: ChatRetrievalHint;
   includeKnowledgeBase: boolean;
+  temporary: boolean;
+  conversationHistory: ConversationTurn[];
   log: RequestLogger;
 }) {
-  const { send, jobId, question, userId, requestedChatSessionId, retrievalHint, includeKnowledgeBase, log } = options;
+  const {
+    send,
+    jobId,
+    question,
+    userId,
+    requestedChatSessionId,
+    retrievalHint,
+    includeKnowledgeBase,
+    temporary,
+    conversationHistory,
+    log,
+  } = options;
   try {
     send("job", { jobId });
 
-    const chatSession = requestedChatSessionId
-      ? await getOwnedChatSession(requestedChatSessionId, userId, log)
-      : await createChatSession(userId, log);
-    const conversationContext = await getRecentConversationContext(userId, chatSession.id, log);
-    const shouldGenerateTitle = !requestedChatSessionId && chatSession.title_status === "pending";
+    const chatSession = temporary
+      ? null
+      : requestedChatSessionId
+        ? await getOwnedChatSession(requestedChatSessionId, userId, log)
+        : await createChatSession(userId, log);
+    const conversationContext = temporary
+      ? conversationHistory
+      : await getRecentConversationContext(userId, chatSession!.id, log);
+    const shouldGenerateTitle = Boolean(!temporary && chatSession && !requestedChatSessionId && chatSession.title_status === "pending");
     const personalDocumentIds = !includeKnowledgeBase
       ? await listPersonalIndexedDocumentIds(userId, log)
       : undefined;
@@ -555,6 +615,7 @@ async function runAnswerJob(options: {
       hintKind: retrievalHint?.kind,
       hintedDocumentCount: getHintedDocumentCount(retrievalHint),
       includeKnowledgeBase,
+      temporary,
     });
 
     const isSummaryRequest = isDocumentSummaryRequest(question);
@@ -578,9 +639,19 @@ async function runAnswerJob(options: {
       log,
     });
 
-    log.info("answer.mode.selected", { userId, answerMode, contextCount: relevantContext.length });
+    log.info("answer.mode.selected", { userId, answerMode, temporary, contextCount: relevantContext.length });
 
-    await streamAnswer({ send, jobId, events, question, userId, chatSessionId: chatSession.id, shouldGenerateTitle, log });
+    await streamAnswer({
+      send,
+      jobId,
+      events,
+      question,
+      userId,
+      chatSessionId: chatSession?.id,
+      temporary,
+      shouldGenerateTitle,
+      log,
+    });
   } catch (error) {
     log.error("stream.failed", { errorCategory: "unknown", userId, error });
     // Internal messages name providers, tables, and configuration; only the
@@ -639,15 +710,22 @@ export async function POST(request: Request) {
   let question: string;
   let requestedChatSessionId: string | undefined;
   let includeKnowledgeBase: boolean;
+  let temporary: boolean;
+  let conversationHistory: ConversationTurn[];
   try {
     question = validateQuestion(body.question);
     requestedChatSessionId = parseChatSessionId(body.chatSessionId);
     includeKnowledgeBase = parseIncludeKnowledgeBase(body.includeKnowledgeBase);
+    temporary = parseTemporary(body.temporary);
+    if (temporary && requestedChatSessionId) {
+      throw new Error("Temporary chat cannot attach to a saved session");
+    }
+    conversationHistory = temporary ? parseConversationHistory(body.conversationHistory) : [];
   } catch (error) {
     return failure(400, error instanceof Error ? error.message : "Invalid question", log, { errorCategory: "validation", userId: user.id, error });
   }
 
-  log.info("request.validated", { userId: user.id, questionLength: question.length, includeKnowledgeBase });
+  log.info("request.validated", { userId: user.id, questionLength: question.length, includeKnowledgeBase, temporary });
 
   const retrievalHint = parseRetrievalHint(body.retrievalHint);
 
@@ -681,6 +759,8 @@ export async function POST(request: Request) {
         requestedChatSessionId,
         retrievalHint,
         includeKnowledgeBase,
+        temporary,
+        conversationHistory,
         log,
       }).finally(() => {
         try {

@@ -1,4 +1,4 @@
-import { Database, FileText, Sparkles, X } from "lucide-react";
+import { Database, FileText, MessageCircleDashed, Sparkles, X } from "lucide-react";
 
 import type { AutocompleteSuggestion } from "../../lib/trie-autocomplete";
 import { ChatInput } from "../ChatInput";
@@ -18,6 +18,7 @@ type ChatComposerProps = {
   queueLimit?: number;
   focusedDocument?: FocusedDocument | null;
   includeKnowledgeBase?: boolean;
+  isTemporaryChat?: boolean;
   knowledgeBaseCount?: number;
   onToggleKnowledgeBase?: () => void;
   onClearFocusedDocument?: () => void;
@@ -35,6 +36,7 @@ export function ChatComposer({
   queueLimit = 3,
   focusedDocument = null,
   includeKnowledgeBase = true,
+  isTemporaryChat = false,
   knowledgeBaseCount,
   onToggleKnowledgeBase,
   onClearFocusedDocument,
@@ -198,12 +200,20 @@ export function ChatComposer({
             </span>
           </button>
 
-          {!includeKnowledgeBase && (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-slate-950/85 px-2.5 py-0.5 text-[0.7rem] text-slate-300 shadow-lg backdrop-blur-xl">
-              <FileText className="h-3 w-3 text-cyan-300" />
-              Your uploaded docs only
-            </span>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {!includeKnowledgeBase && (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-slate-950/85 px-2.5 py-0.5 text-[0.7rem] text-slate-300 shadow-lg backdrop-blur-xl">
+                <FileText className="h-3 w-3 text-cyan-300" />
+                Your uploaded docs only
+              </span>
+            )}
+            {isTemporaryChat && (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-cyan-300/40 bg-cyan-400/10 px-2.5 py-0.5 text-[0.7rem] font-medium text-cyan-100">
+                <MessageCircleDashed className="h-3 w-3 text-cyan-300" />
+                Not saved to history
+              </span>
+            )}
+          </div>
         </div>
       )}
 
@@ -213,6 +223,7 @@ export function ChatComposer({
         isResponding={isResponding}
         focusedDocumentName={focusedDocument?.filename}
         includeKnowledgeBase={includeKnowledgeBase}
+        isTemporaryChat={isTemporaryChat}
         onSubmit={onSubmit}
         onStopResponse={onStopResponse}
         onOpenUpload={onOpenUpload}

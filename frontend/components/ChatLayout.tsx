@@ -24,6 +24,7 @@ import { useDemo } from "../context/DemoContext";
 import {
   streamChatQuestion,
   streamChatQuestionDemo,
+  type ChatConversationTurn,
   type ChatMessage as ChatMessageType,
   type ChatResponse,
   type ChatRetrievalHint,
@@ -99,6 +100,30 @@ function resolveErrorMessage(
   };
 }
 
+const MAX_TEMPORARY_HISTORY_TURNS = 6;
+
+function toConversationHistory(messages: ChatMessageType[]): ChatConversationTurn[] {
+  const turns: ChatConversationTurn[] = [];
+  for (let i = 0; i < messages.length - 1; i += 1) {
+    const current = messages[i];
+    const next = messages[i + 1];
+    if (
+      current?.role === "user" &&
+      next?.role === "assistant" &&
+      next.status === "complete" &&
+      current.content.trim() &&
+      next.content.trim()
+    ) {
+      turns.push({
+        question: current.content.trim(),
+        answer: next.content.trim(),
+      });
+      i += 1;
+    }
+  }
+  return turns.slice(-MAX_TEMPORARY_HISTORY_TURNS);
+}
+
 type ChatConversationViewProps = {
   isLoadingSession: boolean;
   messages: ChatMessageType[];
@@ -106,6 +131,7 @@ type ChatConversationViewProps = {
   hasPersonalSources: boolean;
   includeKnowledgeBase: boolean;
   isDemo: boolean;
+  isTemporaryChat: boolean;
   onRetryMessage?: (assistantMessageIndex: number) => void;
   onOpenUpload?: () => void;
   bottomRef: React.RefObject<HTMLDivElement | null>;
@@ -118,6 +144,7 @@ function ChatConversationView({
   hasPersonalSources,
   includeKnowledgeBase,
   isDemo,
+  isTemporaryChat,
   onRetryMessage,
   onOpenUpload,
   bottomRef,
@@ -136,6 +163,7 @@ function ChatConversationView({
         hasPersonalSources={hasPersonalSources}
         includeKnowledgeBase={includeKnowledgeBase}
         isDemo={isDemo}
+        isTemporaryChat={isTemporaryChat}
         onOpenUpload={onOpenUpload}
       />
     );
@@ -173,16 +201,22 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
   const includeKnowledgeBase = demo ? true : (workspace ? workspace.includeKnowledgeBase : preferences.includeKnowledgeBase);
 
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
+  const [localTemporaryChat, setLocalTemporaryChat] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [queuedMessages, setQueuedMessages] = useState<QueuedChatMessage[]>([]);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [showSignupModal, setShowSignupModal] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
 
+  const isTemporaryChat = !demo && (workspace ? workspace.isTemporaryChat : localTemporaryChat);
+
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeJobIdRef = useRef<string | null>(null);
   const activeSmootherRef = useRef<TextStreamSmoother | null>(null);
   const mountedRef = useRef(true);
+  const messagesRef = useRef<ChatMessageType[]>([]);
+  const isTemporaryChatRef = useRef(isTemporaryChat);
+  const prevSessionParamRef = useRef<string | null>(searchParams.get("session"));
   const queuedMessagesRef = useRef<QueuedChatMessage[]>([]);
   const conversationRunRef = useRef(0);
   const isLoadingRef = useRef(false);
@@ -193,14 +227,43 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
   const touchStartYRef = useRef<number | null>(null);
   const sessionParam = searchParams.get("session");
 
+  const setTemporaryChat = useCallback(
+    (next: boolean) => {
+      if (demo) return;
+      isTemporaryChatRef.current = next;
+      if (workspace) {
+        workspace.setIsTemporaryChat(next);
+      } else {
+        setLocalTemporaryChat(next);
+      }
+    },
+    [demo, workspace],
+  );
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       activeSmootherRef.current?.stop();
       activeSmootherRef.current = null;
+      workspace?.setIsTemporaryChat(false);
     };
-  }, []);
+  }, [workspace]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    isTemporaryChatRef.current = isTemporaryChat;
+  }, [isTemporaryChat]);
+
+  useEffect(() => {
+    if (!demo && sessionParam && sessionParam !== prevSessionParamRef.current) {
+      setTemporaryChat(false);
+    }
+    prevSessionParamRef.current = sessionParam;
+  }, [demo, sessionParam, setTemporaryChat]);
 
   useEffect(() => {
     queuedMessagesRef.current = queuedMessages;
@@ -500,9 +563,18 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
   const focusedDocument = workspace?.focusedDocument ?? null;
 
   const runQuestion = useCallback(
-    async (question: string, selectedSuggestion?: AutocompleteSuggestion, runScope = conversationRunRef.current) => {
+    async (
+      question: string,
+      selectedSuggestion?: AutocompleteSuggestion,
+      runScope = conversationRunRef.current,
+      historyOverride?: ChatMessageType[],
+    ) => {
       const trimmedQuestion = question.trim();
       if (!trimmedQuestion || isLoadingSessionRef.current) return;
+
+      const isTemporaryRun = !demo && isTemporaryChatRef.current;
+      const priorMessages = historyOverride ?? messagesRef.current;
+      const conversationHistory = isTemporaryRun ? toConversationHistory(priorMessages) : undefined;
 
       const now = Date.now();
       const userMessage: ChatMessageType = {
@@ -528,14 +600,14 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
 
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
-      let expectedSessionId = activeSessionIdRef.current;
+      let expectedSessionId = isTemporaryRun ? null : activeSessionIdRef.current;
       let drainPromise: Promise<StreamSmootherResult> | null = null;
       let doneResponse: ChatResponse | null = null;
 
       const isRunAttached = () =>
         mountedRef.current &&
         conversationRunRef.current === runScope &&
-        activeSessionIdRef.current === expectedSessionId;
+        (isTemporaryRun ? isTemporaryChatRef.current : activeSessionIdRef.current === expectedSessionId);
 
       const smoother = createTextStreamSmoother({
         onUpdate: (revealed) => {
@@ -610,7 +682,7 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
           const stillAttached = isRunAttached();
 
           if (stillAttached) {
-            if (completedSessionId) {
+            if (!isTemporaryRun && completedSessionId) {
               expectedSessionId = completedSessionId;
               activeSessionIdRef.current = completedSessionId;
               setActiveSessionId(completedSessionId);
@@ -629,30 +701,31 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
             drainPromise = smoother.complete(response.answer);
           } else {
             smoother.stop();
-            if (completedSessionId && loadedSessionRef.current === completedSessionId) {
+            if (!isTemporaryRun && completedSessionId && loadedSessionRef.current === completedSessionId) {
               loadedSessionRef.current = null;
             }
           }
 
-          if (!demo) {
+          if (!demo && !isTemporaryRun) {
             refreshRecentChats().catch(noop);
           }
         },
-        onTitle: demo
-          ? undefined
-          : (title) => {
-              const sessionId = activeSessionIdRef.current;
-              if (!sessionId) return;
-              const applyTitle = (current: ChatSessionSummary[]) => {
-                if (!hasMatchingSession(current, sessionId)) {
-                  refreshRecentChats().catch(noop);
-                  return current;
-                }
-                return updateSessionTitleInRows(current, sessionId, title);
-              };
-              setRecentSessionRows(applyTitle);
-              workspace?.setRecentSessionRows(applyTitle);
-            },
+        onTitle:
+          demo || isTemporaryRun
+            ? undefined
+            : (title) => {
+                const sessionId = activeSessionIdRef.current;
+                if (!sessionId) return;
+                const applyTitle = (current: ChatSessionSummary[]) => {
+                  if (!hasMatchingSession(current, sessionId)) {
+                    refreshRecentChats().catch(noop);
+                    return current;
+                  }
+                  return updateSessionTitleInRows(current, sessionId, title);
+                };
+                setRecentSessionRows(applyTitle);
+                workspace?.setRecentSessionRows(applyTitle);
+              },
       };
 
       try {
@@ -660,7 +733,11 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
           ? streamChatQuestionDemo(trimmedQuestion, streamHandlers, abortController.signal)
           : streamChatQuestion(trimmedQuestion, streamHandlers, {
               ...(effectiveRetrievalHint ? { retrievalHint: effectiveRetrievalHint } : {}),
-              ...(expectedSessionId ? { chatSessionId: expectedSessionId } : {}),
+              ...(isTemporaryRun
+                ? { temporary: true, conversationHistory }
+                : expectedSessionId
+                  ? { chatSessionId: expectedSessionId }
+                  : {}),
               includeKnowledgeBase,
               signal: abortController.signal,
             }));
@@ -712,7 +789,26 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
           if (nextQueuedMessage) {
             queuedMessagesRef.current = remainingQueuedMessages;
             setQueuedMessages(remainingQueuedMessages);
-            runQuestion(nextQueuedMessage.question, nextQueuedMessage.selectedSuggestion, runScope).catch(noop);
+            const completedResponse = doneResponse as ChatResponse | null;
+            const completedAnswer = completedResponse?.answer.trim();
+            const nextHistoryOverride = completedAnswer
+              ? [
+                  ...priorMessages,
+                  userMessage,
+                  {
+                    ...assistantPlaceholder,
+                    content: completedAnswer,
+                    sources: completedResponse?.sources,
+                    status: "complete" as const,
+                  },
+                ]
+              : priorMessages;
+            runQuestion(
+              nextQueuedMessage.question,
+              nextQueuedMessage.selectedSuggestion,
+              runScope,
+              nextHistoryOverride,
+            ).catch(noop);
           }
         }
       }
@@ -778,10 +874,11 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
       if (!userMessage || userMessage.role !== "user") return;
 
       const questionToRetry = userMessage.content;
-      setMessages((current) => current.filter((_, idx) => idx !== assistantIndex && idx !== assistantIndex - 1));
-      runQuestion(questionToRetry).catch(noop);
+      const remainingMessages = messages.filter((_, idx) => idx !== assistantIndex && idx !== assistantIndex - 1);
+      setMessages(remainingMessages);
+      runQuestion(questionToRetry, undefined, conversationRunRef.current, remainingMessages).catch(noop);
     },
-    [ isLoadingSessionRef, messages, runQuestion],
+    [isLoadingSessionRef, messages, runQuestion],
   );
 
   const handleRemoveQueuedMessage = useCallback((queuedMessageId: string) => {
@@ -804,31 +901,70 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
     }).catch(noop);
   }, []);
 
-  const handleNewChat = useCallback(() => {
-    conversationRunRef.current += 1;
-    activeSmootherRef.current?.stop();
-    activeSmootherRef.current = null;
-    if (demo) {
-      abortControllerRef.current?.abort();
-    } else {
-      abortControllerRef.current = null;
-      activeJobIdRef.current = null;
-    }
-    setIsLoadingSession(false);
-    setIsLoading(false);
-    isLoadingRef.current = false;
-    isLoadingSessionRef.current = false;
-    setActiveSessionId(null);
-    activeSessionIdRef.current = null;
-    workspace?.setActiveSessionId(null);
-    setMessages([]);
-    setQueuedMessages([]);
-    queuedMessagesRef.current = [];
-    loadedSessionRef.current = null;
-    if (!demo) window.history.pushState(null, "", "/chat");
-  }, [activeSessionIdRef, demo, loadedSessionRef, isLoadingSessionRef, setActiveSessionId, setIsLoadingSession, workspace]);
+  const resetConversationState = useCallback(
+    (options: { temporary: boolean; abortActive: boolean }) => {
+      conversationRunRef.current += 1;
+      activeSmootherRef.current?.stop();
+      activeSmootherRef.current = null;
+      if (options.abortActive) {
+        const jobId = activeJobIdRef.current;
+        abortControllerRef.current?.abort();
+        abortControllerRef.current = null;
+        activeJobIdRef.current = null;
+        if (jobId && !demo) {
+          fetch("/api/chat/cancel", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ jobId }),
+          }).catch(noop);
+        }
+      } else {
+        abortControllerRef.current = null;
+        activeJobIdRef.current = null;
+      }
+      setTemporaryChat(options.temporary);
+      setIsLoadingSession(false);
+      setIsLoading(false);
+      isLoadingRef.current = false;
+      isLoadingSessionRef.current = false;
+      setActiveSessionId(null);
+      activeSessionIdRef.current = null;
+      workspace?.setActiveSessionId(null);
+      setMessages([]);
+      messagesRef.current = [];
+      setQueuedMessages([]);
+      queuedMessagesRef.current = [];
+      loadedSessionRef.current = null;
+      if (!demo) window.history.pushState(null, "", "/chat");
+    },
+    [
+      activeSessionIdRef,
+      demo,
+      isLoadingSessionRef,
+      loadedSessionRef,
+      setActiveSessionId,
+      setIsLoadingSession,
+      setTemporaryChat,
+      workspace,
+    ],
+  );
 
-  // Listen to sidebar session deletion & New Chat events from WorkspaceShell
+  const handleNewChat = useCallback(() => {
+    resetConversationState({
+      temporary: false,
+      abortActive: demo || isTemporaryChatRef.current,
+    });
+  }, [demo, resetConversationState]);
+
+  const handleToggleTemporaryChat = useCallback(() => {
+    if (demo) return;
+    resetConversationState({
+      temporary: !isTemporaryChatRef.current,
+      abortActive: isTemporaryChatRef.current,
+    });
+  }, [demo, resetConversationState]);
+
+  // Listen to sidebar session deletion & New Chat / Temporary Chat events from WorkspaceShell
   useEffect(() => {
     if (!workspace || demo) return;
     return workspace.registerSessionLifecycle({
@@ -841,8 +977,19 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
       onNewChat: () => {
         handleNewChat();
       },
+      onToggleTemporaryChat: () => {
+        handleToggleTemporaryChat();
+      },
     });
-  }, [activeSessionIdRef, demo, handleNewChat, sessionParam, setRecentSessionRows, workspace]);
+  }, [
+    activeSessionIdRef,
+    demo,
+    handleNewChat,
+    handleToggleTemporaryChat,
+    sessionParam,
+    setRecentSessionRows,
+    workspace,
+  ]);
 
   const handleToggleKnowledgeBase = useCallback(() => {
     if (demo) return;
@@ -873,7 +1020,11 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
 
   const chatContent = (
     <div className={`relative flex min-h-0 flex-1 flex-col ${isNewChatEmpty ? "chat-new-gradient" : ""}`}>
-      <ChatHeader onOpenUpload={triggerOpenUpload} />
+      <ChatHeader
+        onOpenUpload={triggerOpenUpload}
+        isTemporaryChat={isTemporaryChat}
+        onToggleTemporaryChat={demo ? undefined : handleToggleTemporaryChat}
+      />
       <div className="relative flex min-h-0 flex-1" {...dragProps}>
         {isChatFileDragging && (
           <div className="pointer-events-none absolute inset-3 z-30 flex items-center justify-center rounded-3xl border-2 border-dashed border-cyan-300/70 bg-slate-950/75 text-cyan-50 shadow-2xl shadow-cyan-950/30 backdrop-blur-sm">
@@ -908,6 +1059,7 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
                   )}
                   includeKnowledgeBase={includeKnowledgeBase}
                   isDemo={demo}
+                  isTemporaryChat={isTemporaryChat}
                   onRetryMessage={handleRetryMessage}
                   onOpenUpload={demo ? undefined : triggerOpenUpload}
                   bottomRef={bottomRef}
@@ -956,6 +1108,7 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
                   queueLimit={QUEUE_LIMIT}
                   focusedDocument={focusedDocument}
                   includeKnowledgeBase={includeKnowledgeBase}
+                  isTemporaryChat={isTemporaryChat}
                   knowledgeBaseCount={knowledgeBaseCount}
                   onToggleKnowledgeBase={demo ? undefined : handleToggleKnowledgeBase}
                   onClearFocusedDocument={workspace ? () => workspace.setFocusedDocument(null) : undefined}
@@ -1021,6 +1174,8 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
       deletingSourceId={deletingSourceId}
       deletingSessionId={deletingSessionId}
       includeKnowledgeBase={includeKnowledgeBase}
+      isTemporaryChat={isTemporaryChat}
+      onToggleTemporaryChat={handleToggleTemporaryChat}
       onToggleKnowledgeBase={handleToggleKnowledgeBase}
       onDeleteSource={handleDeleteSource}
       onDeleteSession={handleDeleteSession}

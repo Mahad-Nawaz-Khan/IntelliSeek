@@ -1,6 +1,6 @@
 "use client";
 
-import { Menu, Moon, Sun } from "lucide-react";
+import { Menu, MessageCircleDashed, Moon, Sun } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
 
@@ -17,6 +17,8 @@ type AcademicWorkspaceProps = {
   deletingSessionId?: string | null;
   focusedSourceId?: string | null;
   includeKnowledgeBase?: boolean;
+  isTemporaryChat?: boolean;
+  onToggleTemporaryChat?: () => void;
   onToggleKnowledgeBase?: () => void;
   onSelectSource?: (source: KnowledgeSource) => void;
   onDeleteSource?: (sourceId: string) => void;
@@ -40,6 +42,8 @@ export function AcademicWorkspace({
   deletingSessionId,
   focusedSourceId,
   includeKnowledgeBase = true,
+  isTemporaryChat = false,
+  onToggleTemporaryChat,
   onToggleKnowledgeBase,
   onSelectSource,
   onDeleteSource,
@@ -164,16 +168,34 @@ export function AcademicWorkspace({
               <Menu className="h-5 w-5" />
             </button>
             <span className="text-sm font-semibold tracking-[0.16em] text-cyan-100 uppercase">IntelliSeek</span>
-            <button
-              type="button"
-              onClick={toggleTheme}
-              className="absolute right-3 inline-flex h-10 w-10 items-center justify-center rounded-xl text-slate-200 transition hover:bg-white/5 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
-              aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
-              title={isDark ? "Switch to light theme" : "Switch to dark theme"}
-              suppressHydrationWarning
-            >
-              {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-            </button>
+            <div className="absolute right-3 flex items-center gap-1">
+              {onToggleTemporaryChat && (
+                <button
+                  type="button"
+                  onClick={onToggleTemporaryChat}
+                  aria-pressed={isTemporaryChat}
+                  aria-label={isTemporaryChat ? "Exit temporary chat" : "Start temporary chat"}
+                  title={isTemporaryChat ? "Exit temporary chat" : "Start temporary chat"}
+                  className={`inline-flex h-10 w-10 items-center justify-center rounded-xl transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 md:hidden ${
+                    isTemporaryChat
+                      ? "border border-dashed border-cyan-300/60 bg-cyan-400/15 text-cyan-100"
+                      : "text-slate-200 hover:bg-white/5 hover:text-white"
+                  }`}
+                >
+                  <MessageCircleDashed className="h-5 w-5" />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={toggleTheme}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-slate-200 transition hover:bg-white/5 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
+                aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
+                title={isDark ? "Switch to light theme" : "Switch to dark theme"}
+                suppressHydrationWarning
+              >
+                {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+              </button>
+            </div>
           </div>
           {children}
         </section>

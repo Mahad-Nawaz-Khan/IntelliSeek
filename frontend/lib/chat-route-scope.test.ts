@@ -9,6 +9,7 @@ const {
   retrieveContextMock,
   retrieveKeywordContextMock,
   streamGeneralAgentAnswerMock,
+  supabaseFromMock,
 } = vi.hoisted(() => ({
   listPersonalIndexedDocumentIdsMock: vi.fn(async () => [PERSONAL_DOC_ID]),
   retrieveContextMock: vi.fn(async () => []),
@@ -17,6 +18,7 @@ const {
     yield { type: "delta", text: "Answer" } as const;
     yield { type: "done", answer: "Answer", sources: [] } as const;
   }),
+  supabaseFromMock: vi.fn((table: string) => createSupabaseQuery(table)),
 }));
 
 function createSupabaseQuery(table: string) {
@@ -55,7 +57,7 @@ vi.mock("./server/rate-limit", () => ({
 
 vi.mock("./server/supabase", () => ({
   getSupabaseServiceClient: () => ({
-    from: (table: string) => createSupabaseQuery(table),
+    from: (table: string) => supabaseFromMock(table),
   }),
 }));
 
@@ -114,6 +116,7 @@ describe("POST /api/chat includeKnowledgeBase validation and scoping", () => {
     retrieveContextMock.mockClear();
     retrieveKeywordContextMock.mockClear();
     streamGeneralAgentAnswerMock.mockClear();
+    supabaseFromMock.mockClear();
   });
 
   it("rejects non-boolean includeKnowledgeBase values with HTTP 400", async () => {
@@ -187,6 +190,96 @@ describe("POST /api/chat includeKnowledgeBase validation and scoping", () => {
       expect.anything(),
       [],
       { includeKnowledgeBase: true, personalDocumentIds: undefined },
+    );
+  });
+});
+
+describe("POST /api/chat temporary chat mode", () => {
+  beforeEach(() => {
+    listPersonalIndexedDocumentIdsMock.mockClear();
+    retrieveContextMock.mockClear();
+    retrieveKeywordContextMock.mockClear();
+    streamGeneralAgentAnswerMock.mockClear();
+    supabaseFromMock.mockClear();
+  });
+
+  it("rejects non-boolean temporary flags and invalid combinations", async () => {
+    for (const invalidTemporary of ["true", 1, null, {}]) {
+      const response = await POST(
+        createChatRequest({
+          question: "What is a trie?",
+          temporary: invalidTemporary,
+        }),
+      );
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        ok: false,
+        error: "Invalid temporary chat flag",
+      });
+    }
+
+    const withSessionResponse = await POST(
+      createChatRequest({
+        question: "What is a trie?",
+        temporary: true,
+        chatSessionId: SESSION_ID,
+      }),
+    );
+    expect(withSessionResponse.status).toBe(400);
+    await expect(withSessionResponse.json()).resolves.toMatchObject({
+      ok: false,
+      error: "Temporary chat cannot attach to a saved session",
+    });
+
+    const badHistoryResponse = await POST(
+      createChatRequest({
+        question: "Follow-up?",
+        temporary: true,
+        conversationHistory: [{ question: 123, answer: "abc" }],
+      }),
+    );
+    expect(badHistoryResponse.status).toBe(400);
+    await expect(badHistoryResponse.json()).resolves.toMatchObject({
+      ok: false,
+      error: "Invalid conversation history",
+    });
+  });
+
+  it("skips chat_sessions and chat_history persistence while forwarding in-memory conversationHistory", async () => {
+    const response = await POST(
+      createChatRequest({
+        question: "What is its time complexity?",
+        temporary: true,
+        conversationHistory: [
+          {
+            question: "What is binary search?",
+            answer: "Binary search finds a target in a sorted array by halving the search interval.",
+          },
+        ],
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const sseText = await response.text();
+
+    const queriedTables = supabaseFromMock.mock.calls.map(([table]) => table);
+    expect(queriedTables).not.toContain("chat_sessions");
+    expect(queriedTables).not.toContain("chat_history");
+
+    expect(sseText).toContain('event: done\ndata: {"answer":"Answer","sources":[]}');
+    expect(sseText).not.toContain("event: title");
+    expect(sseText).not.toContain("chatSessionId");
+
+    expect(streamGeneralAgentAnswerMock).toHaveBeenCalledWith(
+      "What is its time complexity?",
+      [
+        {
+          question: "What is binary search?",
+          answer: "Binary search finds a target in a sorted array by halving the search interval.",
+        },
+      ],
+      expect.anything(),
+      { includeKnowledgeBase: true },
     );
   });
 });
