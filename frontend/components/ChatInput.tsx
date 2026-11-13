@@ -161,7 +161,7 @@ export function ChatInput({
       : "Ask only from your uploaded documents... (Press / to focus)";
 
   return (
-    <div className="relative mx-auto w-full max-w-4xl place-self-center rounded-[26px] border border-white/10 bg-slate-950/75 px-1.5 py-1 shadow-[0_14px_36px_rgba(0,0,0,0.34)] backdrop-blur-xl transition-[border-color,box-shadow] focus-within:border-cyan-400/50 focus-within:shadow-[0_16px_44px_rgba(8,145,178,0.2)]">
+    <div className="relative mx-auto w-full max-w-4xl place-self-center rounded-[26px] border border-white/10 bg-slate-950/75 p-1.5 shadow-[0_14px_36px_rgba(0,0,0,0.34)] backdrop-blur-xl transition-[border-color,box-shadow] focus-within:border-cyan-400/50 focus-within:shadow-[0_16px_44px_rgba(8,145,178,0.2)]">
       {isAutocompleteOpen && matches.length > 0 && (
         <div className="absolute inset-x-3 bottom-full z-20 mb-2 overflow-hidden rounded-2xl border border-cyan-300/20 bg-slate-950/95 shadow-2xl shadow-cyan-950/30 backdrop-blur-xl">
           <div className="flex items-center justify-between gap-2 border-b border-white/10 px-3 py-2 text-xs font-medium uppercase tracking-[0.22em] text-cyan-200">
@@ -204,7 +204,7 @@ export function ChatInput({
           </div>
         </div>
       )}
-      <div className="flex items-end gap-1">
+      <div className="flex items-end gap-1.5">
         {onOpenUpload && (
           <button
             type="button"
@@ -219,7 +219,11 @@ export function ChatInput({
         )}
         <div className="relative min-w-0 flex-1">
           {!value && (
-            <span className="pointer-events-none absolute inset-x-2.5 top-2 truncate text-sm leading-5 text-slate-500">
+            <span
+              className={`pointer-events-none absolute top-1/2 -translate-y-1/2 truncate text-sm leading-5 text-slate-500 ${
+                onOpenUpload ? "inset-x-2" : "left-3.5 right-2"
+              }`}
+            >
               {placeholderText}
             </span>
           )}
@@ -273,7 +277,9 @@ export function ChatInput({
                 }
               }
             }}
-            className="max-h-36 min-h-9 w-full resize-none bg-transparent px-2.5 py-2 text-sm leading-5 text-slate-100 outline-hidden disabled:cursor-not-allowed disabled:opacity-60"
+            className={`block max-h-36 min-h-9 w-full resize-none bg-transparent py-2 text-sm leading-5 text-slate-100 outline-hidden disabled:cursor-not-allowed disabled:opacity-60 ${
+              onOpenUpload ? "px-2" : "pl-3.5 pr-2"
+            }`}
           />
         </div>
         <button
@@ -291,7 +297,7 @@ export function ChatInput({
           aria-label={isResponding ? "Stop response" : "Send question"}
           title={isResponding ? "Stop response" : "Send question"}
         >
-          {isResponding ? <Square className="h-3.5 w-3.5 fill-current" /> : <Send className="h-4 w-4 translate-x-px" />}
+          {isResponding ? <Square className="h-3.5 w-3.5 fill-current" /> : <Send className="h-4 w-4" />}
         </button>
       </div>
     </div>
