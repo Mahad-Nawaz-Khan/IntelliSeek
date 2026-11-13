@@ -193,6 +193,8 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isPinnedToBottomRef = useRef(true);
+  const lastScrollTopRef = useRef(0);
+  const touchStartYRef = useRef<number | null>(null);
   const sessionParam = searchParams.get("session");
 
   useEffect(() => {
@@ -415,37 +417,88 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
     }
   }, [demo, isLoaded, isSignedIn, router, user]);
 
+  const handleWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    const el = scrollContainerRef.current;
+    if (!el || el.scrollHeight <= el.clientHeight) return;
+    if (event.deltaY < 0) {
+      isPinnedToBottomRef.current = false;
+    }
+  }, []);
+
+  const handleTouchStart = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    touchStartYRef.current = event.touches[0]?.clientY ?? null;
+  }, []);
+
+  const handleTouchMove = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    const el = scrollContainerRef.current;
+    const startY = touchStartYRef.current;
+    const currentY = event.touches[0]?.clientY;
+    if (!el || el.scrollHeight <= el.clientHeight || startY === null || currentY === undefined) return;
+    // Finger moving downward scrolls the viewport upward toward earlier messages.
+    if (currentY > startY + 4) {
+      isPinnedToBottomRef.current = false;
+    }
+    touchStartYRef.current = currentY;
+  }, []);
+
   const handleScroll = useCallback(() => {
     const el = scrollContainerRef.current;
     if (!el) return;
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    isPinnedToBottomRef.current = distanceFromBottom < 120;
-    setShowScrollToBottom(distanceFromBottom > 240);
-  }, []);
+
+    const currentTop = el.scrollTop;
+    const previousTop = lastScrollTopRef.current;
+    const distanceFromBottom = el.scrollHeight - currentTop - el.clientHeight;
+    lastScrollTopRef.current = currentTop;
+
+    // Disengage auto-scroll on any real upward movement so high-frequency streaming
+    // frames never yank the viewport back down while the user scrolls up.
+    if (currentTop < previousTop - 1 && distanceFromBottom > 2) {
+      isPinnedToBottomRef.current = false;
+    } else if (currentTop > previousTop + 1 && distanceFromBottom <= 24) {
+      isPinnedToBottomRef.current = true;
+    }
+
+    setShowScrollToBottom((!isPinnedToBottomRef.current || !preferences.autoScrollOnStream) && distanceFromBottom > 120);
+  }, [preferences.autoScrollOnStream]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     const el = scrollContainerRef.current;
+    isPinnedToBottomRef.current = true;
     if (el) {
-      el.scrollTo({ top: el.scrollHeight, behavior });
+      const targetTop = Math.max(0, el.scrollHeight - el.clientHeight);
+      el.scrollTo({ top: targetTop, behavior });
+      lastScrollTopRef.current = el.scrollTop;
     } else {
       bottomRef.current?.scrollIntoView({ behavior });
     }
-    isPinnedToBottomRef.current = true;
     setShowScrollToBottom(false);
   }, []);
 
   useEffect(() => {
+    const el = scrollContainerRef.current;
     if (!messages.length) {
+      isPinnedToBottomRef.current = true;
+      lastScrollTopRef.current = 0;
       setShowScrollToBottom(false);
       return;
     }
-    if (!preferences.autoScrollOnStream || !isPinnedToBottomRef.current) return;
-    const el = scrollContainerRef.current;
+    if (!preferences.autoScrollOnStream || !isPinnedToBottomRef.current) {
+      if (el) {
+        const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+        setShowScrollToBottom((!isPinnedToBottomRef.current || !preferences.autoScrollOnStream) && distanceFromBottom > 120);
+      }
+      return;
+    }
     if (el) {
-      el.scrollTop = el.scrollHeight;
+      const targetTop = Math.max(0, el.scrollHeight - el.clientHeight);
+      if (Math.abs(el.scrollTop - targetTop) > 1) {
+        el.scrollTop = targetTop;
+      }
+      lastScrollTopRef.current = el.scrollTop;
     } else {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
+    setShowScrollToBottom(false);
   }, [messages, preferences.autoScrollOnStream]);
 
   const focusedDocument = workspace?.focusedDocument ?? null;
@@ -841,10 +894,13 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
           <div
             ref={scrollContainerRef}
             onScroll={handleScroll}
-            className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6"
+            onWheel={handleWheel}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-4 pt-4 pb-2 sm:px-6"
           >
             <div className="flex min-h-full flex-col">
-              <div className="flex-1 pb-6">
+              <div className="flex-1 pb-4">
                 <ChatConversationView
                   isLoadingSession={isLoadingSession}
                   messages={messages}
@@ -861,7 +917,7 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
                 />
               </div>
 
-              <div className="sticky bottom-0 z-20 -mx-4 px-4 pb-6 pt-4 sm:-mx-6 sm:px-6">
+              <div className="sticky bottom-0 z-20 -mx-4 px-4 pb-3 pt-2 sm:-mx-6 sm:px-6">
                 {showScrollToBottom && messages.length > 0 && (
                   <div className="mb-3 flex justify-center">
                     <button
@@ -941,7 +997,15 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
     </>
   );
 
-  if (embedded || demo) return chatContent;
+  if (demo) {
+    return (
+      <div className="academic-page-shell flex h-dvh flex-col overflow-hidden text-slate-100">
+        {chatContent}
+      </div>
+    );
+  }
+
+  if (embedded) return chatContent;
 
   return (
     <AcademicWorkspace

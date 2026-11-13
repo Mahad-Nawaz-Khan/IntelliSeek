@@ -105,7 +105,7 @@ export function ChatInput({
     if (!textarea) return;
 
     textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 160)}px`;
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 144)}px`;
   }, [value]);
 
   useEffect(() => {
@@ -161,7 +161,7 @@ export function ChatInput({
       : "Ask only from your uploaded documents... (Press / to focus)";
 
   return (
-    <div className="relative mx-auto min-h-16 w-full max-w-4xl place-self-center rounded-full border border-white/10 bg-slate-950/75 p-2 shadow-[0_18px_45px_rgba(0,0,0,0.38)] backdrop-blur-xl transition-[border-color,box-shadow] focus-within:border-cyan-400/50 focus-within:shadow-[0_20px_55px_rgba(8,145,178,0.22)]">
+    <div className="relative mx-auto w-full max-w-4xl place-self-center rounded-[26px] border border-white/10 bg-slate-950/75 px-1.5 py-1 shadow-[0_14px_36px_rgba(0,0,0,0.34)] backdrop-blur-xl transition-[border-color,box-shadow] focus-within:border-cyan-400/50 focus-within:shadow-[0_16px_44px_rgba(8,145,178,0.2)]">
       {isAutocompleteOpen && matches.length > 0 && (
         <div className="absolute inset-x-3 bottom-full z-20 mb-2 overflow-hidden rounded-2xl border border-cyan-300/20 bg-slate-950/95 shadow-2xl shadow-cyan-950/30 backdrop-blur-xl">
           <div className="flex items-center justify-between gap-2 border-b border-white/10 px-3 py-2 text-xs font-medium uppercase tracking-[0.22em] text-cyan-200">
@@ -204,22 +204,22 @@ export function ChatInput({
           </div>
         </div>
       )}
-      <div className="mx-0.5 flex items-center gap-1">
+      <div className="flex items-end gap-1">
         {onOpenUpload && (
           <button
             type="button"
             onClick={onOpenUpload}
             disabled={disabled}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-transparent text-slate-300 transition hover:bg-white/10 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-transparent text-slate-300 transition hover:bg-white/10 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
             aria-label="Upload document"
             title="Upload document"
           >
-            <Plus className="h-6 w-6" strokeWidth={2.5} />
+            <Plus className="h-5 w-5" strokeWidth={2.25} />
           </button>
         )}
         <div className="relative min-w-0 flex-1">
           {!value && (
-            <span className="pointer-events-none absolute inset-x-3 top-3 truncate text-sm leading-6 text-slate-500">
+            <span className="pointer-events-none absolute inset-x-2.5 top-2 truncate text-sm leading-5 text-slate-500">
               {placeholderText}
             </span>
           )}
@@ -273,7 +273,7 @@ export function ChatInput({
                 }
               }
             }}
-            className="max-h-40 min-h-11 w-full resize-none bg-transparent px-3 pb-2 pt-3 text-sm leading-6 text-slate-100 outline-hidden disabled:cursor-not-allowed disabled:opacity-60"
+            className="max-h-36 min-h-9 w-full resize-none bg-transparent px-2.5 py-2 text-sm leading-5 text-slate-100 outline-hidden disabled:cursor-not-allowed disabled:opacity-60"
           />
         </div>
         <button
@@ -287,11 +287,11 @@ export function ChatInput({
             submit();
           }}
           disabled={disabled || (!isResponding && !value.trim())}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-950/30 transition hover:bg-cyan-300 active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-950/30 transition hover:bg-cyan-300 active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
           aria-label={isResponding ? "Stop response" : "Send question"}
           title={isResponding ? "Stop response" : "Send question"}
         >
-          {isResponding ? <Square className="h-4 w-4 fill-current" /> : <Send className="h-5 w-5 translate-x-px" />}
+          {isResponding ? <Square className="h-3.5 w-3.5 fill-current" /> : <Send className="h-4 w-4 translate-x-px" />}
         </button>
       </div>
     </div>

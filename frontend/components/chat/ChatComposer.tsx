@@ -59,7 +59,7 @@ export function ChatComposer({
   };
 
   return (
-    <div className="mx-auto w-full max-w-4xl space-y-2">
+    <div className="mx-auto w-full max-w-4xl space-y-1.5">
       {focusedDocument && (
         <div className="mx-auto flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-cyan-300/25 bg-slate-950/90 px-3.5 py-2 text-xs text-cyan-50 shadow-xl shadow-cyan-950/20 backdrop-blur-xl">
           <div className="flex min-w-0 items-center gap-2">
@@ -153,7 +153,7 @@ export function ChatComposer({
                 ? "Knowledge Base context is ON (click to use only your uploaded docs)"
                 : "Knowledge Base context is OFF — answering from your uploaded docs only (click to turn on)"
             }
-            className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium shadow-lg backdrop-blur-xl transition-all active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 disabled:cursor-not-allowed disabled:opacity-60 ${
+            className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-medium shadow-lg backdrop-blur-xl transition-all active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 disabled:cursor-not-allowed disabled:opacity-60 ${
               includeKnowledgeBase
                 ? "border-cyan-300/30 bg-slate-950/85 text-cyan-100 hover:border-cyan-300/50 hover:bg-slate-900/95"
                 : "border-amber-300/30 bg-slate-950/85 text-amber-100 hover:border-amber-300/50 hover:bg-slate-900/95"
@@ -199,7 +199,7 @@ export function ChatComposer({
           </button>
 
           {!includeKnowledgeBase && (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-slate-950/85 px-3 py-1 text-[0.7rem] text-slate-300 shadow-lg backdrop-blur-xl">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-slate-950/85 px-2.5 py-0.5 text-[0.7rem] text-slate-300 shadow-lg backdrop-blur-xl">
               <FileText className="h-3 w-3 text-cyan-300" />
               Your uploaded docs only
             </span>
