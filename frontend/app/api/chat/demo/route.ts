@@ -96,6 +96,7 @@ export async function POST(request: Request) {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
+        controller.enqueue(encoder.encode(": stream-open\n\n"));
         const isSummaryRequest = isDocumentSummaryRequest(question);
 
         log.info("demo.retrieval.start", { questionLength: question.length });
@@ -124,9 +125,17 @@ export async function POST(request: Request) {
         await streamDemoAnswer(controller, events, log);
       } catch (error) {
         log.error("demo.stream.failed", { errorCategory: "unknown", error });
-        controller.enqueue(toSse("error", { error: toClientErrorMessage(error) }));
+        try {
+          controller.enqueue(toSse("error", { error: toClientErrorMessage(error) }));
+        } catch {
+          // Client already disconnected.
+        }
       } finally {
-        controller.close();
+        try {
+          controller.close();
+        } catch {
+          // Stream already closed.
+        }
       }
     },
   });
@@ -136,6 +145,7 @@ export async function POST(request: Request) {
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
       ...rateLimitHeaders(rateLimit),
     },
   });

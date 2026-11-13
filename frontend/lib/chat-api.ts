@@ -61,7 +61,7 @@ type ChatErrorResponse = {
   error?: string;
 };
 
-type StreamChatHandlers = {
+export type StreamChatHandlers = {
   onDelta: (text: string) => void;
   /**
    * A fallback provider restarted the answer. Clear the text rendered so far,
@@ -76,7 +76,7 @@ type StreamChatHandlers = {
   onTitle?: (title: string) => void;
 };
 
-type StreamEvent = {
+export type StreamEvent = {
   event: string;
   data: unknown;
 };
@@ -94,13 +94,14 @@ async function parseJsonError(response: Response) {
   return data?.error ?? "The assistant could not answer this question.";
 }
 
-function parseSseFrame(frame: string): StreamEvent | null {
+export function parseSseFrame(frame: string): StreamEvent | null {
   let event = "message";
   const dataLines: string[] = [];
 
-  frame.split("\n").forEach((line) => {
-    if (line.startsWith("event: ")) event = line.slice(7).trim();
-    if (line.startsWith("data: ")) dataLines.push(line.slice(6));
+  frame.split(/\r?\n/).forEach((line) => {
+    if (line.startsWith(":")) return;
+    if (line.startsWith("event:")) event = line.slice(6).replace(/^ /, "").trim();
+    if (line.startsWith("data:")) dataLines.push(line.slice(5).replace(/^ /, ""));
   });
 
   if (!dataLines.length) return null;
@@ -212,7 +213,7 @@ function dispatchStreamEvent(
   }
 }
 
-async function consumeSseReader(
+export async function consumeSseReader(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   onEvent: (event: StreamEvent) => void,
 ) {
@@ -223,7 +224,7 @@ async function consumeSseReader(
     const { done, value } = await reader.read();
     buffer += decoder.decode(value, { stream: !done });
 
-    const frames = buffer.split("\n\n");
+    const frames = buffer.split(/\r?\n\r?\n/);
     buffer = frames.pop() ?? "";
 
     for (const frame of frames) {

@@ -654,6 +654,13 @@ export async function POST(request: Request) {
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       let clientGone = false;
+      try {
+        // Flush an initial SSE comment immediately so proxies and browsers open the stream.
+        controller.enqueue(encoder.encode(": stream-open\n\n"));
+      } catch {
+        clientGone = true;
+      }
+
       const send: SseSend = (event, data) => {
         if (clientGone) return;
         try {
@@ -695,6 +702,7 @@ export async function POST(request: Request) {
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
       ...rateLimitHeaders(rateLimit),
     },
   });

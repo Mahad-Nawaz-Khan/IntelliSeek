@@ -92,8 +92,14 @@ const markdownComponents: Components = {
   pre: ({ children }) => <CodeBlockPre>{children}</CodeBlockPre>,
 };
 
-function renderMessageBody(isStreaming: boolean, isUser: boolean, content: string, compact: boolean) {
-  if (isStreaming) {
+function renderMessageBody(
+  isPreparing: boolean,
+  isStreaming: boolean,
+  isUser: boolean,
+  content: string,
+  compact: boolean,
+) {
+  if (isPreparing) {
     return (
       <output aria-live="polite" className="block space-y-2.5 py-1">
         <span className="sr-only">IntelliSeek is preparing an answer</span>
@@ -114,6 +120,15 @@ function renderMessageBody(isStreaming: boolean, isUser: boolean, content: strin
       } text-slate-100 [&_a]:text-cyan-200 [&_a]:underline [&_blockquote]:my-4 [&_blockquote]:border-l-2 [&_blockquote]:border-cyan-300/40 [&_blockquote]:pl-4 [&_blockquote]:text-slate-300 [&_code]:rounded-md [&_code]:bg-slate-950/70 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-cyan-100 [&_h1]:mb-3 [&_h1]:mt-1 [&_h1]:text-lg [&_h1]:font-semibold [&_h1]:tracking-[-0.03em] [&_h1]:text-white md:[&_h1]:text-xl lg:[&_h1]:text-2xl [&_h2]:mb-3 [&_h2]:mt-5 [&_h2]:text-base [&_h2]:font-semibold [&_h2]:tracking-[-0.03em] [&_h2]:text-white md:[&_h2]:text-lg lg:[&_h2]:text-xl [&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:text-white md:[&_h3]:text-base lg:[&_h3]:text-lg [&_li]:my-1.5 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:space-y-1 [&_ol]:pl-6 [&_p]:my-3 md:[&_p]:text-justify md:[&_p]:hyphens-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_strong]:font-semibold [&_strong]:text-white [&_table]:my-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-white/10 [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:border-white/10 [&_th]:bg-white/10 [&_th]:px-3 [&_th]:py-2 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:space-y-1 [&_ul]:pl-6`}
     >
       <ReactMarkdown components={markdownComponents}>{content}</ReactMarkdown>
+      {isStreaming && (
+        <span
+          aria-hidden="true"
+          className="mt-1 inline-flex items-center gap-1.5 text-[0.7rem] font-medium tracking-wide text-cyan-200/75"
+        >
+          <span className="h-2 w-2 animate-pulse rounded-full bg-cyan-300" />
+          <span>Streaming...</span>
+        </span>
+      )}
     </div>
   );
 }
@@ -125,7 +140,8 @@ export function ChatMessage({ message, onRetry }: Readonly<ChatMessageProps>) {
   const isUser = message.role === "user";
   const content = message.displayedContent ?? message.content;
   const sourceGroups = message.sources?.length ? groupSourceCitations(message.sources) : [];
-  const isStreaming = message.status === "loading";
+  const isStreaming = !isUser && message.status === "loading";
+  const isPreparing = isStreaming && !content;
 
   const handleCopyMessage = () => {
     if (!content || typeof navigator === "undefined" || !navigator.clipboard) return;
@@ -145,7 +161,7 @@ export function ChatMessage({ message, onRetry }: Readonly<ChatMessageProps>) {
       )}
 
       <div className={`transition ${getMessageContainerClass(isUser, message.status, preferences.compactMessages)}`}>
-        {renderMessageBody(isStreaming, isUser, content, preferences.compactMessages)}
+        {renderMessageBody(isPreparing, isStreaming, isUser, content, preferences.compactMessages)}
 
         {!isUser && message.status === "complete" && (
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-3">

@@ -25,10 +25,17 @@ import {
   streamChatQuestion,
   streamChatQuestionDemo,
   type ChatMessage as ChatMessageType,
+  type ChatResponse,
   type ChatRetrievalHint,
   type ChatSessionSummary,
+  type StreamChatHandlers,
 } from "../lib/chat-api";
 import { usePreferences } from "../lib/preferences";
+import {
+  createTextStreamSmoother,
+  type StreamSmootherResult,
+  type TextStreamSmoother,
+} from "../lib/stream-smoother";
 import type { AutocompleteSuggestion } from "../lib/trie-autocomplete";
 import { uploadDocumentFile, type UploadToastPayload } from "../lib/upload-document";
 import { createSourceGroups } from "../lib/ui-state";
@@ -178,6 +185,8 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeJobIdRef = useRef<string | null>(null);
+  const activeSmootherRef = useRef<TextStreamSmoother | null>(null);
+  const mountedRef = useRef(true);
   const queuedMessagesRef = useRef<QueuedChatMessage[]>([]);
   const conversationRunRef = useRef(0);
   const isLoadingRef = useRef(false);
@@ -185,6 +194,15 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isPinnedToBottomRef = useRef(true);
   const sessionParam = searchParams.get("session");
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      activeSmootherRef.current?.stop();
+      activeSmootherRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     queuedMessagesRef.current = queuedMessages;
@@ -316,8 +334,12 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
   );
 
   const latestMessage = messages.length ? messages[messages.length - 1] : undefined;
+  const hasStartedAnswer =
+    latestMessage?.role === "assistant" &&
+    (Boolean(latestMessage.sources?.length) ||
+      Boolean((latestMessage.displayedContent ?? latestMessage.content).length));
   const retrievalMessage =
-    isLoading && latestMessage?.role === "assistant" && latestMessage.sources?.length
+    isLoading && hasStartedAnswer
       ? "Writing your answer..."
       : includeKnowledgeBase
         ? "Searching your indexed documents..."
@@ -455,10 +477,45 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
       setIsLoading(true);
       isLoadingRef.current = true;
 
-      let streamedAnswer = "";
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
-      const sessionAtSend = activeSessionIdRef.current;
+      let expectedSessionId = activeSessionIdRef.current;
+      let drainPromise: Promise<StreamSmootherResult> | null = null;
+      let doneResponse: ChatResponse | null = null;
+
+      const isRunAttached = () =>
+        mountedRef.current &&
+        conversationRunRef.current === runScope &&
+        activeSessionIdRef.current === expectedSessionId;
+
+      const smoother = createTextStreamSmoother({
+        onUpdate: (revealed) => {
+          if (!isRunAttached()) return;
+          setMessages((current) =>
+            patchAssistantMessage(current, assistantId, {
+              displayedContent: revealed,
+              status: "loading",
+            }),
+          );
+        },
+        onComplete: (finalText) => {
+          if (!isRunAttached()) return;
+          setMessages((current) =>
+            patchAssistantMessage(current, assistantId, {
+              content: finalText,
+              displayedContent: undefined,
+              ...(doneResponse ? { sources: doneResponse.sources } : {}),
+              status: "complete",
+            }),
+          );
+        },
+      });
+      activeSmootherRef.current = smoother;
+
+      const handleAbort = () => {
+        smoother.stop();
+      };
+      abortController.signal.addEventListener("abort", handleAbort, { once: true });
 
       const effectiveRetrievalHint: ChatRetrievalHint | undefined =
         selectedSuggestion?.metadata ??
@@ -470,129 +527,117 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
             }
           : undefined);
 
-      const resetStreamedAnswer = () => {
-        streamedAnswer = "";
-        setMessages((current) =>
-          patchAssistantMessage(current, assistantId, {
-            content: "",
-            displayedContent: "",
-            status: "loading",
-          }),
-        );
+      const streamHandlers: StreamChatHandlers = {
+        onJob: demo
+          ? undefined
+          : (jobId) => {
+              if (isRunAttached()) {
+                activeJobIdRef.current = jobId;
+              }
+            },
+        onDelta: (text) => {
+          smoother.push(text);
+        },
+        onReset: () => {
+          smoother.reset();
+          if (!isRunAttached()) return;
+          setMessages((current) =>
+            patchAssistantMessage(current, assistantId, {
+              content: "",
+              displayedContent: "",
+              status: "loading",
+            }),
+          );
+        },
+        onSources: (streamSources) => {
+          if (!isRunAttached()) return;
+          setMessages((current) =>
+            patchAssistantMessage(current, assistantId, { sources: streamSources }),
+          );
+        },
+        onDone: (response) => {
+          doneResponse = response;
+          const completedSessionId = response.chatSessionId;
+          const stillAttached = isRunAttached();
+
+          if (stillAttached) {
+            if (completedSessionId) {
+              expectedSessionId = completedSessionId;
+              activeSessionIdRef.current = completedSessionId;
+              setActiveSessionId(completedSessionId);
+              workspace?.setActiveSessionId(completedSessionId);
+              loadedSessionRef.current = completedSessionId;
+              window.history.replaceState(null, "", `/chat?session=${encodeURIComponent(completedSessionId)}`);
+            }
+            // Hold status as "loading" until the visual reveal drains so footer actions
+            // and source fallback copy appear cleanly after streaming finishes.
+            setMessages((current) =>
+              patchAssistantMessage(current, assistantId, {
+                content: response.answer,
+                sources: response.sources,
+              }),
+            );
+            drainPromise = smoother.complete(response.answer);
+          } else {
+            smoother.stop();
+            if (completedSessionId && loadedSessionRef.current === completedSessionId) {
+              loadedSessionRef.current = null;
+            }
+          }
+
+          if (!demo) {
+            refreshRecentChats().catch(noop);
+          }
+        },
+        onTitle: demo
+          ? undefined
+          : (title) => {
+              const sessionId = activeSessionIdRef.current;
+              if (!sessionId) return;
+              const applyTitle = (current: ChatSessionSummary[]) => {
+                if (!hasMatchingSession(current, sessionId)) {
+                  refreshRecentChats().catch(noop);
+                  return current;
+                }
+                return updateSessionTitleInRows(current, sessionId, title);
+              };
+              setRecentSessionRows(applyTitle);
+              workspace?.setRecentSessionRows(applyTitle);
+            },
       };
 
       try {
-        if (demo) {
-          await streamChatQuestionDemo(
-            trimmedQuestion,
-            {
-              onDelta: (text) => {
-                streamedAnswer += text;
-                setMessages((current) =>
-                  patchAssistantMessage(current, assistantId, {
-                    content: streamedAnswer,
-                    displayedContent: streamedAnswer,
-                    status: "complete",
-                  }),
-                );
-              },
-              onReset: resetStreamedAnswer,
-              onSources: (demoSources) => {
-                setMessages((current) =>
-                  patchAssistantMessage(current, assistantId, { sources: demoSources }),
-                );
-              },
-              onDone: (response) => {
-                setMessages((current) =>
-                  patchAssistantMessage(current, assistantId, {
-                    content: response.answer,
-                    displayedContent: undefined,
-                    sources: response.sources,
-                    status: "complete",
-                  }),
-                );
-              },
-            },
-            abortController.signal,
-          );
-        } else {
-          await streamChatQuestion(
-            trimmedQuestion,
-            {
-              onJob: (jobId) => {
-                activeJobIdRef.current = jobId;
-              },
-              onDelta: (text) => {
-                streamedAnswer += text;
-                setMessages((current) =>
-                  patchAssistantMessage(current, assistantId, {
-                    content: streamedAnswer,
-                    displayedContent: streamedAnswer,
-                    status: "complete",
-                  }),
-                );
-              },
-              onReset: resetStreamedAnswer,
-              onSources: (apiSources) => {
-                setMessages((current) =>
-                  patchAssistantMessage(current, assistantId, { sources: apiSources }),
-                );
-              },
-              onDone: (response) => {
-                const completedSessionId = response.chatSessionId;
-                const stillAttached =
-                  conversationRunRef.current === runScope && activeSessionIdRef.current === sessionAtSend;
-
-                if (stillAttached) {
-                  if (completedSessionId) {
-                    activeSessionIdRef.current = completedSessionId;
-                    setActiveSessionId(completedSessionId);
-                    workspace?.setActiveSessionId(completedSessionId);
-                    loadedSessionRef.current = completedSessionId;
-                    window.history.replaceState(null, "", `/chat?session=${encodeURIComponent(completedSessionId)}`);
-                  }
-                  setMessages((current) =>
-                    patchAssistantMessage(current, assistantId, {
-                      content: response.answer,
-                      displayedContent: undefined,
-                      sources: response.sources,
-                      status: "complete",
-                    }),
-                  );
-                } else if (completedSessionId && loadedSessionRef.current === completedSessionId) {
-                  loadedSessionRef.current = null;
-                }
-                refreshRecentChats().catch(noop);
-              },
-              onTitle: (title) => {
-                const sessionId = activeSessionIdRef.current;
-                if (!sessionId) return;
-                const applyTitle = (current: ChatSessionSummary[]) => {
-                  if (!hasMatchingSession(current, sessionId)) {
-                    refreshRecentChats().catch(noop);
-                    return current;
-                  }
-                  return updateSessionTitleInRows(current, sessionId, title);
-                };
-                setRecentSessionRows(applyTitle);
-                workspace?.setRecentSessionRows(applyTitle);
-              },
-            },
-            {
+        await (demo
+          ? streamChatQuestionDemo(trimmedQuestion, streamHandlers, abortController.signal)
+          : streamChatQuestion(trimmedQuestion, streamHandlers, {
               ...(effectiveRetrievalHint ? { retrievalHint: effectiveRetrievalHint } : {}),
-              ...(activeSessionIdRef.current ? { chatSessionId: activeSessionIdRef.current } : {}),
+              ...(expectedSessionId ? { chatSessionId: expectedSessionId } : {}),
               includeKnowledgeBase,
               signal: abortController.signal,
-            },
-          );
+            }));
+
+        if (drainPromise) {
+          const drainResult = await (drainPromise as Promise<StreamSmootherResult>);
+          if (!drainResult.completed && isRunAttached()) {
+            setMessages((current) =>
+              patchAssistantMessage(current, assistantId, {
+                content: drainResult.text,
+                displayedContent: undefined,
+                status: "complete",
+              }),
+            );
+          }
         }
       } catch (error) {
+        const stoppedText = smoother.stop();
+        if (!isRunAttached()) return;
+
         const isAbort =
           error instanceof DOMException
             ? error.name === "AbortError"
             : error instanceof Error && error.name === "AbortError";
 
-        const resolved = resolveErrorMessage(error, isAbort, streamedAnswer);
+        const resolved = resolveErrorMessage(error, isAbort, stoppedText);
         setMessages((current) =>
           patchAssistantMessage(current, assistantId, {
             content: resolved.content,
@@ -601,14 +646,19 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
           }),
         );
       } finally {
+        abortController.signal.removeEventListener("abort", handleAbort);
+        if (activeSmootherRef.current === smoother) {
+          activeSmootherRef.current = null;
+        }
         if (abortControllerRef.current === abortController) {
           abortControllerRef.current = null;
           activeJobIdRef.current = null;
         }
-        setIsLoading(false);
-        isLoadingRef.current = false;
 
         if (conversationRunRef.current === runScope) {
+          setIsLoading(false);
+          isLoadingRef.current = false;
+
           const [nextQueuedMessage, ...remainingQueuedMessages] = queuedMessagesRef.current;
           if (nextQueuedMessage) {
             queuedMessagesRef.current = remainingQueuedMessages;
@@ -707,6 +757,8 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
 
   const handleNewChat = useCallback(() => {
     conversationRunRef.current += 1;
+    activeSmootherRef.current?.stop();
+    activeSmootherRef.current = null;
     if (demo) {
       abortControllerRef.current?.abort();
     } else {
