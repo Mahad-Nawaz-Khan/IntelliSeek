@@ -150,7 +150,10 @@ export function AcademicWorkspace({
           </div>
         )}
 
-        <section className="chat-workspace-surface flex min-h-0 flex-1 flex-col overflow-hidden">
+        <section
+          style={{ backgroundColor: "var(--chat-workspace-bg, #0a0e22)" }}
+          className="chat-workspace-surface flex min-h-0 flex-1 flex-col overflow-hidden bg-[#0a0e22]"
+        >
           <div className="relative flex h-14 items-center justify-center border-b border-white/10 px-3 lg:hidden">
             <button
               type="button"

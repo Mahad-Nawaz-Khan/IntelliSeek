@@ -161,7 +161,10 @@ export function ChatInput({
       : "Ask only from your uploaded documents... (Press / to focus)";
 
   return (
-    <div className="chat-input-surface relative mx-auto w-full max-w-4xl place-self-center rounded-[26px] border p-1.5 transition-colors">
+    <div
+      style={{ backgroundColor: "var(--chat-input-bg, #161f33)" }}
+      className="chat-input-surface relative mx-auto w-full max-w-4xl place-self-center rounded-[26px] border border-white/10 bg-[#161f33] p-1.5 shadow-[0_14px_36px_rgba(0,0,0,0.34)] transition-[border-color] focus-within:border-cyan-400/50"
+    >
       {isAutocompleteOpen && matches.length > 0 && (
         <div className="absolute inset-x-3 bottom-full z-20 mb-2 overflow-hidden rounded-2xl border border-cyan-300/20 bg-slate-950/95 shadow-2xl shadow-cyan-950/30 backdrop-blur-xl">
           <div className="flex items-center justify-between gap-2 border-b border-white/10 px-3 py-2 text-xs font-medium uppercase tracking-[0.22em] text-cyan-200">

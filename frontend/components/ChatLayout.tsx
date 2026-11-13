@@ -994,10 +994,11 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
 
   if (demo) {
     return (
-      <div className="academic-page-shell h-dvh overflow-hidden text-slate-100">
-        <div className="chat-workspace-surface flex h-full flex-col overflow-hidden">
-          {chatContent}
-        </div>
+      <div
+        style={{ backgroundColor: "var(--chat-workspace-bg, #0a0e22)" }}
+        className="chat-workspace-surface flex h-dvh flex-col overflow-hidden bg-[#0a0e22] text-slate-100"
+      >
+        {chatContent}
       </div>
     );
   }

@@ -6,12 +6,16 @@
   --intelliseek-violet: #7c3aed;
   --intelliseek-slate: #0f172a;
   --intelliseek-cyan: #06b6d4;
+  --chat-workspace-bg: #0a0e22;
+  --chat-input-bg: #161f33;
 }
 
 :root[data-theme="light"] {
   --background: #f4f7fb;
   --foreground: #172033;
   --intelliseek-slate: #e8edf5;
+  --chat-workspace-bg: #f1f5f9;
+  --chat-input-bg: #ffffff;
 }
 
 .brand-wordmark-primary {
@@ -449,35 +453,29 @@ button:hover,
   background: #f87171;
 }
 
-/* Chat surface vs solid elevated input pill */
+/* Solid chat workspace (no gradient) and solid lighter input bar */
 .chat-workspace-surface {
-  background-color: #060a14;
+  background-color: var(--chat-workspace-bg, #0a0e22);
+  background-image: none;
 }
 
 :root[data-theme="light"] .chat-workspace-surface {
-  background-color: #eef3f9;
+  background-color: var(--chat-workspace-bg, #f1f5f9);
 }
 
 .chat-input-surface {
-  background-color: #1e293b;
-  border-color: rgb(148 163 184 / 0.22);
-  box-shadow: 0 6px 20px rgb(2 6 23 / 0.35);
+  background-color: var(--chat-input-bg, #161f33);
 }
 
-.chat-input-surface:focus-within {
-  border-color: rgb(148 163 184 / 0.34);
-  box-shadow: 0 6px 20px rgb(2 6 23 / 0.35);
+:root[data-theme="light"] .chat-input-surface.border {
+  background-color: var(--chat-input-bg, #ffffff);
+  border-color: rgb(71 85 105 / 0.18);
+  box-shadow: 0 10px 28px rgb(15 23 42 / 0.08);
 }
 
-:root[data-theme="light"] .chat-input-surface {
-  background-color: #ffffff;
-  border-color: rgb(15 23 42 / 0.14);
-  box-shadow: 0 6px 20px rgb(15 23 42 / 0.08);
-}
-
-:root[data-theme="light"] .chat-input-surface:focus-within {
-  border-color: rgb(15 23 42 / 0.24);
-  box-shadow: 0 6px 20px rgb(15 23 42 / 0.08);
+:root[data-theme="light"] .chat-input-surface.border:focus-within {
+  border-color: rgb(8 145 178 / 0.6);
+  box-shadow: 0 10px 28px rgb(15 23 42 / 0.08);
 }
 
 @keyframes status-dot-pulse {
