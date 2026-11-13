@@ -106,7 +106,6 @@ type ChatConversationViewProps = {
   hasPersonalSources: boolean;
   includeKnowledgeBase: boolean;
   isDemo: boolean;
-  onSubmit: (question: string) => boolean;
   onRetryMessage?: (assistantMessageIndex: number) => void;
   onOpenUpload?: () => void;
   bottomRef: React.RefObject<HTMLDivElement | null>;
@@ -119,7 +118,6 @@ function ChatConversationView({
   hasPersonalSources,
   includeKnowledgeBase,
   isDemo,
-  onSubmit,
   onRetryMessage,
   onOpenUpload,
   bottomRef,
@@ -135,11 +133,9 @@ function ChatConversationView({
   if (messages.length === 0) {
     return (
       <ChatWelcome
-        disabled={isLoading}
         hasPersonalSources={hasPersonalSources}
         includeKnowledgeBase={includeKnowledgeBase}
         isDemo={isDemo}
-        onSelect={onSubmit}
         onOpenUpload={onOpenUpload}
       />
     );
@@ -900,7 +896,7 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
             className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-4 pt-4 pb-2 sm:px-6"
           >
             <div className="flex min-h-full flex-col">
-              <div className="flex-1 pb-4">
+              <div className={`flex-1 pb-4 ${messages.length === 0 && !isLoadingSession ? "flex items-center justify-center" : ""}`}>
                 <ChatConversationView
                   isLoadingSession={isLoadingSession}
                   messages={messages}
@@ -910,7 +906,6 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
                   )}
                   includeKnowledgeBase={includeKnowledgeBase}
                   isDemo={demo}
-                  onSubmit={handleSubmit}
                   onRetryMessage={handleRetryMessage}
                   onOpenUpload={demo ? undefined : triggerOpenUpload}
                   bottomRef={bottomRef}
@@ -999,8 +994,10 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
 
   if (demo) {
     return (
-      <div className="academic-page-shell flex h-dvh flex-col overflow-hidden text-slate-100">
-        {chatContent}
+      <div className="academic-page-shell h-dvh overflow-hidden text-slate-100">
+        <div className="chat-workspace-surface flex h-full flex-col overflow-hidden">
+          {chatContent}
+        </div>
       </div>
     );
   }

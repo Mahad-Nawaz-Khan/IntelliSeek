@@ -449,6 +449,37 @@ button:hover,
   background: #f87171;
 }
 
+/* Chat surface vs solid elevated input pill */
+.chat-workspace-surface {
+  background-color: #060a14;
+}
+
+:root[data-theme="light"] .chat-workspace-surface {
+  background-color: #eef3f9;
+}
+
+.chat-input-surface {
+  background-color: #1e293b;
+  border-color: rgb(148 163 184 / 0.22);
+  box-shadow: 0 6px 20px rgb(2 6 23 / 0.35);
+}
+
+.chat-input-surface:focus-within {
+  border-color: rgb(148 163 184 / 0.34);
+  box-shadow: 0 6px 20px rgb(2 6 23 / 0.35);
+}
+
+:root[data-theme="light"] .chat-input-surface {
+  background-color: #ffffff;
+  border-color: rgb(15 23 42 / 0.14);
+  box-shadow: 0 6px 20px rgb(15 23 42 / 0.08);
+}
+
+:root[data-theme="light"] .chat-input-surface:focus-within {
+  border-color: rgb(15 23 42 / 0.24);
+  box-shadow: 0 6px 20px rgb(15 23 42 / 0.08);
+}
+
 @keyframes status-dot-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.4; transform: scale(0.75); }

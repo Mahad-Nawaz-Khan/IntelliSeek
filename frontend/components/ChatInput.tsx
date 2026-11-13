@@ -161,7 +161,7 @@ export function ChatInput({
       : "Ask only from your uploaded documents... (Press / to focus)";
 
   return (
-    <div className="relative mx-auto w-full max-w-4xl place-self-center rounded-[26px] border border-white/10 bg-slate-950/75 p-1.5 shadow-[0_14px_36px_rgba(0,0,0,0.34)] backdrop-blur-xl transition-[border-color,box-shadow] focus-within:border-cyan-400/50 focus-within:shadow-[0_16px_44px_rgba(8,145,178,0.2)]">
+    <div className="chat-input-surface relative mx-auto w-full max-w-4xl place-self-center rounded-[26px] border p-1.5 transition-colors">
       {isAutocompleteOpen && matches.length > 0 && (
         <div className="absolute inset-x-3 bottom-full z-20 mb-2 overflow-hidden rounded-2xl border border-cyan-300/20 bg-slate-950/95 shadow-2xl shadow-cyan-950/30 backdrop-blur-xl">
           <div className="flex items-center justify-between gap-2 border-b border-white/10 px-3 py-2 text-xs font-medium uppercase tracking-[0.22em] text-cyan-200">
@@ -220,7 +220,7 @@ export function ChatInput({
         <div className="relative min-w-0 flex-1">
           {!value && (
             <span
-              className={`pointer-events-none absolute top-1/2 -translate-y-1/2 truncate text-sm leading-5 text-slate-500 ${
+              className={`pointer-events-none absolute top-1/2 -translate-y-1/2 truncate text-sm leading-5 text-slate-400 ${
                 onOpenUpload ? "inset-x-2" : "left-3.5 right-2"
               }`}
             >

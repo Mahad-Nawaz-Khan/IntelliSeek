@@ -67,66 +67,68 @@ export function AppSidebar({
 
   if (isCollapsed) {
     return (
-      <aside className="flex h-full w-16 shrink-0 flex-col items-center gap-2 overflow-hidden bg-slate-950/75 px-1.5 py-4 backdrop-blur-xl">
+      <aside className="flex h-full min-h-0 w-16 shrink-0 flex-col items-center gap-2 overflow-hidden bg-slate-950/75 px-1.5 py-4 backdrop-blur-xl">
         <button
           type="button"
           onClick={onToggleCollapsed}
-          className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10 hover:text-white"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10 hover:text-white"
           aria-label="Expand sidebar"
           title="Expand sidebar"
         >
           <Menu className="h-5 w-5" />
         </button>
 
-        <div className="my-1 h-px w-6 bg-white/10" />
+        <div className="my-1 h-px w-6 shrink-0 bg-white/10" />
 
-        {onNewChat && (
-          <button
-            type="button"
-            onClick={onNewChat}
-            className="flex h-10 w-10 items-center justify-center rounded-2xl border border-violet-300/20 bg-violet-400/10 text-violet-100 transition hover:bg-violet-400/20 hover:text-white"
-            aria-label="New chat"
-            title="New chat"
-          >
-            <MessageSquarePlus className="h-4 w-4" />
-          </button>
-        )}
+        <div className="scrollbar-hidden flex min-h-0 w-full flex-1 flex-col items-center gap-2 overflow-y-auto py-0.5">
+          {onNewChat && (
+            <button
+              type="button"
+              onClick={onNewChat}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-violet-300/20 bg-violet-400/10 text-violet-100 transition hover:bg-violet-400/20 hover:text-white"
+              aria-label="New chat"
+              title="New chat"
+            >
+              <MessageSquarePlus className="h-4 w-4" />
+            </button>
+          )}
 
-        {onOpenUpload && (
-          <button
-            type="button"
-            onClick={onOpenUpload}
-            className="flex h-10 w-10 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-100 transition hover:bg-cyan-300/20 hover:text-white"
-            aria-label="Upload document"
-            title="Upload document"
-          >
-            <FileUp className="h-4 w-4" />
-          </button>
-        )}
+          {onOpenUpload && (
+            <button
+              type="button"
+              onClick={onOpenUpload}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-100 transition hover:bg-cyan-300/20 hover:text-white"
+              aria-label="Upload document"
+              title="Upload document"
+            >
+              <FileUp className="h-4 w-4" />
+            </button>
+          )}
 
-        <nav className="mt-1 flex flex-col items-center gap-1">
-          {navigation.map((item) => {
-            const Icon = item.icon;
-            const active = pathname === item.href;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`flex h-10 w-10 items-center justify-center rounded-2xl transition ${
-                  active
-                    ? "bg-cyan-300/15 text-cyan-50 ring-1 ring-cyan-300/25"
-                    : "text-slate-400 hover:bg-white/5 hover:text-white"
-                }`}
-                aria-label={item.label}
-                title={item.label}
-              >
-                <Icon className="h-4 w-4" />
-              </Link>
-            );
-          })}
-        </nav>
+          <nav className="mt-1 flex shrink-0 flex-col items-center gap-1">
+            {navigation.map((item) => {
+              const Icon = item.icon;
+              const active = pathname === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`flex h-10 w-10 items-center justify-center rounded-2xl transition ${
+                    active
+                      ? "bg-cyan-300/15 text-cyan-50 ring-1 ring-cyan-300/25"
+                      : "text-slate-400 hover:bg-white/5 hover:text-white"
+                  }`}
+                  aria-label={item.label}
+                  title={item.label}
+                >
+                  <Icon className="h-4 w-4" />
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
 
-        <div className="mt-auto flex flex-col items-center gap-2">
+        <div className="mt-auto flex shrink-0 flex-col items-center gap-2 pt-1">
           {user?.email ? (
             <span
               className="flex h-9 w-9 items-center justify-center rounded-full bg-cyan-300/15 text-xs font-semibold text-cyan-200 ring-1 ring-cyan-300/25"
@@ -159,100 +161,106 @@ export function AppSidebar({
   }
 
   return (
-    <aside className="scrollbar-hidden flex h-full w-full flex-col gap-3 overflow-y-auto bg-slate-950/75 px-3 py-4 backdrop-blur-xl lg:w-64 lg:shrink-0">
-      <div className="flex items-start justify-between gap-2 px-1 py-1">
-        <Link href="/chat" className="flex min-w-0 items-center gap-2.5">
-          <BrandMark />
-          <span className="min-w-0">
-            <span className="block text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-cyan-100">IntelliSeek</span>
-            <span className="block truncate text-sm font-semibold text-white">Academic AI</span>
-          </span>
-        </Link>
-        {onClose && (
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg p-1.5 text-slate-300 transition hover:bg-white/10 hover:text-white lg:hidden"
-            aria-label="Close sidebar"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        )}
-        {onToggleCollapsed && (
-          <button
-            type="button"
-            onClick={onToggleCollapsed}
-            className="hidden rounded-lg p-1.5 text-slate-300 transition hover:bg-white/10 hover:text-white lg:inline-flex"
-            aria-label="Collapse sidebar"
-            title="Collapse sidebar"
-          >
-            <Menu className="h-4 w-4" />
-          </button>
-        )}
-      </div>
-
-      <PrimaryButton
-        type="button"
-        onClick={onNewChat}
-        variant="secondary"
-        className="h-9.5 w-full justify-start rounded-xl px-3 text-xs shadow-sm"
-      >
-        <MessageSquarePlus className="h-3.5 w-3.5" />
-        New Chat
-      </PrimaryButton>
-
-      <nav className="grid gap-1">
-        {navigation.map((item) => {
-          const Icon = item.icon;
-          const active = pathname === item.href;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={() => onClose?.()}
-              className={`relative flex items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-medium transition hover:cursor-pointer ${
-                active
-                  ? "bg-cyan-300/12 text-cyan-50 ring-1 ring-cyan-300/20"
-                  : "text-slate-400 hover:bg-white/5 hover:text-white"
-              }`}
+    <aside className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-slate-950/75 backdrop-blur-xl lg:w-64 lg:shrink-0">
+      <div className="shrink-0 px-3 pt-4 pb-2">
+        <div className="flex items-start justify-between gap-2 px-1 py-1">
+          <Link href="/chat" className="flex min-w-0 items-center gap-2.5">
+            <BrandMark />
+            <span className="min-w-0">
+              <span className="block text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-cyan-100">IntelliSeek</span>
+              <span className="block truncate text-sm font-semibold text-white">Academic AI</span>
+            </span>
+          </Link>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg p-1.5 text-slate-300 transition hover:bg-white/10 hover:text-white lg:hidden"
+              aria-label="Close sidebar"
             >
-              {active && (
-                <span className="absolute left-0 top-1/2 h-4 w-0.75 -translate-y-1/2 rounded-r-full bg-cyan-300" />
-              )}
-              <Icon className={`h-3.5 w-3.5 ${active ? "text-cyan-300" : ""}`} />
-              {item.label}
-            </Link>
-          );
-        })}
-      </nav>
-
-      <div className="pt-1">
-        <SourceGroups
-          groups={groups}
-          status={sourceStatus}
-          deletingSourceId={deletingSourceId}
-          focusedSourceId={focusedSourceId}
-          includeKnowledgeBase={includeKnowledgeBase}
-          onToggleKnowledgeBase={onToggleKnowledgeBase}
-          onSelectSource={onSelectSource}
-          onDeleteSource={onDeleteSource}
-          onOpenUpload={onOpenUpload}
-          onOpenKnowledgeBaseUpload={onOpenKnowledgeBaseUpload}
-          canManageKnowledgeBase={canManageKnowledgeBase}
-        />
+              <X className="h-4 w-4" />
+            </button>
+          )}
+          {onToggleCollapsed && (
+            <button
+              type="button"
+              onClick={onToggleCollapsed}
+              className="hidden rounded-lg p-1.5 text-slate-300 transition hover:bg-white/10 hover:text-white lg:inline-flex"
+              aria-label="Collapse sidebar"
+              title="Collapse sidebar"
+            >
+              <Menu className="h-4 w-4" />
+            </button>
+          )}
+        </div>
       </div>
 
-      <div className="pt-1">
-        <RecentChats
-          sessions={recentChats}
-          deletingSessionId={deletingSessionId}
-          onDeleteSession={onDeleteSession}
-          onRenameSession={onRenameSession}
-          onOpenSession={onOpenSession}
-        />
+      <div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-3 py-1">
+        <div className="space-y-3">
+          <PrimaryButton
+            type="button"
+            onClick={onNewChat}
+            variant="secondary"
+            className="h-9.5 w-full justify-start rounded-xl px-3 text-xs shadow-sm"
+          >
+            <MessageSquarePlus className="h-3.5 w-3.5" />
+            New Chat
+          </PrimaryButton>
+
+          <nav className="grid gap-1">
+            {navigation.map((item) => {
+              const Icon = item.icon;
+              const active = pathname === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={() => onClose?.()}
+                  className={`relative flex items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-medium transition hover:cursor-pointer ${
+                    active
+                      ? "bg-cyan-300/12 text-cyan-50 ring-1 ring-cyan-300/20"
+                      : "text-slate-400 hover:bg-white/5 hover:text-white"
+                  }`}
+                >
+                  {active && (
+                    <span className="absolute left-0 top-1/2 h-4 w-0.75 -translate-y-1/2 rounded-r-full bg-cyan-300" />
+                  )}
+                  <Icon className={`h-3.5 w-3.5 ${active ? "text-cyan-300" : ""}`} />
+                  {item.label}
+                </Link>
+              );
+            })}
+          </nav>
+
+          <div className="pt-1">
+            <SourceGroups
+              groups={groups}
+              status={sourceStatus}
+              deletingSourceId={deletingSourceId}
+              focusedSourceId={focusedSourceId}
+              includeKnowledgeBase={includeKnowledgeBase}
+              onToggleKnowledgeBase={onToggleKnowledgeBase}
+              onSelectSource={onSelectSource}
+              onDeleteSource={onDeleteSource}
+              onOpenUpload={onOpenUpload}
+              onOpenKnowledgeBaseUpload={onOpenKnowledgeBaseUpload}
+              canManageKnowledgeBase={canManageKnowledgeBase}
+            />
+          </div>
+
+          <div className="pt-1">
+            <RecentChats
+              sessions={recentChats}
+              deletingSessionId={deletingSessionId}
+              onDeleteSession={onDeleteSession}
+              onRenameSession={onRenameSession}
+              onOpenSession={onOpenSession}
+            />
+          </div>
+        </div>
       </div>
 
-      <div className="mt-auto border-t border-white/10 px-1 pt-3">
+      <div className="mx-3 shrink-0 border-t border-white/10 px-1 pt-3 pb-4">
         <div className="flex items-center gap-2.5">
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-cyan-300/15 text-xs font-semibold text-cyan-200 ring-1 ring-cyan-300/20">
             {user?.email ? user.email.charAt(0).toUpperCase() : "U"}

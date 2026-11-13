@@ -150,7 +150,7 @@ export function AcademicWorkspace({
           </div>
         )}
 
-        <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-950/55 backdrop-blur-xl">
+        <section className="chat-workspace-surface flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="relative flex h-14 items-center justify-center border-b border-white/10 px-3 lg:hidden">
             <button
               type="button"
