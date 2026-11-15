@@ -283,3 +283,81 @@ describe("POST /api/chat temporary chat mode", () => {
     );
   });
 });
+
+describe("POST /api/chat selectedDocumentIds scoping", () => {
+  const SELECTED_KB_DOC_ID = "22222222-2222-4222-8222-222222222222";
+
+  beforeEach(() => {
+    listPersonalIndexedDocumentIdsMock.mockClear();
+    retrieveContextMock.mockClear();
+    retrieveKeywordContextMock.mockClear();
+    streamGeneralAgentAnswerMock.mockClear();
+    supabaseFromMock.mockClear();
+  });
+
+  it("rejects non-array or non-UUID selectedDocumentIds values with HTTP 400", async () => {
+    for (const invalidSelected of ["11111111-1111-4111-8111-111111111111", ["not-a-uuid"], [123], {}]) {
+      const response = await POST(
+        createChatRequest({
+          question: "Explain recursion",
+          selectedDocumentIds: invalidSelected,
+        }),
+      );
+
+      expect(response.status).toBe(400);
+      expect(retrieveContextMock).not.toHaveBeenCalled();
+    }
+  });
+
+  it("skips document retrieval and streams general mode when selectedDocumentIds is empty", async () => {
+    const response = await POST(
+      createChatRequest({
+        question: "Explain recursion",
+        selectedDocumentIds: [],
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await response.text();
+
+    expect(listPersonalIndexedDocumentIdsMock).not.toHaveBeenCalled();
+    expect(retrieveContextMock).not.toHaveBeenCalled();
+    expect(retrieveKeywordContextMock).not.toHaveBeenCalled();
+    expect(streamGeneralAgentAnswerMock).toHaveBeenCalledWith(
+      "Explain recursion",
+      [],
+      expect.anything(),
+      { includeKnowledgeBase: true },
+    );
+  });
+
+  it("forwards deduplicated selectedDocumentIds strictly to hybrid retrieval", async () => {
+    const response = await POST(
+      createChatRequest({
+        question: "Explain recursion",
+        selectedDocumentIds: [SELECTED_KB_DOC_ID, SELECTED_KB_DOC_ID],
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await response.text();
+
+    expect(listPersonalIndexedDocumentIdsMock).not.toHaveBeenCalled();
+    expect(retrieveContextMock).toHaveBeenCalledWith(
+      "Explain recursion",
+      USER_ID,
+      10,
+      expect.anything(),
+      [],
+      { includeKnowledgeBase: true, selectedDocumentIds: [SELECTED_KB_DOC_ID] },
+    );
+    expect(retrieveKeywordContextMock).toHaveBeenCalledWith(
+      "Explain recursion",
+      USER_ID,
+      8,
+      expect.anything(),
+      [],
+      { includeKnowledgeBase: true, selectedDocumentIds: [SELECTED_KB_DOC_ID] },
+    );
+  });
+});

@@ -47,6 +47,8 @@ export type RetrievalScopeOptions = {
   includeKnowledgeBase?: boolean;
   /** Optional pre-resolved personal indexed document ids to avoid duplicate lookups across parallel strategies. */
   personalDocumentIds?: string[];
+  /** Optional explicit user-checked document IDs that restrict retrieval solely to those documents. */
+  selectedDocumentIds?: string[];
 };
 
 type IndexedDocumentRow = {
@@ -111,6 +113,33 @@ async function resolveRpcScopedDocumentIds(
   const cleanHinted = filterUuids(requestedDocumentIds);
   const hintedIds = typeof maxHinted === "number" ? cleanHinted.slice(0, maxHinted) : cleanHinted;
   const includeKnowledgeBase = options.includeKnowledgeBase !== false;
+
+  if (options.selectedDocumentIds !== undefined) {
+    const selectedIds = filterUuids(options.selectedDocumentIds);
+    if (!selectedIds.length) {
+      return { skip: true };
+    }
+
+    let allowed = selectedIds;
+    if (hintedIds.length) {
+      const hintedSet = new Set(hintedIds);
+      allowed = allowed.filter((id) => hintedSet.has(id));
+    }
+    if (!includeKnowledgeBase) {
+      const personalIds = options.personalDocumentIds ?? await listPersonalIndexedDocumentIds(userId, log);
+      const personalSet = new Set(personalIds);
+      allowed = allowed.filter((id) => personalSet.has(id));
+    }
+    if (!allowed.length) {
+      return { skip: true };
+    }
+
+    return {
+      skip: false,
+      documentIds: allowed,
+      strictDocumentIds: true,
+    };
+  }
 
   if (includeKnowledgeBase) {
     return {
@@ -379,6 +408,13 @@ export async function retrieveKeywordContext(
     return [];
   }
 
+  const selectedIds = options.selectedDocumentIds !== undefined
+    ? filterUuids(options.selectedDocumentIds)
+    : undefined;
+  if (selectedIds !== undefined && selectedIds.length === 0) {
+    return [];
+  }
+
   const supabase = getSupabaseServiceClient();
   if (!supabase) {
     log?.error("retrieval.keyword.client_unavailable", { errorCategory: "supabase_query", userId });
@@ -390,12 +426,22 @@ export async function retrieveKeywordContext(
 
   const startedAt = Date.now();
   const uniqueDocumentIds = filterUuids(documentIds).slice(0, 8);
+  let effectiveDocumentIds = uniqueDocumentIds;
+  if (selectedIds !== undefined) {
+    const selectedSet = new Set(selectedIds);
+    effectiveDocumentIds = uniqueDocumentIds.length
+      ? uniqueDocumentIds.filter((id) => selectedSet.has(id))
+      : selectedIds.slice(0, 50);
+    if (!effectiveDocumentIds.length) {
+      return [];
+    }
+  }
   const orFilter = terms.map((term) => `text_content.ilike.%${term}%`).join(",");
   log?.info("retrieval.keyword.start", {
     userId,
     limit,
     termCount: terms.length,
-    documentCount: uniqueDocumentIds.length,
+    documentCount: effectiveDocumentIds.length,
     includeKnowledgeBase,
   });
 
@@ -409,7 +455,7 @@ export async function retrieveKeywordContext(
 
   query = applyDocumentScopeFilter(query, userId, includeKnowledgeBase, { foreignTable: "documents" });
 
-  if (uniqueDocumentIds.length) query = query.in("document_id", uniqueDocumentIds);
+  if (effectiveDocumentIds.length) query = query.in("document_id", effectiveDocumentIds);
 
   const { data, error } = await query;
   if (error) {
@@ -602,6 +648,7 @@ export async function retrieveContextFromDocumentIds(
   const scopedOptions: RetrievalScopeOptions = {
     includeKnowledgeBase,
     personalDocumentIds,
+    selectedDocumentIds: options.selectedDocumentIds,
   };
 
   log?.info("retrieval.semantic_documents.start", {
@@ -670,8 +717,19 @@ export async function hasIndexedDocuments(
   options: RetrievalScopeOptions = {},
 ) {
   const includeKnowledgeBase = options.includeKnowledgeBase !== false;
+  const selectedIds = options.selectedDocumentIds !== undefined
+    ? filterUuids(options.selectedDocumentIds)
+    : undefined;
+  if (selectedIds !== undefined && selectedIds.length === 0) {
+    return false;
+  }
+
   if (!includeKnowledgeBase && options.personalDocumentIds) {
-    return options.personalDocumentIds.length > 0;
+    if (selectedIds === undefined) {
+      return options.personalDocumentIds.length > 0;
+    }
+    const personalSet = new Set(options.personalDocumentIds);
+    return selectedIds.some((id) => personalSet.has(id));
   }
 
   const supabase = getSupabaseServiceClient();
@@ -680,11 +738,15 @@ export async function hasIndexedDocuments(
     return false;
   }
 
-  const baseQuery = supabase
+  let baseQuery = supabase
     .from("documents")
     .select("id")
     .eq("processing_status", "indexed")
     .limit(1);
+
+  if (selectedIds !== undefined) {
+    baseQuery = baseQuery.in("id", selectedIds);
+  }
 
   const { data, error } = await applyDocumentScopeFilter(baseQuery, userId, includeKnowledgeBase);
 
@@ -716,7 +778,13 @@ export async function retrieveDocumentContextByIds(
     return [];
   }
 
-  const uniqueDocumentIds = filterUuids(documentIds).slice(0, 4);
+  const rawUniqueIds = filterUuids(documentIds).slice(0, 4);
+  const selectedIds = options.selectedDocumentIds !== undefined
+    ? new Set(filterUuids(options.selectedDocumentIds))
+    : undefined;
+  const uniqueDocumentIds = selectedIds !== undefined
+    ? rawUniqueIds.filter((id) => selectedIds.has(id))
+    : rawUniqueIds;
   if (!uniqueDocumentIds.length) {
     log?.warn("retrieval.documents.empty_ids", { errorCategory: "retrieval", userId, limit });
     return [];
@@ -829,6 +897,13 @@ export async function retrieveRepresentativeDocumentContext(
     return [];
   }
 
+  const selectedIds = options.selectedDocumentIds !== undefined
+    ? filterUuids(options.selectedDocumentIds)
+    : undefined;
+  if (selectedIds !== undefined && selectedIds.length === 0) {
+    return [];
+  }
+
   const supabase = getSupabaseServiceClient();
   if (!supabase) {
     log?.error("retrieval.representative.client_unavailable", { errorCategory: "supabase_query", userId });
@@ -843,12 +918,16 @@ export async function retrieveRepresentativeDocumentContext(
     includeKnowledgeBase,
   });
 
-  const baseQuery = supabase
+  let baseQuery = supabase
     .from("documents")
     .select("id, filename, source_scope")
     .eq("processing_status", "indexed")
     .order("created_at", { ascending: false })
     .limit(12);
+
+  if (selectedIds !== undefined) {
+    baseQuery = baseQuery.in("id", selectedIds);
+  }
 
   const { data: documents, error: documentsError } = await applyDocumentScopeFilter(
     baseQuery,

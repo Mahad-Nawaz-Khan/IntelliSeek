@@ -1,10 +1,16 @@
 import { MessageCircleDashed, UploadCloud } from "lucide-react";
 import Link from "next/link";
 
+import {
+  isSourcesResolved,
+  shouldShowWelcomeUploadCta,
+  type SourceStatus,
+} from "../../lib/ui-state";
 import { BrandMark } from "../ui/BrandMark";
 
 type ChatWelcomeProps = {
   hasPersonalSources?: boolean;
+  sourceStatus?: SourceStatus;
   includeKnowledgeBase?: boolean;
   isDemo?: boolean;
   isTemporaryChat?: boolean;
@@ -13,25 +19,41 @@ type ChatWelcomeProps = {
 
 export function ChatWelcome({
   hasPersonalSources = false,
+  sourceStatus = "loading",
   includeKnowledgeBase = true,
   isDemo = false,
   isTemporaryChat = false,
   onOpenUpload,
 }: Readonly<ChatWelcomeProps>) {
+  const hasResolvedSources = isSourcesResolved(sourceStatus);
+  const shouldShowUploadButton = shouldShowWelcomeUploadCta({
+    sourceStatus,
+    hasPersonalSources,
+    isDemo,
+    isTemporaryChat,
+  });
+
   const description = isTemporaryChat
     ? "This conversation won't appear in your recent chats or be saved to your history."
     : isDemo
       ? "Ask a question about the sample course material. Answers include sources so you can check the details."
       : !includeKnowledgeBase
-        ? hasPersonalSources
-          ? "Knowledge Base is off — searching only your uploaded notes. Answers include sources so you can check the details."
-          : "Knowledge Base is turned off. Upload your own notes to ground answers in your files, or re-enable Knowledge Base below."
-        : hasPersonalSources
-          ? "Ask a question about your notes. Answers include sources so you can check the details."
-          : "Ask a question about the shared course material, or upload your own notes to get answers grounded in your files.";
+        ? !hasResolvedSources
+          ? "Knowledge Base is off — checking your uploaded notes. Answers include sources so you can check the details."
+          : hasPersonalSources
+            ? "Knowledge Base is off — searching only your uploaded notes. Answers include sources so you can check the details."
+            : "Knowledge Base is turned off. Upload your own notes to ground answers in your files, or re-enable Knowledge Base from the + menu."
+        : !hasResolvedSources
+          ? "Ask a question about your notes or shared course material. Answers include sources so you can check the details."
+          : hasPersonalSources
+            ? "Ask a question about your notes. Answers include sources so you can check the details."
+            : "Ask a question about the shared course material, or upload your own notes to get answers grounded in your files.";
 
   return (
-    <section className="mx-auto my-0 flex w-full min-w-0 flex-col items-center px-0 py-0 text-center lg:max-w-4xl lg:px-4">
+    <section
+      key={isTemporaryChat ? "temp" : "standard"}
+      className="chat-enter mx-auto my-0 flex w-full min-w-0 flex-col items-center px-0 py-0 text-center lg:max-w-4xl lg:px-4"
+    >
       {isTemporaryChat ? (
         <span className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl border border-dashed border-cyan-300/45 bg-cyan-400/12 text-cyan-200">
           <MessageCircleDashed className="h-6 w-6" />
@@ -49,8 +71,8 @@ export function ChatWelcome({
         {description}
       </p>
 
-      {!isDemo && !isTemporaryChat && !hasPersonalSources && (
-        <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
+      {shouldShowUploadButton && (
+        <div className="chat-fade-in mt-6 flex flex-col justify-center gap-3 sm:flex-row">
           {onOpenUpload ? (
             <button
               type="button"

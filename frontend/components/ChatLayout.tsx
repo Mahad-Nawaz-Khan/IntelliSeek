@@ -39,7 +39,16 @@ import {
 } from "../lib/stream-smoother";
 import type { AutocompleteSuggestion } from "../lib/trie-autocomplete";
 import { uploadDocumentFile, type UploadToastPayload } from "../lib/upload-document";
-import { createSourceGroups } from "../lib/ui-state";
+import {
+  computeSectionSelectionResult,
+  computeSourceToggleResult,
+  createSourceGroups,
+  getSelectedSources,
+  hasPersonalUploadedSources,
+  isSelectableSource,
+  type KnowledgeSource,
+  type SourceStatus,
+} from "../lib/ui-state";
 
 const noop = () => {};
 
@@ -129,6 +138,7 @@ type ChatConversationViewProps = {
   messages: ChatMessageType[];
   isLoading: boolean;
   hasPersonalSources: boolean;
+  sourceStatus: SourceStatus;
   includeKnowledgeBase: boolean;
   isDemo: boolean;
   isTemporaryChat: boolean;
@@ -142,6 +152,7 @@ function ChatConversationView({
   messages,
   isLoading,
   hasPersonalSources,
+  sourceStatus,
   includeKnowledgeBase,
   isDemo,
   isTemporaryChat,
@@ -151,7 +162,7 @@ function ChatConversationView({
 }: Readonly<ChatConversationViewProps>) {
   if (isLoadingSession) {
     return (
-      <div className="mx-auto max-w-5xl space-y-4 py-10">
+      <div className="chat-fade-in mx-auto max-w-5xl space-y-4 py-10">
         <div className="h-12 w-2/3 max-w-md animate-pulse rounded-3xl bg-white/5" />
         <div className="h-24 w-full max-w-3xl animate-pulse rounded-3xl bg-white/5" />
       </div>
@@ -161,6 +172,7 @@ function ChatConversationView({
     return (
       <ChatWelcome
         hasPersonalSources={hasPersonalSources}
+        sourceStatus={sourceStatus}
         includeKnowledgeBase={includeKnowledgeBase}
         isDemo={isDemo}
         isTemporaryChat={isTemporaryChat}
@@ -169,7 +181,7 @@ function ChatConversationView({
     );
   }
   return (
-    <div className="mx-auto max-w-5xl space-y-5">
+    <div className="chat-enter mx-auto max-w-5xl space-y-5">
       {messages.map((message, index) => {
         const canRetry =
           !isLoading &&
@@ -202,6 +214,7 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
 
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [localTemporaryChat, setLocalTemporaryChat] = useState(false);
+  const [localExcludedSourceIds, setLocalExcludedSourceIds] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [queuedMessages, setQueuedMessages] = useState<QueuedChatMessage[]>([]);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
@@ -240,15 +253,21 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
     [demo, workspace],
   );
 
+  const setWorkspaceTemporaryChatRef = useRef(workspace?.setIsTemporaryChat);
+
+  useEffect(() => {
+    setWorkspaceTemporaryChatRef.current = workspace?.setIsTemporaryChat;
+  }, [workspace?.setIsTemporaryChat]);
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       activeSmootherRef.current?.stop();
       activeSmootherRef.current = null;
-      workspace?.setIsTemporaryChat(false);
+      setWorkspaceTemporaryChatRef.current?.(false);
     };
-  }, [workspace]);
+  }, []);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -412,6 +431,23 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
   );
 
   const knowledgeBaseCount = knowledgeBaseDocumentIds.size;
+
+  const excludedSourceIds = !demo && workspace ? workspace.excludedSourceIds : localExcludedSourceIds;
+  const selectableSourceIds = useMemo(
+    () => new Set(sources.filter(isSelectableSource).map((source) => source.id)),
+    [sources],
+  );
+  const selectedSourceIds = useMemo(
+    () =>
+      !demo && workspace
+        ? workspace.selectedSourceIds
+        : getSelectedSources(sources, localExcludedSourceIds, includeKnowledgeBase).map((source) => source.id),
+    [demo, includeKnowledgeBase, localExcludedSourceIds, sources, workspace],
+  );
+  const hasExcludedSources = useMemo(
+    () => excludedSourceIds.some((id) => selectableSourceIds.has(id)),
+    [excludedSourceIds, selectableSourceIds],
+  );
 
   const filteredServerAutocompleteSuggestions = useMemo(() => {
     if (includeKnowledgeBase) return serverAutocompleteSuggestions;
@@ -739,6 +775,7 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
                   ? { chatSessionId: expectedSessionId }
                   : {}),
               includeKnowledgeBase,
+              ...(hasExcludedSources ? { selectedDocumentIds: selectedSourceIds } : {}),
               signal: abortController.signal,
             }));
 
@@ -817,10 +854,12 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
       activeSessionIdRef,
       demo,
       focusedDocument,
+      hasExcludedSources,
       includeKnowledgeBase,
       isLoadingSessionRef,
       loadedSessionRef,
       refreshRecentChats,
+      selectedSourceIds,
       setActiveSessionId,
       setRecentSessionRows,
       workspace,
@@ -1000,6 +1039,71 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
     updatePreference("includeKnowledgeBase", !preferences.includeKnowledgeBase);
   }, [demo, preferences.includeKnowledgeBase, updatePreference, workspace]);
 
+  const handleToggleSourceSelection = useCallback(
+    (sourceId: string) => {
+      if (demo) return;
+      if (workspace) {
+        workspace.toggleSourceSelection(sourceId);
+        return;
+      }
+      const result = computeSourceToggleResult(
+        sources,
+        localExcludedSourceIds,
+        sourceId,
+        includeKnowledgeBase,
+      );
+      setLocalExcludedSourceIds(result.excludedSourceIds);
+      if (result.enableKnowledgeBase) {
+        updatePreference("includeKnowledgeBase", true);
+      }
+    },
+    [demo, includeKnowledgeBase, localExcludedSourceIds, sources, updatePreference, workspace],
+  );
+
+  const handleSetSectionSourcesSelected = useCallback(
+    (sourceType: KnowledgeSource["sourceType"], selected: boolean) => {
+      if (demo) return;
+      if (workspace) {
+        workspace.setSectionSourcesSelected(sourceType, selected);
+        return;
+      }
+      const result = computeSectionSelectionResult(
+        sources,
+        localExcludedSourceIds,
+        sourceType,
+        selected,
+        includeKnowledgeBase,
+      );
+      setLocalExcludedSourceIds(result.excludedSourceIds);
+      if (result.enableKnowledgeBase) {
+        updatePreference("includeKnowledgeBase", true);
+      }
+    },
+    [demo, includeKnowledgeBase, localExcludedSourceIds, sources, updatePreference, workspace],
+  );
+
+  const handleSetAllSourcesSelected = useCallback(
+    (selected: boolean) => {
+      if (demo) return;
+      if (workspace) {
+        workspace.setAllSourcesSelected(selected);
+        return;
+      }
+      if (selected) {
+        setLocalExcludedSourceIds([]);
+        const hasSelectableKb = sources.some(
+          (item) => item.sourceType === "knowledge-base" && isSelectableSource(item),
+        );
+        if (hasSelectableKb && !includeKnowledgeBase) {
+          updatePreference("includeKnowledgeBase", true);
+        }
+        return;
+      }
+      setLocalExcludedSourceIds(sources.filter(isSelectableSource).map((item) => item.id));
+    },
+    [demo, includeKnowledgeBase, sources, updatePreference, workspace],
+  );
+
   const triggerOpenUpload = useCallback(() => {
     if (demo) {
       setShowSignupModal(true);
@@ -1019,7 +1123,7 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
   const isNewChatEmpty = messages.length === 0 && !isLoadingSession;
 
   const chatContent = (
-    <div className={`relative flex min-h-0 flex-1 flex-col ${isNewChatEmpty ? "chat-new-gradient" : ""}`}>
+    <div className={`chat-fade-in relative flex min-h-0 flex-1 flex-col ${isNewChatEmpty ? "chat-new-gradient" : ""}`}>
       <ChatHeader
         onOpenUpload={triggerOpenUpload}
         isTemporaryChat={isTemporaryChat}
@@ -1054,9 +1158,8 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
                   isLoadingSession={isLoadingSession}
                   messages={messages}
                   isLoading={isLoading}
-                  hasPersonalSources={sources.some(
-                    (source) => source.sourceType === "uploaded" && source.status === "indexed",
-                  )}
+                  hasPersonalSources={hasPersonalUploadedSources(sources)}
+                  sourceStatus={sourceStatus}
                   includeKnowledgeBase={includeKnowledgeBase}
                   isDemo={demo}
                   isTemporaryChat={isTemporaryChat}
@@ -1074,15 +1177,15 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
                 }
               >
                 {showScrollToBottom && messages.length > 0 && (
-                  <div className="mb-3 flex justify-center">
+                  <div className="chat-fade-in mb-3 flex justify-center">
                     <button
                       type="button"
                       onClick={() => scrollToBottom("smooth")}
-                      className="inline-flex items-center gap-1.5 rounded-full border border-cyan-300/30 bg-slate-950/90 px-3.5 py-1.5 text-xs font-medium text-cyan-100 shadow-lg shadow-cyan-950/30 backdrop-blur-xl transition hover:border-cyan-300/60 hover:bg-slate-900"
+                      className="chat-scroll-btn flex h-9 w-9 items-center justify-center rounded-full border border-cyan-300/30 bg-slate-950/90 text-cyan-300 shadow-lg shadow-cyan-950/30 backdrop-blur-xl transition hover:border-cyan-300/60 hover:bg-slate-900 hover:text-cyan-100"
                       aria-label="Scroll to latest message"
+                      title="Scroll to latest message"
                     >
-                      <ArrowDown className="h-3.5 w-3.5 text-cyan-300" />
-                      Jump to latest
+                      <ArrowDown className="h-4 w-4" />
                     </button>
                   </div>
                 )}
@@ -1110,12 +1213,18 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
                   includeKnowledgeBase={includeKnowledgeBase}
                   isTemporaryChat={isTemporaryChat}
                   knowledgeBaseCount={knowledgeBaseCount}
+                  sources={demo ? undefined : sources}
+                  selectedSourceIds={demo ? undefined : selectedSourceIds}
                   onToggleKnowledgeBase={demo ? undefined : handleToggleKnowledgeBase}
+                  onToggleSourceSelection={demo ? undefined : handleToggleSourceSelection}
+                  onSetSectionSourcesSelected={demo ? undefined : handleSetSectionSourcesSelected}
+                  onSetAllSourcesSelected={demo ? undefined : handleSetAllSourcesSelected}
                   onClearFocusedDocument={workspace ? () => workspace.setFocusedDocument(null) : undefined}
                   onSubmit={handleSubmit}
                   onRemoveQueuedMessage={handleRemoveQueuedMessage}
                   onStopResponse={handleStopResponse}
                   onOpenUpload={demo ? undefined : triggerOpenUpload}
+                  onUploadFiles={demo ? undefined : uploadDroppedFiles}
                 />
                 {demo && !hasReachedLimit && (
                   <div className="mx-auto mt-2 flex w-full max-w-4xl items-center justify-between text-xs text-slate-500">

@@ -80,7 +80,7 @@ export function AcademicWorkspace({
   };
 
   return (
-    <main className="academic-page-shell h-dvh overflow-hidden text-slate-100">
+    <main className="academic-page-shell chat-fade-in h-dvh overflow-hidden text-slate-100">
       <div className="flex h-full items-stretch gap-px bg-white/10">
         <div className="hidden min-h-0 lg:flex lg:shrink-0">
           <AppSidebar

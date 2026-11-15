@@ -90,7 +90,10 @@ Do not cite uploaded or knowledge-base files or imply that this answer came from
 ${PRIMARY_STYLE_GUIDE}`;
 }
 
-function buildAgentInstructions(includeKnowledgeBase = true) {
+function buildAgentInstructions(includeKnowledgeBase = true, hasSelectedDocumentFilter = false) {
+  if (hasSelectedDocumentFilter) {
+    return `${SYSTEM_PROMPT}\n\nNote: The user has explicitly restricted active sources for this turn. Only search and reference the selected documents.`;
+  }
   if (includeKnowledgeBase) return SYSTEM_PROMPT;
   return `${SYSTEM_PROMPT}\n\nNote: The shared Knowledge Base is currently turned off by the user. Only search and reference the user's personal uploaded documents.`;
 }
@@ -238,7 +241,12 @@ async function findUserDocuments(
   query: string,
   limit: number,
   includeKnowledgeBase = true,
+  selectedDocumentIds?: string[],
 ): Promise<DocumentRow[]> {
+  if (selectedDocumentIds !== undefined && selectedDocumentIds.length === 0) {
+    return [];
+  }
+
   const supabase = getSupabaseServiceClient();
   if (!supabase) throw new Error("Supabase service client is not configured");
 
@@ -256,6 +264,9 @@ async function findUserDocuments(
     includeKnowledgeBase,
   );
 
+  if (selectedDocumentIds !== undefined) {
+    request = request.in("id", selectedDocumentIds);
+  }
   if (safeQuery) request = request.ilike("filename", `%${safeQuery}%`);
 
   const { data, error } = await request;
@@ -268,7 +279,12 @@ async function getUserDocumentChunks(
   documentId: string,
   limit: number,
   includeKnowledgeBase = true,
+  selectedDocumentIds?: string[],
 ): Promise<AgentToolChunk[]> {
+  if (selectedDocumentIds !== undefined && !selectedDocumentIds.includes(documentId)) {
+    return [];
+  }
+
   const supabase = getSupabaseServiceClient();
   if (!supabase) throw new Error("Supabase service client is not configured");
 
@@ -335,6 +351,7 @@ function createAgentRun(userId: string, scopeOptions: RetrievalScopeOptions = {}
   configureAgentClient();
 
   const includeKnowledgeBase = scopeOptions.includeKnowledgeBase !== false;
+  const selectedDocumentIds = scopeOptions.selectedDocumentIds;
   const usedChunks: AgentToolChunk[] = [];
 
   const searchChunks = tool({
@@ -345,6 +362,10 @@ function createAgentRun(userId: string, scopeOptions: RetrievalScopeOptions = {}
       limit: z.number().int().min(1).max(10).default(5).describe("Maximum chunks to return."),
     }),
     execute: async ({ query, limit }) => {
+      if (selectedDocumentIds !== undefined && selectedDocumentIds.length === 0) {
+        return JSON.stringify([]);
+      }
+
       const personalDocumentIds = !includeKnowledgeBase
         ? scopeOptions.personalDocumentIds ?? await listPersonalIndexedDocumentIds(userId)
         : undefined;
@@ -352,15 +373,29 @@ function createAgentRun(userId: string, scopeOptions: RetrievalScopeOptions = {}
         return JSON.stringify([]);
       }
 
+      let effectiveDocIds = !includeKnowledgeBase ? personalDocumentIds : undefined;
+      if (selectedDocumentIds !== undefined) {
+        if (!includeKnowledgeBase && personalDocumentIds) {
+          const personalSet = new Set(personalDocumentIds);
+          effectiveDocIds = selectedDocumentIds.filter((id) => personalSet.has(id));
+        } else {
+          effectiveDocIds = selectedDocumentIds;
+        }
+        if (!effectiveDocIds.length) {
+          return JSON.stringify([]);
+        }
+      }
+
       const validatedQuery = validateQuestion(query);
       const queryEmbedding = await embedText(validatedQuery);
       const candidateLimit = Math.min(Math.max(limit * 2, 10), 20);
-      const vectorOptions = !includeKnowledgeBase
-        ? { documentIds: personalDocumentIds, strictDocumentIds: true }
+      const vectorOptions = effectiveDocIds !== undefined
+        ? { documentIds: effectiveDocIds, strictDocumentIds: true }
         : {};
       const ragScope: RetrievalScopeOptions = {
         includeKnowledgeBase,
         personalDocumentIds,
+        selectedDocumentIds,
       };
 
       // Parallel 4-way search: macro vector + micro-chunk vector + keyword + full-text
@@ -409,7 +444,7 @@ function createAgentRun(userId: string, scopeOptions: RetrievalScopeOptions = {}
       limit: z.number().int().min(1).max(10).default(5).describe("Maximum documents to return."),
     }),
     execute: async ({ filename, limit }) =>
-      JSON.stringify(await findUserDocuments(userId, filename, limit, includeKnowledgeBase)),
+      JSON.stringify(await findUserDocuments(userId, filename, limit, includeKnowledgeBase, selectedDocumentIds)),
   });
 
   const getDocumentChunks = tool({
@@ -420,7 +455,7 @@ function createAgentRun(userId: string, scopeOptions: RetrievalScopeOptions = {}
       limit: z.number().int().min(1).max(MAX_DOCUMENT_CHUNKS).default(12).describe("Maximum chunks to read from the document."),
     }),
     execute: async ({ document_id, limit }) => {
-      const chunks = await getUserDocumentChunks(userId, document_id, limit, includeKnowledgeBase);
+      const chunks = await getUserDocumentChunks(userId, document_id, limit, includeKnowledgeBase, selectedDocumentIds);
       usedChunks.push(...chunks);
       return JSON.stringify(chunks);
     },
@@ -429,7 +464,7 @@ function createAgentRun(userId: string, scopeOptions: RetrievalScopeOptions = {}
   return {
     agent: new Agent({
       name: "IntelliSeek Academic Assistant",
-      instructions: buildAgentInstructions(includeKnowledgeBase),
+      instructions: buildAgentInstructions(includeKnowledgeBase, selectedDocumentIds !== undefined),
       model: getChatModel(),
       tools: [searchChunks, findDocuments, getDocumentChunks],
     }),

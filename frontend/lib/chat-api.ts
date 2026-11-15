@@ -29,6 +29,7 @@ export type ChatRequest = {
   retrievalHint?: ChatRetrievalHint;
   chatSessionId?: string;
   includeKnowledgeBase?: boolean;
+  selectedDocumentIds?: string[];
   temporary?: boolean;
   conversationHistory?: ChatConversationTurn[];
 };
@@ -37,6 +38,7 @@ type ChatRequestOptions = {
   retrievalHint?: ChatRetrievalHint;
   chatSessionId?: string | null;
   includeKnowledgeBase?: boolean;
+  selectedDocumentIds?: string[];
   temporary?: boolean;
   conversationHistory?: ChatConversationTurn[];
   signal?: AbortSignal;
@@ -259,6 +261,9 @@ export async function streamChatQuestion(question: string, handlers: StreamChatH
     ...(!isTemporary && options.chatSessionId ? { chatSessionId: options.chatSessionId } : {}),
     ...(typeof options.includeKnowledgeBase === "boolean"
       ? { includeKnowledgeBase: options.includeKnowledgeBase }
+      : {}),
+    ...(Array.isArray(options.selectedDocumentIds)
+      ? { selectedDocumentIds: options.selectedDocumentIds }
       : {}),
     ...(isTemporary ? { temporary: true } : {}),
     ...(isTemporary && options.conversationHistory?.length

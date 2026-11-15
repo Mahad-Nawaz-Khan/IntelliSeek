@@ -289,4 +289,70 @@ describe("retrieval Knowledge Base scope enforcement", () => {
     expect(scopedResult).toHaveLength(1);
     expect(scopedResult[0]?.document_id).toBe(PERSONAL_DOC_ID);
   });
+
+  it("returns empty immediately when selectedDocumentIds is empty", async () => {
+    const result = await retrieveContext(
+      "binary search trees",
+      USER_ID,
+      6,
+      undefined,
+      [],
+      { includeKnowledgeBase: true, selectedDocumentIds: [] },
+    );
+
+    expect(result).toEqual([]);
+    expect(embedTextMock).not.toHaveBeenCalled();
+    expect(rpcCalls).toHaveLength(0);
+  });
+
+  it("restricts vector RPCs and post-filtering strictly to selectedDocumentIds when provided", async () => {
+    rpcResponses.set("match_user_chunks", {
+      data: [
+        {
+          chunk_id: "chunk-personal",
+          document_id: PERSONAL_DOC_ID,
+          filename: "my-notes.pdf",
+          text_content: "Personal notes chunk that was not selected.",
+          chunk_index: 0,
+          similarity: 0.96,
+        },
+        {
+          chunk_id: "chunk-kb",
+          document_id: KB_DOC_ID,
+          filename: "shared-kb.pdf",
+          text_content: "Selected Knowledge Base chunk.",
+          chunk_index: 0,
+          similarity: 0.88,
+        },
+      ],
+      error: null,
+    });
+    rpcResponses.set("match_user_micro_chunks", {
+      data: [],
+      error: null,
+    });
+
+    const result = await retrieveContext(
+      "AVL trees",
+      USER_ID,
+      6,
+      undefined,
+      [],
+      { includeKnowledgeBase: true, selectedDocumentIds: [KB_DOC_ID] },
+    );
+
+    expect(embedTextMock).toHaveBeenCalledTimes(1);
+    expect(rpcCalls).toEqual([
+      expect.objectContaining({
+        fn: "match_user_chunks",
+        params: expect.objectContaining({ match_document_ids: [KB_DOC_ID] }),
+      }),
+      expect.objectContaining({
+        fn: "match_user_micro_chunks",
+        params: expect.objectContaining({ match_document_ids: [KB_DOC_ID] }),
+      }),
+    ]);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.document_id).toBe(KB_DOC_ID);
+  });
 });

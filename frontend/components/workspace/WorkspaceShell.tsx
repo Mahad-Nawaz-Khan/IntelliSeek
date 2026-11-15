@@ -28,7 +28,14 @@ import {
   invalidateDocumentsCache,
 } from "../../lib/documents";
 import { usePreferences } from "../../lib/preferences";
-import { createSourceGroups, type KnowledgeSource } from "../../lib/ui-state";
+import {
+  computeSectionSelectionResult,
+  computeSourceToggleResult,
+  createSourceGroups,
+  getSelectedSources,
+  isSelectableSource,
+  type KnowledgeSource,
+} from "../../lib/ui-state";
 import type { UploadToastPayload } from "../../lib/upload-document";
 import { AcademicWorkspace } from "../chat/AcademicWorkspace";
 import { IndexingToast, type UploadIndexingToast } from "../upload/IndexingToast";
@@ -66,6 +73,11 @@ export type WorkspaceContextValue = {
   isAdmin: boolean;
   includeKnowledgeBase: boolean;
   toggleKnowledgeBase: () => void;
+  excludedSourceIds: string[];
+  selectedSourceIds: string[];
+  toggleSourceSelection: (sourceId: string) => void;
+  setSectionSourcesSelected: (sourceType: KnowledgeSource["sourceType"], selected: boolean) => void;
+  setAllSourcesSelected: (selected: boolean) => void;
   focusedDocument: FocusedDocument | null;
   setFocusedDocument: Dispatch<SetStateAction<FocusedDocument | null>>;
   focusDocumentInChat: (doc: FocusedDocument) => void;
@@ -98,6 +110,7 @@ export function WorkspaceShell({ children }: Readonly<WorkspaceShellProps>) {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [uploadTarget, setUploadTarget] = useState<"personal" | "knowledge_base">("personal");
   const [isAdmin, setIsAdmin] = useState(false);
+  const [excludedSourceIds, setExcludedSourceIds] = useState<string[]>([]);
   const [deletingSourceId, setDeletingSourceId] = useState<string | null>(null);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [uploadToasts, setUploadToasts] = useState<UploadIndexingToast[]>([]);
@@ -424,6 +437,62 @@ export function WorkspaceShell({ children }: Readonly<WorkspaceShellProps>) {
     });
   }, []);
 
+  const selectedSourceIds = useMemo(
+    () => getSelectedSources(sources, excludedSourceIds, preferences.includeKnowledgeBase).map((source) => source.id),
+    [excludedSourceIds, preferences.includeKnowledgeBase, sources],
+  );
+
+  const toggleSourceSelection = useCallback(
+    (sourceId: string) => {
+      const result = computeSourceToggleResult(
+        sources,
+        excludedSourceIds,
+        sourceId,
+        preferences.includeKnowledgeBase,
+      );
+      setExcludedSourceIds(result.excludedSourceIds);
+      if (result.enableKnowledgeBase) {
+        updatePreference("includeKnowledgeBase", true);
+      }
+    },
+    [excludedSourceIds, preferences.includeKnowledgeBase, sources, updatePreference],
+  );
+
+  const setSectionSourcesSelected = useCallback(
+    (sourceType: KnowledgeSource["sourceType"], selected: boolean) => {
+      const result = computeSectionSelectionResult(
+        sources,
+        excludedSourceIds,
+        sourceType,
+        selected,
+        preferences.includeKnowledgeBase,
+      );
+      setExcludedSourceIds(result.excludedSourceIds);
+      if (result.enableKnowledgeBase) {
+        updatePreference("includeKnowledgeBase", true);
+      }
+    },
+    [excludedSourceIds, preferences.includeKnowledgeBase, sources, updatePreference],
+  );
+
+  const setAllSourcesSelected = useCallback(
+    (selected: boolean) => {
+      if (selected) {
+        setExcludedSourceIds([]);
+        const hasSelectableKb = sources.some(
+          (item) => item.sourceType === "knowledge-base" && isSelectableSource(item),
+        );
+        if (hasSelectableKb && !preferences.includeKnowledgeBase) {
+          updatePreference("includeKnowledgeBase", true);
+        }
+        return;
+      }
+
+      setExcludedSourceIds(sources.filter(isSelectableSource).map((item) => item.id));
+    },
+    [preferences.includeKnowledgeBase, sources, updatePreference],
+  );
+
   const workspaceContextValue = useMemo<WorkspaceContextValue>(
     () => ({
       sources,
@@ -446,6 +515,11 @@ export function WorkspaceShell({ children }: Readonly<WorkspaceShellProps>) {
       isAdmin,
       includeKnowledgeBase: preferences.includeKnowledgeBase,
       toggleKnowledgeBase,
+      excludedSourceIds,
+      selectedSourceIds,
+      toggleSourceSelection,
+      setSectionSourcesSelected,
+      setAllSourcesSelected,
       focusedDocument: activeFocusedDocument,
       setFocusedDocument,
       focusDocumentInChat,
@@ -458,6 +532,7 @@ export function WorkspaceShell({ children }: Readonly<WorkspaceShellProps>) {
       activeSessionId,
       deletingSessionId,
       deletingSourceId,
+      excludedSourceIds,
       focusDocumentInChat,
       handleDeleteSession,
       handleDeleteSource,
@@ -471,9 +546,13 @@ export function WorkspaceShell({ children }: Readonly<WorkspaceShellProps>) {
       refreshRecentChats,
       refreshSources,
       registerSessionLifecycle,
+      selectedSourceIds,
+      setAllSourcesSelected,
+      setSectionSourcesSelected,
       sourceStatus,
       sources,
       toggleKnowledgeBase,
+      toggleSourceSelection,
     ],
   );
 

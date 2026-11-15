@@ -152,7 +152,7 @@ export function ChatMessage({ message, onRetry }: Readonly<ChatMessageProps>) {
   };
 
   return (
-    <article className={`group/msg flex flex-col ${isUser ? "ml-4 items-end md:ml-16" : "mr-2 items-start md:mr-16"}`}>
+    <article className={`group/msg chat-enter flex flex-col ${isUser ? "ml-4 items-end md:ml-16" : "mr-2 items-start md:mr-16"}`}>
       {!isUser && (
         <div className="mb-2 flex items-center gap-2">
           <BrandMark spinning={isStreaming} />

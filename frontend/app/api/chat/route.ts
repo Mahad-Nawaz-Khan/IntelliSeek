@@ -13,6 +13,7 @@ import {
 import { toClientErrorMessage } from "../../../lib/server/client-errors";
 import { generateGroqChatTitle } from "../../../lib/server/groq";
 import { createRequestLogger, type LogData, type RequestLogger } from "../../../lib/server/logger";
+import { isUuid } from "../../../lib/server/postgrest-safe";
 import { checkRateLimit, getClientIp, rateLimitHeaders, rateLimitResponse } from "../../../lib/server/rate-limit";
 import {
   filterRelevantContext,
@@ -38,6 +39,7 @@ type ChatRequestBody = {
   retrievalHint?: unknown;
   chatSessionId?: unknown;
   includeKnowledgeBase?: unknown;
+  selectedDocumentIds?: unknown;
   temporary?: unknown;
   conversationHistory?: unknown;
 };
@@ -137,6 +139,25 @@ function parseIncludeKnowledgeBase(value: unknown): boolean {
   if (value === undefined) return true;
   if (typeof value !== "boolean") throw new Error("Invalid knowledge base availability flag");
   return value;
+}
+
+const MAX_SELECTED_DOCUMENTS = 500;
+
+function parseSelectedDocumentIds(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > MAX_SELECTED_DOCUMENTS) {
+    throw new Error("Invalid selected document IDs");
+  }
+
+  const normalized: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") throw new Error("Invalid selected document IDs");
+    const trimmed = item.trim();
+    if (!isUuid(trimmed)) throw new Error("Invalid selected document IDs");
+    normalized.push(trimmed);
+  }
+
+  return [...new Set(normalized)];
 }
 
 function isLikelyUploadedMaterialRequest(question: string) {
@@ -469,6 +490,11 @@ async function resolveJobContext(options: {
   log: RequestLogger;
 }): Promise<RetrievedContext[]> {
   const { retrievalHint, userId, question, isSummaryRequest, retrievalOptions, log } = options;
+  if (retrievalOptions.selectedDocumentIds !== undefined && retrievalOptions.selectedDocumentIds.length === 0) {
+    log.info("retrieval.strategy.skipped_no_selected_sources", { userId });
+    return [];
+  }
+
   let relevantContext = await retrieveInitialContext(retrievalHint, userId, question, log, retrievalOptions);
 
   if (retrievalHint) {
@@ -513,6 +539,27 @@ async function resolveJobContext(options: {
     });
   }
 
+  if (
+    !relevantContext.length &&
+    retrievalOptions.selectedDocumentIds &&
+    retrievalOptions.selectedDocumentIds.length > 0 &&
+    retrievalOptions.selectedDocumentIds.length <= 4
+  ) {
+    log.info("retrieval.strategy.start", { userId, strategy: "selected_documents_fallback" });
+    relevantContext = await retrieveDocumentContextByIds(
+      userId,
+      retrievalOptions.selectedDocumentIds,
+      10,
+      log,
+      retrievalOptions,
+    );
+    log.info("retrieval.strategy.complete", {
+      userId,
+      strategy: "selected_documents_fallback",
+      contextCount: relevantContext.length,
+    });
+  }
+
   return relevantContext;
 }
 
@@ -527,6 +574,16 @@ async function selectAnswerModeAndStream(options: {
   log: RequestLogger;
 }): Promise<{ events: AsyncGenerator<AgentAnswerStreamEvent>; answerMode: "grounded" | "agent" | "general" | "static-warning" }> {
   const { question, userId, relevantContext, conversationContext, retrievalHint, isSummaryRequest, retrievalOptions, log } = options;
+
+  if (retrievalOptions.selectedDocumentIds !== undefined && retrievalOptions.selectedDocumentIds.length === 0) {
+    log.info("retrieval.strategy.start", { userId, strategy: "general_answer_no_sources" });
+    return {
+      answerMode: "general",
+      events: streamGeneralAgentAnswer(question, conversationContext, log, {
+        includeKnowledgeBase: retrievalOptions.includeKnowledgeBase,
+      }),
+    };
+  }
 
   if (!relevantContext.length && isSummaryRequest && !retrievalHint && await hasIndexedDocuments(userId, log, retrievalOptions)) {
     return {
@@ -574,6 +631,7 @@ async function runAnswerJob(options: {
   requestedChatSessionId?: string;
   retrievalHint?: ChatRetrievalHint;
   includeKnowledgeBase: boolean;
+  selectedDocumentIds?: string[];
   temporary: boolean;
   conversationHistory: ConversationTurn[];
   log: RequestLogger;
@@ -586,6 +644,7 @@ async function runAnswerJob(options: {
     requestedChatSessionId,
     retrievalHint,
     includeKnowledgeBase,
+    selectedDocumentIds,
     temporary,
     conversationHistory,
     log,
@@ -602,12 +661,13 @@ async function runAnswerJob(options: {
       ? conversationHistory
       : await getRecentConversationContext(userId, chatSession!.id, log);
     const shouldGenerateTitle = Boolean(!temporary && chatSession && !requestedChatSessionId && chatSession.title_status === "pending");
-    const personalDocumentIds = !includeKnowledgeBase
+    const personalDocumentIds = !includeKnowledgeBase && selectedDocumentIds === undefined
       ? await listPersonalIndexedDocumentIds(userId, log)
       : undefined;
     const retrievalOptions: RetrievalScopeOptions = {
       includeKnowledgeBase,
-      personalDocumentIds,
+      ...(personalDocumentIds !== undefined ? { personalDocumentIds } : {}),
+      ...(selectedDocumentIds !== undefined ? { selectedDocumentIds } : {}),
     };
 
     log.info("retrieval.hint", {
@@ -615,6 +675,7 @@ async function runAnswerJob(options: {
       hintKind: retrievalHint?.kind,
       hintedDocumentCount: getHintedDocumentCount(retrievalHint),
       includeKnowledgeBase,
+      selectedDocumentCount: selectedDocumentIds?.length,
       temporary,
     });
 
@@ -710,12 +771,14 @@ export async function POST(request: Request) {
   let question: string;
   let requestedChatSessionId: string | undefined;
   let includeKnowledgeBase: boolean;
+  let selectedDocumentIds: string[] | undefined;
   let temporary: boolean;
   let conversationHistory: ConversationTurn[];
   try {
     question = validateQuestion(body.question);
     requestedChatSessionId = parseChatSessionId(body.chatSessionId);
     includeKnowledgeBase = parseIncludeKnowledgeBase(body.includeKnowledgeBase);
+    selectedDocumentIds = parseSelectedDocumentIds(body.selectedDocumentIds);
     temporary = parseTemporary(body.temporary);
     if (temporary && requestedChatSessionId) {
       throw new Error("Temporary chat cannot attach to a saved session");
@@ -725,7 +788,7 @@ export async function POST(request: Request) {
     return failure(400, error instanceof Error ? error.message : "Invalid question", log, { errorCategory: "validation", userId: user.id, error });
   }
 
-  log.info("request.validated", { userId: user.id, questionLength: question.length, includeKnowledgeBase, temporary });
+  log.info("request.validated", { userId: user.id, questionLength: question.length, includeKnowledgeBase, selectedDocumentCount: selectedDocumentIds?.length, temporary });
 
   const retrievalHint = parseRetrievalHint(body.retrievalHint);
 
@@ -759,6 +822,7 @@ export async function POST(request: Request) {
         requestedChatSessionId,
         retrievalHint,
         includeKnowledgeBase,
+        selectedDocumentIds,
         temporary,
         conversationHistory,
         log,
