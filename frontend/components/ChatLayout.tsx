@@ -2752,7 +2752,7 @@ function ChatLayoutCore({ mode, embedded }: Readonly<ChatLayoutCoreProps>) {
     return (
       <div
         style={{ backgroundColor: "var(--chat-workspace-bg, #0a0e22)" }}
-        className="chat-workspace-surface flex h-dvh flex-col overflow-hidden bg-[#0a0e22] text-slate-100"
+        className="chat-workspace-surface flex h-dvh flex-col overflow-clip bg-[#0a0e22] text-slate-100"
       >
         {chatContent}
       </div>

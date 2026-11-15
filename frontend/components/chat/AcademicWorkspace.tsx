@@ -273,7 +273,7 @@ export function AcademicWorkspace({
 
         <section
           style={{ backgroundColor: "var(--chat-workspace-bg, #0a0e22)" }}
-          className="chat-workspace-surface flex min-h-0 flex-1 flex-col overflow-hidden bg-[#0a0e22]"
+          className="chat-workspace-surface flex min-h-0 flex-1 flex-col overflow-clip bg-[#0a0e22]"
         >
           <MobileHeaderBar
             isDark={isDark}

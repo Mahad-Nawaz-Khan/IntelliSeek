@@ -11,7 +11,7 @@ import {
   Sparkles,
   XCircle,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { QuizPayload } from "../../lib/quiz-parser";
 
@@ -68,10 +68,70 @@ function SummaryStatusIcon({ isCorrect, isWrong }: Readonly<{ isCorrect: boolean
   return <HelpCircle className="h-4 w-4 text-slate-500" />;
 }
 
+type StoredQuizProgress = {
+  currentIndex: number;
+  selectedAnswers: Record<number, number>;
+  showSummary: boolean;
+};
+
+const QUIZ_PROGRESS_PREFIX = "intelliseek-quiz-progress:";
+
+/** Stable key derived from quiz content so progress survives remounts and chat switches. */
+function getQuizStorageKey(quiz: QuizPayload): string {
+  const source = JSON.stringify([
+    quiz.title,
+    quiz.questions.map((question) => [question.question, question.options, question.correctIndex]),
+  ]);
+  let hash = 5381;
+  for (let index = 0; index < source.length; index += 1) {
+    hash = ((hash << 5) + hash + source.charCodeAt(index)) | 0;
+  }
+  return `${QUIZ_PROGRESS_PREFIX}${(hash >>> 0).toString(36)}`;
+}
+
+function readQuizProgress(key: string, total: number): StoredQuizProgress | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<StoredQuizProgress>;
+    const selectedAnswers: Record<number, number> = {};
+    if (parsed.selectedAnswers && typeof parsed.selectedAnswers === "object") {
+      Object.entries(parsed.selectedAnswers).forEach(([questionIndex, optionIndex]) => {
+        const qIndex = Number(questionIndex);
+        if (Number.isInteger(qIndex) && qIndex >= 0 && qIndex < total && Number.isInteger(optionIndex)) {
+          selectedAnswers[qIndex] = optionIndex as number;
+        }
+      });
+    }
+    const currentIndex = Number.isInteger(parsed.currentIndex) ? (parsed.currentIndex as number) : 0;
+    return { currentIndex, selectedAnswers, showSummary: parsed.showSummary === true };
+  } catch {
+    return null;
+  }
+}
+
+function writeQuizProgress(key: string, progress: StoredQuizProgress) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(progress));
+  } catch {
+    // Storage may be full or unavailable (private mode); progress simply won't persist.
+  }
+}
+
 export function QuizWidget({ quiz, onRequestNewQuiz }: Readonly<QuizWidgetProps>) {
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [selectedAnswers, setSelectedAnswers] = useState<Record<number, number>>({});
-  const [showSummary, setShowSummary] = useState(false);
+  const storageKey = useMemo(() => getQuizStorageKey(quiz), [quiz]);
+  const [initialProgress] = useState(() => readQuizProgress(storageKey, quiz.questions.length));
+  const [currentIndex, setCurrentIndex] = useState(initialProgress?.currentIndex ?? 0);
+  const [selectedAnswers, setSelectedAnswers] = useState<Record<number, number>>(
+    initialProgress?.selectedAnswers ?? {},
+  );
+  const [showSummary, setShowSummary] = useState(initialProgress?.showSummary ?? false);
+
+  useEffect(() => {
+    writeQuizProgress(storageKey, { currentIndex, selectedAnswers, showSummary });
+  }, [currentIndex, selectedAnswers, showSummary, storageKey]);
 
   const total = quiz.questions.length;
   const boundedIndex = Math.max(0, Math.min(currentIndex, total - 1));
@@ -298,7 +358,7 @@ export function QuizWidget({ quiz, onRequestNewQuiz }: Readonly<QuizWidgetProps>
             return (
               <label
                 key={`${currentQuestion.id}-opt-${letter}`}
-                className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left text-sm transition focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-cyan-300 ${
+                className={`relative flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left text-sm transition focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-cyan-300 ${
                   hasAnsweredCurrent ? "cursor-default" : "cursor-pointer"
                 } ${optionContainerClass}`}
               >
