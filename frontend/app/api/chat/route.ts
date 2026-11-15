@@ -609,7 +609,7 @@ async function selectAnswerModeAndStream(options: {
     log.info("retrieval.strategy.start", { userId, strategy: "agent_fallback" });
     return {
       answerMode: "agent",
-      events: streamAgentAnswer(question, userId, conversationContext, retrievalOptions),
+      events: streamAgentAnswer(question, userId, conversationContext, retrievalOptions, log),
     };
   }
 

@@ -31,6 +31,7 @@ import { getSupabaseServiceClient } from "../supabase";
 const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const DEFAULT_CHAT_MODEL = "openai/gpt-5-nano";
 const MAX_DOCUMENT_CHUNKS = 20;
+const MAX_AGENT_TURNS = 6;
 
 const PRIMARY_STYLE_GUIDE = `Write like ChatGPT's web app: clear, direct, and easy to scan.
 
@@ -372,7 +373,7 @@ function buildConversationInput(question: string, conversationContext: Conversat
 }
 
 async function* streamAgentText(agent: Agent, input: string): AsyncGenerator<string, string> {
-  const stream = await run(agent, input, { maxTurns: 1, stream: true });
+  const stream = await run(agent, input, { maxTurns: MAX_AGENT_TURNS, stream: true });
 
   for await (const event of stream) {
     if (event.type === "raw_model_stream_event" && event.data.type === "output_text_delta" && event.data.delta) {
@@ -450,6 +451,111 @@ async function rescueWeakSearchCandidates(
   return mergeRetrievedContext(candidates, ...expansionSearches);
 }
 
+type AgentToolsHandlers = {
+  searchChunks: (args: { query: string; limit: number }) => Promise<string>;
+  findDocuments: (args: { filename: string; limit: number }) => Promise<string>;
+  getDocumentChunks: (args: { document_id: string; limit: number }) => Promise<string>;
+};
+
+function buildKnowledgeAgentTools(handlers: AgentToolsHandlers) {
+  const searchChunks = tool({
+    name: "search_chunks",
+    description: "Search the user's accessible document chunks semantically for a specific question or concept.",
+    parameters: z.object({
+      query: z.string().describe("The search query to match against uploaded document chunks."),
+      limit: z.number().int().min(1).max(10).default(5).describe("Maximum chunks to return."),
+    }),
+    execute: handlers.searchChunks,
+  });
+
+  const findDocuments = tool({
+    name: "find_documents",
+    description: "Find accessible uploaded documents by filename or partial filename before answering document-specific questions.",
+    parameters: z.object({
+      filename: z.string().describe("Filename or partial filename to search for."),
+      limit: z.number().int().min(1).max(10).default(5).describe("Maximum documents to return."),
+    }),
+    execute: handlers.findDocuments,
+  });
+
+  const getDocumentChunks = tool({
+    name: "get_document_chunks",
+    description: "Read representative chunks from one accessible document for summaries, outlines, topic lists, or exam prep questions.",
+    parameters: z.object({
+      document_id: z.string().uuid().describe("The document ID returned by find_documents."),
+      limit: z.number().int().min(1).max(MAX_DOCUMENT_CHUNKS).default(12).describe("Maximum chunks to read from the document."),
+    }),
+    execute: handlers.getDocumentChunks,
+  });
+
+  return [searchChunks, findDocuments, getDocumentChunks];
+}
+
+function searchPreRetrievedChunks(context: RetrievedContext[], query: string, limit: number): RetrievedContext[] {
+  const clampedLimit = Math.min(Math.max(limit, 1), 10);
+  if (!context.length) return [];
+
+  const terms = query
+    .toLowerCase()
+    .trim()
+    .split(/\s+/)
+    .filter((term) => term.length >= 2);
+  if (!terms.length) return context.slice(0, clampedLimit);
+
+  const matched = context
+    .map((chunk) => {
+      const haystack = `${chunk.filename}\n${chunk.text_content}`.toLowerCase();
+      const matchCount = terms.reduce((count, term) => (haystack.includes(term) ? count + 1 : count), 0);
+      return { chunk, matchCount };
+    })
+    .filter((entry) => entry.matchCount > 0)
+    .sort((a, b) => b.matchCount - a.matchCount || b.chunk.score - a.chunk.score);
+
+  return matched.slice(0, clampedLimit).map((entry) => entry.chunk);
+}
+
+function findPreRetrievedDocuments(context: RetrievedContext[], filename: string, limit: number) {
+  const clampedLimit = Math.min(Math.max(limit, 1), 10);
+  if (!context.length) return [];
+
+  const needle = filename.trim().toLowerCase();
+  const seen = new Set<string>();
+  const documents: Array<{ id: string; filename: string }> = [];
+
+  for (const chunk of context) {
+    if (seen.has(chunk.document_id)) continue;
+    seen.add(chunk.document_id);
+    if (needle && !chunk.filename.toLowerCase().includes(needle)) continue;
+    documents.push({ id: chunk.document_id, filename: chunk.filename });
+    if (documents.length >= clampedLimit) break;
+  }
+
+  return documents;
+}
+
+function getPreRetrievedDocumentChunks(context: RetrievedContext[], documentId: string, limit: number): RetrievedContext[] {
+  const clampedLimit = Math.min(Math.max(limit, 1), MAX_DOCUMENT_CHUNKS);
+  if (!context.length) return [];
+
+  return context
+    .filter((chunk) => chunk.document_id === documentId)
+    .sort((a, b) => a.chunk_index - b.chunk_index)
+    .slice(0, clampedLimit);
+}
+
+/**
+ * Exposes IntelliSeek's standard tool schemas backed by pre-retrieved context so
+ * grounded and general agent runs stay multi-turn tool-enabled harnesses.
+ */
+export function createPreRetrievedAgentTools(context: RetrievedContext[] = []) {
+  return buildKnowledgeAgentTools({
+    searchChunks: async ({ query, limit }) => JSON.stringify(searchPreRetrievedChunks(context, query, limit)),
+    findDocuments: async ({ filename, limit }) => JSON.stringify(findPreRetrievedDocuments(context, filename, limit)),
+    getDocumentChunks: async ({ document_id, limit }) =>
+      JSON.stringify(getPreRetrievedDocumentChunks(context, document_id, limit)),
+  });
+}
+
 function createAgentRun(
   userId: string,
   scopeOptions: RetrievalScopeOptions = {},
@@ -462,14 +568,8 @@ function createAgentRun(
   const scopeMode = resolveScopeMode(includeKnowledgeBase, selectedDocumentIds !== undefined);
   const usedChunks: AgentToolChunk[] = [];
 
-  const searchChunks = tool({
-    name: "search_chunks",
-    description: "Search the user's accessible document chunks semantically for a specific question or concept.",
-    parameters: z.object({
-      query: z.string().describe("The search query to match against uploaded document chunks."),
-      limit: z.number().int().min(1).max(10).default(5).describe("Maximum chunks to return."),
-    }),
-    execute: async ({ query, limit }) => {
+  const tools = buildKnowledgeAgentTools({
+    searchChunks: async ({ query, limit }) => {
       const resolvedScope = await resolveChunkSearchScope(
         userId,
         scopeOptions,
@@ -521,27 +621,9 @@ function createAgentRun(
       usedChunks.push(...chunks);
       return JSON.stringify(chunks);
     },
-  });
-
-  const findDocuments = tool({
-    name: "find_documents",
-    description: "Find accessible uploaded documents by filename or partial filename before answering document-specific questions.",
-    parameters: z.object({
-      filename: z.string().describe("Filename or partial filename to search for."),
-      limit: z.number().int().min(1).max(10).default(5).describe("Maximum documents to return."),
-    }),
-    execute: async ({ filename, limit }) =>
+    findDocuments: async ({ filename, limit }) =>
       JSON.stringify(await findUserDocuments(userId, filename, limit, includeKnowledgeBase, selectedDocumentIds)),
-  });
-
-  const getDocumentChunks = tool({
-    name: "get_document_chunks",
-    description: "Read representative chunks from one accessible document for summaries, outlines, topic lists, or exam prep questions.",
-    parameters: z.object({
-      document_id: z.string().uuid().describe("The document ID returned by find_documents."),
-      limit: z.number().int().min(1).max(MAX_DOCUMENT_CHUNKS).default(12).describe("Maximum chunks to read from the document."),
-    }),
-    execute: async ({ document_id, limit }) => {
+    getDocumentChunks: async ({ document_id, limit }) => {
       const chunks = await getUserDocumentChunks(userId, document_id, limit, includeKnowledgeBase, selectedDocumentIds);
       usedChunks.push(...chunks);
       return JSON.stringify(chunks);
@@ -553,9 +635,10 @@ function createAgentRun(
       name: "IntelliSeek Academic Assistant",
       instructions: getAgentInstructionsForMode(scopeMode, promptMode),
       model: getChatModel(),
-      tools: [searchChunks, findDocuments, getDocumentChunks],
+      tools,
     }),
     getSources: () => uniqueSources(usedChunks),
+    getUsedChunks: () => [...usedChunks],
   };
 }
 
@@ -567,7 +650,7 @@ export async function generateAgentAnswer(
 ): Promise<AgentRunResult> {
   const promptMode: AnswerPromptMode = isQuizRequest(question) ? "quiz" : "standard";
   const { agent, getSources } = createAgentRun(userId, scopeOptions, promptMode);
-  const result = await run(agent, buildConversationInput(question, conversationContext), { maxTurns: 6 });
+  const result = await run(agent, buildConversationInput(question, conversationContext), { maxTurns: MAX_AGENT_TURNS });
   const answer = requireAnswer(result.finalOutput);
 
   return {
@@ -581,21 +664,32 @@ export async function* streamAgentAnswer(
   userId: string,
   conversationContext: ConversationTurn[] = [],
   scopeOptions: RetrievalScopeOptions = {},
+  log?: RequestLogger,
 ): AsyncGenerator<AgentAnswerStreamEvent> {
-  const promptMode: AnswerPromptMode = isQuizRequest(question) ? "quiz" : "standard";
-  const { agent, getSources } = createAgentRun(userId, scopeOptions, promptMode);
-  const stream = await run(agent, buildConversationInput(question, conversationContext), { maxTurns: 6, stream: true });
+  const isQuiz = isQuizRequest(question);
+  const promptMode: AnswerPromptMode = isQuiz ? "quiz" : "standard";
+  const conversationInput = buildConversationInput(question, conversationContext);
+  const agentRunHolder: { current: ReturnType<typeof createAgentRun> | null } = { current: null };
 
-  for await (const event of stream) {
-    if (event.type === "raw_model_stream_event" && event.data.type === "output_text_delta" && event.data.delta) {
-      yield { type: "delta", text: event.data.delta };
-    }
-  }
+  const answer = yield* streamTextWithFallback(
+    () => {
+      const runState = createAgentRun(userId, scopeOptions, promptMode);
+      agentRunHolder.current = runState;
+      return streamAgentText(runState.agent, conversationInput);
+    },
+    () => {
+      const chunks = agentRunHolder.current?.getUsedChunks() ?? [];
+      return chunks.length > 0
+        ? streamGroqGroundedAnswer(conversationInput, chunks, { isQuiz })
+        : streamGroqGeneralAnswer(conversationInput, {
+            includeKnowledgeBase: scopeOptions.includeKnowledgeBase,
+            isQuiz,
+          });
+    },
+    log,
+  );
 
-  await stream.completed;
-  const answer = requireAnswer(stream.finalOutput);
-
-  yield { type: "done", answer, sources: selectCitedSources(answer, getSources()) };
+  yield { type: "done", answer, sources: selectCitedSources(answer, agentRunHolder.current?.getSources() ?? []) };
 }
 
 export async function* streamGroundedAgentAnswer(
@@ -615,6 +709,7 @@ export async function* streamGroundedAgentAnswer(
         name: "IntelliSeek Uploaded File Assistant",
         instructions,
         model: getChatModel(),
+        tools: createPreRetrievedAgentTools(context),
       });
       return streamAgentText(agent, `Uploaded-file context chunks:\n${buildContextInput(context)}\n\n${conversationInput}`);
     },
@@ -647,6 +742,7 @@ export async function* streamGeneralAgentAnswer(
         name: "IntelliSeek General Assistant",
         instructions,
         model: getChatModel(),
+        tools: createPreRetrievedAgentTools([]),
       });
       return streamAgentText(agent, conversationInput);
     },
