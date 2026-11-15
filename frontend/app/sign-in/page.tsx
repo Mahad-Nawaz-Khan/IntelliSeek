@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { FormEvent, Suspense, useEffect, useState } from "react";
 
 import { useTheme } from "../../context/ThemeContext";
@@ -25,7 +25,6 @@ function getErrorMessage(error: string | null) {
 }
 
 function SignInForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const { theme, toggleTheme } = useTheme();
   const next = getSafeReturnPath(searchParams.get("next"));

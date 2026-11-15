@@ -656,11 +656,12 @@ async function runAnswerJob(options: {
   try {
     send("job", { jobId });
 
-    const chatSession = temporary
-      ? null
-      : requestedChatSessionId
+    let chatSession: ChatSessionRow | null = null;
+    if (!temporary) {
+      chatSession = requestedChatSessionId
         ? await getOwnedChatSession(requestedChatSessionId, userId, log)
         : await createChatSession(userId, log);
+    }
     const conversationContext = temporary
       ? conversationHistory
       : await getRecentConversationContext(userId, chatSession!.id, log);

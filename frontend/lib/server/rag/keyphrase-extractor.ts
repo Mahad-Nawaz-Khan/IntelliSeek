@@ -7,8 +7,9 @@
  */
 
 const DEFINITION_PATTERNS = [
-  /(?:^|\.\s+)([A-Z][a-z]+(?:\s+[A-Za-z]+){0,4})\s+(?:is|are|was|were|refers?\s+to|means?|denotes?)\s/gm,
-  /(?:^|\.\s+)(?:The\s+)?([A-Z][a-z]+(?:\s+[A-Za-z]+){0,3})\s*(?::|—|–)\s/gm,
+  /(?:^|\.\s+)([A-Z][a-z]+(?:\s+[A-Za-z]+){0,4})\s+(?:is|are|was|were)\s/gm,
+  /(?:^|\.\s+)([A-Z][a-z]+(?:\s+[A-Za-z]+){0,4})\s+(?:refers?\s+to|means?|denotes?)\s/gm,
+  /(?:^|\.\s+)(?:The\s+)?([A-Z][a-z]+(?:\s+[A-Za-z]+){0,3})\s*[:—–]\s/gm,
 ];
 
 const ACRONYM_PATTERN = /\b([A-Z]{2,6})\b/g;
@@ -67,50 +68,55 @@ export type ExtractedKeyphrase = {
   source: "definition" | "capitalized" | "acronym" | "frequency";
 };
 
-export function extractKeyphrases(
-  chunks: string[],
-  options: { limit?: number } = {},
-): ExtractedKeyphrase[] {
-  const limit = options.limit ?? 60;
-  const phraseScores = new Map<string, { score: number; source: ExtractedKeyphrase["source"] }>();
+type PhraseScoreEntry = {
+  score: number;
+  source: ExtractedKeyphrase["source"];
+};
 
-  function addPhrase(phrase: string, score: number, source: ExtractedKeyphrase["source"]) {
-    const normalized = phrase.trim().replace(/\s+/g, " ");
-    if (normalized.length < 3 || normalized.length > 80) return;
+function recordPhraseScore(
+  phraseScores: Map<string, PhraseScoreEntry>,
+  phrase: string,
+  score: number,
+  source: ExtractedKeyphrase["source"],
+): void {
+  const normalized = phrase.trim().replace(/\s+/g, " ");
+  if (normalized.length < 3 || normalized.length > 80) return;
 
-    const words = normalized.toLowerCase().split(" ");
-    if (words.every((w) => KEYPHRASE_STOP.has(w))) return;
-    if (words.length === 1 && words[0].length < 3) return;
+  const words = normalized.toLowerCase().split(" ");
+  if (words.every((w) => KEYPHRASE_STOP.has(w))) return;
+  if (words.length === 1 && words[0].length < 3) return;
 
-    const key = normalized.toLowerCase();
-    const existing = phraseScores.get(key);
-    if (!existing || existing.score < score) {
-      phraseScores.set(key, { score, source });
+  const key = normalized.toLowerCase();
+  const existing = phraseScores.get(key);
+  if (!existing || existing.score < score) {
+    phraseScores.set(key, { score, source });
+  }
+}
+
+function collectPatternMatches(
+  phraseScores: Map<string, PhraseScoreEntry>,
+  fullText: string,
+  pattern: RegExp,
+  score: number,
+  source: ExtractedKeyphrase["source"],
+): void {
+  for (const match of fullText.matchAll(pattern)) {
+    if (match[1]) {
+      recordPhraseScore(phraseScores, match[1], score, source);
     }
   }
+}
 
-  const fullText = chunks.join("\n\n");
-
-  // Strategy 1: Definition patterns (highest priority)
-  for (const pattern of DEFINITION_PATTERNS) {
-    for (const match of fullText.matchAll(pattern)) {
-      if (match[1]) addPhrase(match[1], 10, "definition");
-    }
-  }
-
-  // Strategy 2: Capitalized multi-word technical phrases
-  for (const match of fullText.matchAll(CAPITALIZED_PHRASE_PATTERN)) {
-    if (match[1]) addPhrase(match[1], 6, "capitalized");
-  }
-
-  // Strategy 3: Technical acronyms
+function collectAcronyms(phraseScores: Map<string, PhraseScoreEntry>, fullText: string): void {
   for (const match of fullText.matchAll(ACRONYM_PATTERN)) {
-    if (match[1] && match[1].length >= 2 && !KEYPHRASE_STOP.has(match[1].toLowerCase())) {
-      addPhrase(match[1], 4, "acronym");
+    const acronym = match[1];
+    if (acronym && acronym.length >= 2 && !KEYPHRASE_STOP.has(acronym.toLowerCase())) {
+      recordPhraseScore(phraseScores, acronym, 4, "acronym");
     }
   }
+}
 
-  // Strategy 4: High-frequency domain terms
+function collectFrequentTerms(phraseScores: Map<string, PhraseScoreEntry>, chunks: string[]): void {
   const termFreq = new Map<string, number>();
   for (const chunk of chunks) {
     const words = chunk
@@ -129,15 +135,42 @@ export function extractKeyphrases(
     .slice(0, 40);
 
   for (const [term, freq] of sortedTerms) {
-    addPhrase(term, Math.min(freq, 8), "frequency");
+    recordPhraseScore(phraseScores, term, Math.min(freq, 8), "frequency");
   }
+}
+
+function formatKeyphraseTitle(phrase: string): string {
+  return phrase
+    .split(" ")
+    .map((w) => (w.length <= 4 && w === w.toUpperCase() ? w : w.charAt(0).toUpperCase() + w.slice(1)))
+    .join(" ");
+}
+
+export function extractKeyphrases(
+  chunks: string[],
+  options: { limit?: number } = {},
+): ExtractedKeyphrase[] {
+  const limit = options.limit ?? 60;
+  const phraseScores = new Map<string, PhraseScoreEntry>();
+  const fullText = chunks.join("\n\n");
+
+  // Strategy 1: Definition patterns (highest priority)
+  for (const pattern of DEFINITION_PATTERNS) {
+    collectPatternMatches(phraseScores, fullText, pattern, 10, "definition");
+  }
+
+  // Strategy 2: Capitalized multi-word technical phrases
+  collectPatternMatches(phraseScores, fullText, CAPITALIZED_PHRASE_PATTERN, 6, "capitalized");
+
+  // Strategy 3: Technical acronyms
+  collectAcronyms(phraseScores, fullText);
+
+  // Strategy 4: High-frequency domain terms
+  collectFrequentTerms(phraseScores, chunks);
 
   return [...phraseScores.entries()]
     .map(([phrase, { score, source }]) => ({
-      phrase: phrase
-        .split(" ")
-        .map((w) => (w.length <= 4 && w === w.toUpperCase() ? w : w.charAt(0).toUpperCase() + w.slice(1)))
-        .join(" "),
+      phrase: formatKeyphraseTitle(phrase),
       score,
       source,
     }))

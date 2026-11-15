@@ -1,4 +1,4 @@
-import { Gauge, CheckCircle, ShieldAlert, Award, ArrowUpRight, Activity } from "lucide-react";
+import { Activity } from "lucide-react";
 
 const benchmarks = [
   {

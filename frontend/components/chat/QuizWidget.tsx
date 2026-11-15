@@ -50,6 +50,24 @@ type QuizWidgetProps = {
   onRequestNewQuiz?: (prompt: string) => void;
 };
 
+function getMasteryMessage(percentage: number): string {
+  if (percentage >= 80) return "Strong mastery of this material.";
+  if (percentage >= 50) return "Good progress — review the highlighted misses below.";
+  return "Keep practicing — revisit any missed concepts below.";
+}
+
+function getSummaryBadgeClass(isCorrect: boolean, isWrong: boolean): string {
+  if (isCorrect) return "bg-emerald-400/15 text-emerald-300";
+  if (isWrong) return "bg-red-400/15 text-red-300";
+  return "bg-white/10 text-slate-400";
+}
+
+function SummaryStatusIcon({ isCorrect, isWrong }: Readonly<{ isCorrect: boolean; isWrong: boolean }>) {
+  if (isCorrect) return <CheckCircle2 className="h-4 w-4 text-emerald-400" />;
+  if (isWrong) return <XCircle className="h-4 w-4 text-red-400" />;
+  return <HelpCircle className="h-4 w-4 text-slate-500" />;
+}
+
 export function QuizWidget({ quiz, onRequestNewQuiz }: Readonly<QuizWidgetProps>) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedAnswers, setSelectedAnswers] = useState<Record<number, number>>({});
@@ -95,12 +113,7 @@ export function QuizWidget({ quiz, onRequestNewQuiz }: Readonly<QuizWidgetProps>
   };
 
   if (showSummary) {
-    const masteryMessage =
-      percentage >= 80
-        ? "Strong mastery of this material."
-        : percentage >= 50
-          ? "Good progress — review the highlighted misses below."
-          : "Keep practicing — revisit any missed concepts below.";
+    const masteryMessage = getMasteryMessage(percentage);
 
     return (
       <section
@@ -135,6 +148,7 @@ export function QuizWidget({ quiz, onRequestNewQuiz }: Readonly<QuizWidgetProps>
               const choice = selectedAnswers[index];
               const isCorrect = choice !== undefined && choice === question.correctIndex;
               const isWrong = choice !== undefined && choice !== question.correctIndex;
+              const badgeClass = getSummaryBadgeClass(isCorrect, isWrong);
 
               return (
                 <button
@@ -145,13 +159,7 @@ export function QuizWidget({ quiz, onRequestNewQuiz }: Readonly<QuizWidgetProps>
                 >
                   <div className="flex min-w-0 items-center gap-2.5">
                     <span
-                      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-xs font-semibold ${
-                        isCorrect
-                          ? "bg-emerald-400/15 text-emerald-300"
-                          : isWrong
-                            ? "bg-red-400/15 text-red-300"
-                            : "bg-white/10 text-slate-400"
-                      }`}
+                      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-xs font-semibold ${badgeClass}`}
                     >
                       {index + 1}
                     </span>
@@ -160,13 +168,7 @@ export function QuizWidget({ quiz, onRequestNewQuiz }: Readonly<QuizWidgetProps>
                     </span>
                   </div>
                   <span className="shrink-0">
-                    {isCorrect ? (
-                      <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-                    ) : isWrong ? (
-                      <XCircle className="h-4 w-4 text-red-400" />
-                    ) : (
-                      <HelpCircle className="h-4 w-4 text-slate-500" />
-                    )}
+                    <SummaryStatusIcon isCorrect={isCorrect} isWrong={isWrong} />
                   </span>
                 </button>
               );
@@ -269,7 +271,8 @@ export function QuizWidget({ quiz, onRequestNewQuiz }: Readonly<QuizWidgetProps>
         </div>
 
         {/* Antigravity-style Choice Options */}
-        <div className="mt-3.5 space-y-2" role="radiogroup" aria-label={currentQuestion.question}>
+        <fieldset className="m-0 mt-3.5 space-y-2 border-0 p-0">
+          <legend className="sr-only">{currentQuestion.question}</legend>
           {currentQuestion.options.map((option, optionIndex) => {
             const letter = String.fromCharCode(65 + optionIndex);
             const isSelected = selectedOption === optionIndex;
@@ -293,15 +296,21 @@ export function QuizWidget({ quiz, onRequestNewQuiz }: Readonly<QuizWidgetProps>
             }
 
             return (
-              <button
-                key={`${currentQuestion.id}-opt-${optionIndex}`}
-                type="button"
-                role="radio"
-                aria-checked={isSelected}
-                disabled={hasAnsweredCurrent}
-                onClick={() => handleSelectOption(optionIndex)}
-                className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left text-sm transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 disabled:cursor-default ${optionContainerClass}`}
+              <label
+                key={`${currentQuestion.id}-opt-${letter}`}
+                className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left text-sm transition focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-cyan-300 ${
+                  hasAnsweredCurrent ? "cursor-default" : "cursor-pointer"
+                } ${optionContainerClass}`}
               >
+                <input
+                  type="radio"
+                  name={`quiz-question-${currentQuestion.id}`}
+                  value={optionIndex}
+                  checked={isSelected}
+                  disabled={hasAnsweredCurrent}
+                  onChange={() => handleSelectOption(optionIndex)}
+                  className="sr-only"
+                />
                 <span
                   className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border text-xs font-bold transition ${letterBadgeClass}`}
                 >
@@ -320,10 +329,10 @@ export function QuizWidget({ quiz, onRequestNewQuiz }: Readonly<QuizWidgetProps>
                     <span className="hidden sm:inline">Your choice</span>
                   </span>
                 )}
-              </button>
+              </label>
             );
           })}
-        </div>
+        </fieldset>
 
         {/* Instant Explanation Callout */}
         {hasAnsweredCurrent && (

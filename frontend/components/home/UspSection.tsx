@@ -1,4 +1,4 @@
-import { Check, X, Shield, Cpu, FileCheck, Search, Sparkles, Layers } from "lucide-react";
+import { Check, X, Shield, Cpu, FileCheck, Search, Sparkles } from "lucide-react";
 
 const differentiators = [
   {

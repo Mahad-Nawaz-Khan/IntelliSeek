@@ -10,6 +10,86 @@ import type { UploadItem } from "../../lib/ui-state";
 import { UploadDropzone } from "./UploadDropzone";
 import { UploadProgress } from "./UploadProgress";
 
+type UploadModalBodyProps = {
+  isLoaded: boolean;
+  isSignedIn: boolean;
+  uploadTarget: "personal" | "knowledge_base";
+  isWorking: boolean;
+  isDragging: boolean;
+  onClose: () => void;
+  onFilesSelected: (files: File[]) => void;
+  onDraggingChange: (dragging: boolean) => void;
+};
+
+function UploadModalBody({
+  isLoaded,
+  isSignedIn,
+  uploadTarget,
+  isWorking,
+  isDragging,
+  onClose,
+  onFilesSelected,
+  onDraggingChange,
+}: Readonly<UploadModalBodyProps>) {
+  if (!isLoaded) {
+    return (
+      <output className="block rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
+        Checking your sign-in status…
+      </output>
+    );
+  }
+
+  if (!isSignedIn && uploadTarget === "personal") {
+    return (
+      <div className="rounded-2xl border border-cyan-300/20 bg-cyan-300/5 p-5">
+        <p className="text-sm font-semibold text-white">Sign in to upload your notes</p>
+        <p className="mt-1 text-sm leading-6 text-slate-400">
+          Your files are kept in your private library. Sign in or create a free account to add them.
+        </p>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <Link
+            href="/sign-in?next=/chat"
+            onClick={onClose}
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-200"
+          >
+            Sign in <ArrowRight className="h-4 w-4" />
+          </Link>
+          <Link
+            href="/sign-up?next=/chat"
+            onClick={onClose}
+            className="inline-flex min-h-10 items-center justify-center rounded-xl border border-white/15 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-200"
+          >
+            Create free account
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <UploadDropzone
+      disabled={isWorking || !isLoaded || !isSignedIn}
+      isDragging={isDragging}
+      onChange={(event) => {
+        const files = Array.from(event.target.files ?? []);
+        if (files.length) onFilesSelected(files);
+        event.target.value = "";
+      }}
+      onDragLeave={() => onDraggingChange(false)}
+      onDragOver={(event) => {
+        event.preventDefault();
+        onDraggingChange(true);
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        onDraggingChange(false);
+        const files = Array.from(event.dataTransfer.files ?? []);
+        if (files.length) onFilesSelected(files);
+      }}
+    />
+  );
+}
+
 type UploadModalProps = {
   isOpen: boolean;
   onClose: () => void;
@@ -109,13 +189,16 @@ export function UploadModal({
   return (
     <dialog
       open
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-      className="fixed inset-0 z-50 m-0 flex h-full max-h-full w-full max-w-full items-center justify-center border-none bg-slate-950/80 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 m-0 flex h-full max-h-full w-full max-w-full items-center justify-center border-none bg-transparent p-4"
       aria-label="Upload documents"
     >
-      <div className="w-full max-w-2xl rounded-[2rem] border border-white/10 bg-slate-950/95 p-5 shadow-2xl shadow-slate-950/60">
+      <button
+        type="button"
+        onClick={onClose}
+        className="absolute inset-0 h-full w-full cursor-default border-none bg-slate-950/80 backdrop-blur-sm"
+        aria-label="Close upload dialog"
+      />
+      <div className="relative z-10 w-full max-w-2xl rounded-[2rem] border border-white/10 bg-slate-950/95 p-5 shadow-2xl shadow-slate-950/60">
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-200">
@@ -140,53 +223,18 @@ export function UploadModal({
           </button>
         </div>
 
-        {!isLoaded ? (
-          <p className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300" role="status">
-            Checking your sign-in status…
-          </p>
-        ) : !isSignedIn && uploadTarget === "personal" ? (
-          <div className="rounded-2xl border border-cyan-300/20 bg-cyan-300/5 p-5">
-            <p className="text-sm font-semibold text-white">Sign in to upload your notes</p>
-            <p className="mt-1 text-sm leading-6 text-slate-400">Your files are kept in your private library. Sign in or create a free account to add them.</p>
-            <div className="mt-4 flex flex-wrap gap-3">
-              <Link
-                href="/sign-in?next=/chat"
-                onClick={onClose}
-                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-200"
-              >
-                Sign in <ArrowRight className="h-4 w-4" />
-              </Link>
-              <Link
-                href="/sign-up?next=/chat"
-                onClick={onClose}
-                className="inline-flex min-h-10 items-center justify-center rounded-xl border border-white/15 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-200"
-              >
-                Create free account
-              </Link>
-            </div>
-          </div>
-        ) : (
-        <UploadDropzone
-          disabled={isWorking || !isLoaded || !isSignedIn}
+        <UploadModalBody
+          isLoaded={isLoaded}
+          isSignedIn={isSignedIn}
+          uploadTarget={uploadTarget}
+          isWorking={isWorking}
           isDragging={isDragging}
-          onChange={(event) => {
-            const files = Array.from(event.target.files ?? []);
-            if (files.length) processFiles(files);
-            event.target.value = "";
+          onClose={onClose}
+          onFilesSelected={(files) => {
+            processFiles(files).catch(() => {});
           }}
-          onDragLeave={() => setIsDragging(false)}
-          onDragOver={(event) => {
-            event.preventDefault();
-            setIsDragging(true);
-          }}
-          onDrop={(event) => {
-            event.preventDefault();
-            setIsDragging(false);
-            const files = Array.from(event.dataTransfer.files ?? []);
-            if (files.length) processFiles(files);
-          }}
+          onDraggingChange={setIsDragging}
         />
-        )}
 
         {displayedItem && (
           <div className="mt-4">

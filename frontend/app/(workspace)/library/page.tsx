@@ -23,12 +23,33 @@ import type { KnowledgeSource } from "../../../lib/ui-state";
 import { StatusBadge } from "../../../components/ui/StatusBadge";
 
 type StatusFilter = "all" | "indexed" | "indexing" | "failed";
+type LibraryStatus = "loading" | "ready" | "empty" | "error";
+
+function resolveLibraryStatus(
+  workspace: ReturnType<typeof useWorkspaceOptional>,
+  localStatus: LibraryStatus,
+): LibraryStatus {
+  if (!workspace) return localStatus;
+  return workspace.sourceStatus === "unavailable" ? "error" : workspace.sourceStatus;
+}
+
+function getLibraryEmptyMessage(
+  status: LibraryStatus,
+  hasFilter: boolean,
+  loadingMessage: string,
+  filteredMessage: string,
+  defaultMessage: string,
+): string {
+  if (status === "loading") return loadingMessage;
+  if (hasFilter) return filteredMessage;
+  return defaultMessage;
+}
 
 export default function LibraryPage() {
   const workspace = useWorkspaceOptional();
 
   const [localSources, setLocalSources] = useState<KnowledgeSource[]>([]);
-  const [localStatus, setLocalStatus] = useState<"loading" | "ready" | "empty" | "error">("loading");
+  const [localStatus, setLocalStatus] = useState<LibraryStatus>("loading");
   const [localIsAdmin, setLocalIsAdmin] = useState(false);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [uploadTarget, setUploadTarget] = useState<"personal" | "knowledge_base">("personal");
@@ -38,11 +59,7 @@ export default function LibraryPage() {
 
   const sources = workspace ? workspace.sources : localSources;
   const isAdmin = workspace ? workspace.isAdmin : localIsAdmin;
-  const status: "loading" | "ready" | "empty" | "error" = workspace
-    ? workspace.sourceStatus === "unavailable"
-      ? "error"
-      : workspace.sourceStatus
-    : localStatus;
+  const status = resolveLibraryStatus(workspace, localStatus);
 
   const refreshSources = useCallback(
     async ({ force = false }: { force?: boolean } = {}) => {
@@ -285,13 +302,13 @@ export default function LibraryPage() {
             canDelete={isAdmin}
             onDelete={handleDelete}
             onAskInChat={(source) => workspace?.focusDocumentInChat({ id: source.id, filename: source.filename })}
-            emptyMessage={
-              status === "loading"
-                ? "Loading knowledge-base documents..."
-                : searchQuery || statusFilter !== "all"
-                  ? "No knowledge-base documents match your current filter."
-                  : "No shared knowledge-base documents have been uploaded yet."
-            }
+            emptyMessage={getLibraryEmptyMessage(
+              status,
+              Boolean(searchQuery) || statusFilter !== "all",
+              "Loading knowledge-base documents...",
+              "No knowledge-base documents match your current filter.",
+              "No shared knowledge-base documents have been uploaded yet.",
+            )}
           />
           <SourceSection
             title="Your Uploads"
@@ -299,13 +316,13 @@ export default function LibraryPage() {
             canDelete
             onDelete={handleDelete}
             onAskInChat={(source) => workspace?.focusDocumentInChat({ id: source.id, filename: source.filename })}
-            emptyMessage={
-              status === "loading"
-                ? "Loading your uploads..."
-                : searchQuery || statusFilter !== "all"
-                  ? "No personal uploads match your current filter."
-                  : "No personal uploads yet. Click 'Upload notes' above to add PDFs, slides, or notes."
-            }
+            emptyMessage={getLibraryEmptyMessage(
+              status,
+              Boolean(searchQuery) || statusFilter !== "all",
+              "Loading your uploads...",
+              "No personal uploads match your current filter.",
+              "No personal uploads yet. Click 'Upload notes' above to add PDFs, slides, or notes.",
+            )}
           />
         </section>
 

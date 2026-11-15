@@ -9,7 +9,6 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 
 import { useTheme } from "../../context/ThemeContext";
@@ -20,7 +19,6 @@ import { hasSupabasePublicConfig, supabase } from "../../lib/supabase";
 export default function SignUpPage() {
   const { theme, toggleTheme } = useTheme();
   const isDark = theme === "dark";
-  const router = useRouter();
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");

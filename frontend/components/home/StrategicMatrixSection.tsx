@@ -1,4 +1,4 @@
-import { Zap, RefreshCw, TrendingUp, ShieldCheck, CheckCircle2, ArrowUpRight, Sparkles, Layers } from "lucide-react";
+import { Zap, RefreshCw, TrendingUp, ShieldCheck, CheckCircle2, Sparkles } from "lucide-react";
 
 const matrixQuadrants = [
   {

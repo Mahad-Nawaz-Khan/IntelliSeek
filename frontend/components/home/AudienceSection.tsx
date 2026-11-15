@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { GraduationCap, Microscope, Code2, Users, CheckCircle2, ArrowRight, Sparkles } from "lucide-react";
+import { GraduationCap, Microscope, Code2, Users, CheckCircle2, Sparkles } from "lucide-react";
 
 const segments = [
   {

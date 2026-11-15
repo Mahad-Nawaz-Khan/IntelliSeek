@@ -242,6 +242,23 @@ export function syncMentionedSourcesWithText(
   );
 }
 
+function hasBoundedMention(lowerText: string, filename: string): boolean {
+  const mentionNeedle = `@${filename.toLowerCase()}`;
+  let searchFrom = 0;
+  while (searchFrom < lowerText.length) {
+    const idx = lowerText.indexOf(mentionNeedle, searchFrom);
+    if (idx === -1) return false;
+    const charBefore = idx === 0 ? " " : lowerText[idx - 1];
+    const endIdx = idx + mentionNeedle.length;
+    const charAfter = endIdx >= lowerText.length ? " " : lowerText[endIdx];
+    if (/\s/.test(charBefore) && /[\s.,!?;:)\]]/.test(charAfter)) {
+      return true;
+    }
+    searchFrom = idx + 1;
+  }
+  return false;
+}
+
 export function extractMentionedSourcesFromText(
   text: string,
   sources: KnowledgeSource[],
@@ -262,32 +279,8 @@ export function extractMentionedSourcesFromText(
     .sort((a, b) => b.filename.length - a.filename.length);
 
   for (const source of selectableSorted) {
-    if (byId.has(source.id)) continue;
-    const mentionNeedle = `@${source.filename.toLowerCase()}`;
-    let searchFrom = 0;
-    while (searchFrom < lower.length) {
-      const idx = lower.indexOf(mentionNeedle, searchFrom);
-      if (idx === -1) break;
-      const charBefore = idx === 0 ? " " : lower[idx - 1];
-      const endIdx = idx + mentionNeedle.length;
-      const charAfter = endIdx >= lower.length ? " " : lower[endIdx];
-      const validBefore = /\s/.test(charBefore);
-      const validAfter = /[\s.,!?;:)\]]/.test(charAfter);
-      if (validBefore && validAfter) {
-        byId.set(source.id, source);
-        break;
-      }
-      searchFrom = idx + 1;
-    }
-  }
-
-  // Preserve any explicitly attached mentions even if text was edited manually before sending
-  for (const source of attachedMentions) {
-    if (isSelectableSource(source) && !byId.has(source.id)) {
-      // Only keep if attachedMentions still matches text OR if caller deliberately kept chip
-      if (lower.includes(`@${source.filename.toLowerCase()}`)) {
-        byId.set(source.id, source);
-      }
+    if (!byId.has(source.id) && hasBoundedMention(lower, source.filename)) {
+      byId.set(source.id, source);
     }
   }
 
@@ -313,6 +306,90 @@ function formatMentionedNames(mentionedSources: KnowledgeSource[]): string {
   return mentionedSources.map((source) => source.filename).join(", ");
 }
 
+function mergeResolvedMentions(
+  attachedMentions: KnowledgeSource[],
+  mentionedSources: KnowledgeSource[],
+): KnowledgeSource[] {
+  const finalMentionMap = new Map<string, KnowledgeSource>();
+  for (const source of attachedMentions) {
+    if (isSelectableSource(source)) finalMentionMap.set(source.id, source);
+  }
+  for (const source of mentionedSources) {
+    finalMentionMap.set(source.id, source);
+  }
+  return Array.from(finalMentionMap.values());
+}
+
+type CommandPromptTemplate = {
+  withArgs: (args: string) => string;
+  withMentions: (names: string) => string;
+  fallback: string;
+};
+
+const COMMAND_PROMPT_TEMPLATES: Record<SlashCommandId, CommandPromptTemplate> = {
+  quiz: {
+    withArgs: (args) => `/quiz ${args}`,
+    withMentions: (names) => `/quiz Create an interactive multiple-choice quiz based on ${names}.`,
+    fallback: "/quiz Create an interactive multiple-choice quiz based on my study material.",
+  },
+  summarize: {
+    withArgs: (args) => `Summarize the key points and main takeaways: ${args}`,
+    withMentions: (names) => `Summarize the key points and main takeaways of ${names}.`,
+    fallback: "Summarize the key points and main takeaways of my uploaded study material.",
+  },
+  concepts: {
+    withArgs: (args) => `Extract the core concepts, key definitions, and important formulas from ${args}.`,
+    withMentions: (names) =>
+      `Extract the core concepts, key definitions, and important formulas covered in ${names}.`,
+    fallback: "Extract the core concepts, key definitions, and important formulas from my study material.",
+  },
+  explain: {
+    withArgs: (args) => `Explain ${args} step by step with intuition, key definitions, and a concrete example.`,
+    withMentions: (names) =>
+      `Explain the main concepts covered in ${names} step by step with intuition and clear examples.`,
+    fallback: "Explain the key concepts in my study material step by step with intuition and clear examples.",
+  },
+  compare: {
+    withArgs: (args) => `Compare ${args} using a structured side-by-side comparison table and key takeaways.`,
+    withMentions: (names) =>
+      `Compare the main topics and approaches covered in ${names} using a clear comparison table.`,
+    fallback: "Compare the major concepts covered in my study material using a clear side-by-side comparison table.",
+  },
+  exam: {
+    withArgs: (args) =>
+      `Create high-yield exam and viva practice questions with detailed model answers for ${args}.`,
+    withMentions: (names) =>
+      `Create high-yield exam and viva practice questions with detailed model answers based on ${names}.`,
+    fallback:
+      "Create high-yield exam and viva practice questions with detailed model answers from my study material.",
+  },
+  compact: {
+    withArgs: (args) =>
+      `Create an ultra-compact TL;DR cheat-sheet summary of the key points, formulas, and definitions for ${args}.`,
+    withMentions: (names) =>
+      `Create an ultra-compact TL;DR cheat-sheet summary of the key points, formulas, and definitions in ${names}.`,
+    fallback:
+      "Create an ultra-compact TL;DR cheat-sheet summary of the key points, formulas, and definitions from my study material.",
+  },
+};
+
+function buildSlashCommandPrompt(
+  commandId: SlashCommandId,
+  args: string,
+  mentionedNames: string,
+  hasMentions: boolean,
+  hasPriorMessages: boolean,
+): string {
+  if (commandId === "compact" && !args && !hasMentions && hasPriorMessages) {
+    return "Condense our conversation so far into a compact, scannable cheat-sheet summary of key takeaways, definitions, and conclusions.";
+  }
+
+  const template = COMMAND_PROMPT_TEMPLATES[commandId];
+  if (args) return template.withArgs(args);
+  if (mentionedNames) return template.withMentions(mentionedNames);
+  return template.fallback;
+}
+
 export function resolveSubmissionCommands(
   rawQuestion: string,
   sources: KnowledgeSource[] = [],
@@ -322,14 +399,7 @@ export function resolveSubmissionCommands(
   const trimmed = rawQuestion.trim();
   const mentionedSources = extractMentionedSourcesFromText(trimmed, sources, attachedMentions);
   // Also retain attachedMentions whose chips are still shown in case the user removed inline text or chip was attached directly
-  const finalMentionMap = new Map<string, KnowledgeSource>();
-  for (const source of attachedMentions) {
-    if (isSelectableSource(source)) finalMentionMap.set(source.id, source);
-  }
-  for (const source of mentionedSources) {
-    finalMentionMap.set(source.id, source);
-  }
-  const resolvedMentions = Array.from(finalMentionMap.values());
+  const resolvedMentions = mergeResolvedMentions(attachedMentions, mentionedSources);
   const mentionedDocumentIds = resolvedMentions.map((source) => source.id);
   const mentionedNames = formatMentionedNames(resolvedMentions);
 
@@ -343,83 +413,13 @@ export function resolveSubmissionCommands(
     };
   }
 
-  let promptToSend = trimmed;
-  switch (command.id) {
-    case "quiz": {
-      if (args) {
-        promptToSend = `/quiz ${args}`;
-      } else if (mentionedNames) {
-        promptToSend = `/quiz Create an interactive multiple-choice quiz based on ${mentionedNames}.`;
-      } else {
-        promptToSend = "/quiz Create an interactive multiple-choice quiz based on my study material.";
-      }
-      break;
-    }
-    case "summarize": {
-      if (args) {
-        promptToSend = `Summarize the key points and main takeaways: ${args}`;
-      } else if (mentionedNames) {
-        promptToSend = `Summarize the key points and main takeaways of ${mentionedNames}.`;
-      } else {
-        promptToSend = "Summarize the key points and main takeaways of my uploaded study material.";
-      }
-      break;
-    }
-    case "concepts": {
-      if (args) {
-        promptToSend = `Extract the core concepts, key definitions, and important formulas from ${args}.`;
-      } else if (mentionedNames) {
-        promptToSend = `Extract the core concepts, key definitions, and important formulas covered in ${mentionedNames}.`;
-      } else {
-        promptToSend = "Extract the core concepts, key definitions, and important formulas from my study material.";
-      }
-      break;
-    }
-    case "explain": {
-      if (args) {
-        promptToSend = `Explain ${args} step by step with intuition, key definitions, and a concrete example.`;
-      } else if (mentionedNames) {
-        promptToSend = `Explain the main concepts covered in ${mentionedNames} step by step with intuition and clear examples.`;
-      } else {
-        promptToSend = "Explain the key concepts in my study material step by step with intuition and clear examples.";
-      }
-      break;
-    }
-    case "compare": {
-      if (args) {
-        promptToSend = `Compare ${args} using a structured side-by-side comparison table and key takeaways.`;
-      } else if (mentionedNames) {
-        promptToSend = `Compare the main topics and approaches covered in ${mentionedNames} using a clear comparison table.`;
-      } else {
-        promptToSend = "Compare the major concepts covered in my study material using a clear side-by-side comparison table.";
-      }
-      break;
-    }
-    case "exam": {
-      if (args) {
-        promptToSend = `Create high-yield exam and viva practice questions with detailed model answers for ${args}.`;
-      } else if (mentionedNames) {
-        promptToSend = `Create high-yield exam and viva practice questions with detailed model answers based on ${mentionedNames}.`;
-      } else {
-        promptToSend = "Create high-yield exam and viva practice questions with detailed model answers from my study material.";
-      }
-      break;
-    }
-    case "compact": {
-      if (!args && !resolvedMentions.length && hasPriorMessages) {
-        promptToSend =
-          "Condense our conversation so far into a compact, scannable cheat-sheet summary of key takeaways, definitions, and conclusions.";
-      } else if (args) {
-        promptToSend = `Create an ultra-compact TL;DR cheat-sheet summary of the key points, formulas, and definitions for ${args}.`;
-      } else if (mentionedNames) {
-        promptToSend = `Create an ultra-compact TL;DR cheat-sheet summary of the key points, formulas, and definitions in ${mentionedNames}.`;
-      } else {
-        promptToSend =
-          "Create an ultra-compact TL;DR cheat-sheet summary of the key points, formulas, and definitions from my study material.";
-      }
-      break;
-    }
-  }
+  const promptToSend = buildSlashCommandPrompt(
+    command.id,
+    args,
+    mentionedNames,
+    resolvedMentions.length > 0,
+    hasPriorMessages,
+  );
 
   return {
     promptToSend,

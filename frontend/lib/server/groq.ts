@@ -72,14 +72,7 @@ The user's uploaded files were searched before this answer and no relevant uploa
 
 ${STYLE_GUIDE}`;
 
-function buildGroundedSystemPrompt(isQuiz = false) {
-  return isQuiz ? `${GROUNDED_SYSTEM_PROMPT}\n\n${QUIZ_SYSTEM_INSTRUCTIONS}` : GROUNDED_SYSTEM_PROMPT;
-}
-
-function buildGeneralSystemPrompt(includeKnowledgeBase = true, isQuiz = false) {
-  const base = includeKnowledgeBase
-    ? GENERAL_SYSTEM_PROMPT
-    : `You are IntelliSeek, an academic assistant.
+const GENERAL_PERSONAL_ONLY_PROMPT = `You are IntelliSeek, an academic assistant.
 
 The shared Knowledge Base is currently turned off for this request, so only the user's personal uploaded files were searched and no relevant content was found.
 
@@ -91,7 +84,24 @@ The shared Knowledge Base is currently turned off for this request, so only the 
 
 ${STYLE_GUIDE}`;
 
-  return isQuiz ? `${base}\n\n${QUIZ_SYSTEM_INSTRUCTIONS}` : base;
+function withQuizInstructions(prompt: string): string {
+  return `${prompt}\n\n${QUIZ_SYSTEM_INSTRUCTIONS}`;
+}
+
+function getGroundedSystemPrompt(): string {
+  return GROUNDED_SYSTEM_PROMPT;
+}
+
+function getGroundedQuizSystemPrompt(): string {
+  return withQuizInstructions(GROUNDED_SYSTEM_PROMPT);
+}
+
+function getGeneralSystemPrompt(includeKnowledgeBase: boolean): string {
+  return includeKnowledgeBase ? GENERAL_SYSTEM_PROMPT : GENERAL_PERSONAL_ONLY_PROMPT;
+}
+
+function getGeneralQuizSystemPrompt(includeKnowledgeBase: boolean): string {
+  return withQuizInstructions(getGeneralSystemPrompt(includeKnowledgeBase));
 }
 
 function getGroqModel() {
@@ -151,9 +161,10 @@ export async function* streamGroqGroundedAnswer(
   options: { isQuiz?: boolean } = {},
 ): AsyncGenerator<string, string> {
   const isQuiz = options.isQuiz === true;
+  const systemPrompt = isQuiz ? getGroundedQuizSystemPrompt() : getGroundedSystemPrompt();
   return yield* streamGroqText(
     [
-      { role: "system", content: buildGroundedSystemPrompt(isQuiz) },
+      { role: "system", content: systemPrompt },
       {
         role: "user",
         content: `Uploaded-file context chunks:\n${buildContext(context)}\n\nQuestion: ${question}`,
@@ -168,9 +179,13 @@ export async function* streamGroqGeneralAnswer(
   options: { includeKnowledgeBase?: boolean; isQuiz?: boolean } = {},
 ): AsyncGenerator<string, string> {
   const isQuiz = options.isQuiz === true;
+  const includeKnowledgeBase = options.includeKnowledgeBase !== false;
+  const systemPrompt = isQuiz
+    ? getGeneralQuizSystemPrompt(includeKnowledgeBase)
+    : getGeneralSystemPrompt(includeKnowledgeBase);
   return yield* streamGroqText(
     [
-      { role: "system", content: buildGeneralSystemPrompt(options.includeKnowledgeBase !== false, isQuiz) },
+      { role: "system", content: systemPrompt },
       { role: "user", content: question },
     ],
     isQuiz ? 1800 : 1100,

@@ -14,6 +14,158 @@ type RecentChatsProps = {
   onRenameSession?: (sessionId: string, title: string) => Promise<boolean>;
 };
 
+function getEmptyRecentChatsMessage(totalCount: number, filterQuery: string): string {
+  if (totalCount > 0) {
+    return `No chats match \u201C${filterQuery}\u201D.`;
+  }
+  return "Saved conversations appear here after you start chatting.";
+}
+
+type RecentChatRowProps = {
+  session: ChatSession;
+  isEditing: boolean;
+  canRename: boolean;
+  draftTitle: string;
+  deletingSessionId?: string | null;
+  onDraftTitleChange: (value: string) => void;
+  onStartEditing: (session: ChatSession) => void;
+  onStopEditing: () => void;
+  onCommitRename: (sessionId: string) => void;
+  onRenameKeyDown: (event: KeyboardEvent<HTMLInputElement>, sessionId: string) => void;
+  onOpenSession?: (sessionId: string) => void;
+  onDeleteSession?: (sessionId: string) => void;
+};
+
+function RecentChatRowEditing({
+  sessionId,
+  draftTitle,
+  onDraftTitleChange,
+  onRenameKeyDown,
+  onCommitRename,
+  onStopEditing,
+}: Readonly<{
+  sessionId: string;
+  draftTitle: string;
+  onDraftTitleChange: (value: string) => void;
+  onRenameKeyDown: (event: KeyboardEvent<HTMLInputElement>, sessionId: string) => void;
+  onCommitRename: (sessionId: string) => void;
+  onStopEditing: () => void;
+}>) {
+  return (
+    <div className="flex min-w-0 flex-1 items-center gap-1 py-1 pl-1.5">
+      <input
+        autoFocus
+        value={draftTitle}
+        onChange={(event) => onDraftTitleChange(event.target.value)}
+        onKeyDown={(event) => onRenameKeyDown(event, sessionId)}
+        onBlur={() => onCommitRename(sessionId)}
+        maxLength={80}
+        aria-label="Chat name"
+        className="min-w-0 flex-1 rounded-lg border border-cyan-300/40 bg-slate-900/80 px-2 py-1 text-xs text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-300/80"
+      />
+      <button
+        type="button"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => onCommitRename(sessionId)}
+        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-emerald-300 transition hover:bg-emerald-500/15"
+        aria-label="Save chat name"
+        title="Save"
+      >
+        <Check className="h-3.5 w-3.5" />
+      </button>
+      <button
+        type="button"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={onStopEditing}
+        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-white/10 hover:text-white"
+        aria-label="Cancel rename"
+        title="Cancel"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
+function RecentChatRow({
+  session,
+  isEditing,
+  canRename,
+  draftTitle,
+  deletingSessionId,
+  onDraftTitleChange,
+  onStartEditing,
+  onStopEditing,
+  onCommitRename,
+  onRenameKeyDown,
+  onOpenSession,
+  onDeleteSession,
+}: Readonly<RecentChatRowProps>) {
+  const isActive = session.status === "active";
+  const rowToneClass = isActive ? "bg-cyan-300/12 ring-1 ring-cyan-300/20" : "hover:bg-white/[0.05]";
+  const labelClass = isActive ? "text-xs font-semibold text-cyan-50" : "text-xs font-medium text-slate-300";
+
+  if (isEditing) {
+    return (
+      <li className={`group relative flex items-center gap-1 rounded-xl pr-1 transition-all duration-150 ${rowToneClass}`}>
+        <RecentChatRowEditing
+          sessionId={session.id}
+          draftTitle={draftTitle}
+          onDraftTitleChange={onDraftTitleChange}
+          onRenameKeyDown={onRenameKeyDown}
+          onCommitRename={onCommitRename}
+          onStopEditing={onStopEditing}
+        />
+      </li>
+    );
+  }
+
+  return (
+    <li className={`group relative flex items-center gap-1 rounded-xl pr-1 transition-all duration-150 ${rowToneClass}`}>
+      {isActive && (
+        <span className="absolute left-0 top-1/2 h-4 w-0.75 -translate-y-1/2 rounded-r-full bg-cyan-300" />
+      )}
+      <button
+        type="button"
+        onClick={() => onOpenSession?.(session.id)}
+        className="min-w-0 flex-1 rounded-xl px-2.5 py-2 text-left transition"
+        aria-current={isActive ? "page" : undefined}
+      >
+        <SessionTitleLabel title={session.title} className={labelClass} />
+      </button>
+      {canRename && (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onStartEditing(session);
+          }}
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-slate-400 opacity-0 transition-all duration-150 hover:bg-cyan-500/15 hover:text-cyan-200 active:scale-90 focus:opacity-100 group-hover:opacity-100"
+          aria-label={`Rename ${session.title}`}
+          title="Rename chat"
+        >
+          <Pencil className="h-3 w-3" />
+        </button>
+      )}
+      {onDeleteSession && (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onDeleteSession(session.id);
+          }}
+          disabled={deletingSessionId === session.id}
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-slate-400 opacity-0 transition-all duration-150 hover:bg-red-500/15 hover:text-red-200 active:scale-90 focus:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
+          aria-label={`Delete ${session.title}`}
+          title="Delete chat"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </li>
+  );
+}
+
 export function RecentChats({
   sessions,
   deletingSessionId,
@@ -99,111 +251,30 @@ export function RecentChats({
         </div>
       )}
 
-      {filteredSessions.length ? (
-        <ul className="space-y-1">
-          {filteredSessions.map((session) => {
-            const isEditing = editingSessionId === session.id;
-            const isActive = session.status === "active";
-
-            return (
-              <li
-                key={session.id}
-                className={`group relative flex items-center gap-1 rounded-xl pr-1 transition-all duration-150 ${
-                  isActive
-                    ? "bg-cyan-300/12 ring-1 ring-cyan-300/20"
-                    : "hover:bg-white/[0.05]"
-                }`}
-              >
-                {isActive && !isEditing && (
-                  <span className="absolute left-0 top-1/2 h-4 w-0.75 -translate-y-1/2 rounded-r-full bg-cyan-300" />
-                )}
-                {isEditing ? (
-                  <div className="flex min-w-0 flex-1 items-center gap-1 py-1 pl-1.5">
-                    <input
-                      autoFocus
-                      value={draftTitle}
-                      onChange={(event) => setDraftTitle(event.target.value)}
-                      onKeyDown={(event) => handleRenameKeyDown(event, session.id)}
-                      onBlur={() => commitRename(session.id)}
-                      maxLength={80}
-                      aria-label="Chat name"
-                      className="min-w-0 flex-1 rounded-lg border border-cyan-300/40 bg-slate-900/80 px-2 py-1 text-xs text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-300/80"
-                    />
-                    <button
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => commitRename(session.id)}
-                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-emerald-300 transition hover:bg-emerald-500/15"
-                      aria-label="Save chat name"
-                      title="Save"
-                    >
-                      <Check className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={stopEditing}
-                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-white/10 hover:text-white"
-                      aria-label="Cancel rename"
-                      title="Cancel"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => onOpenSession?.(session.id)}
-                      className="min-w-0 flex-1 rounded-xl px-2.5 py-2 text-left transition"
-                      aria-current={isActive ? "page" : undefined}
-                    >
-                      <SessionTitleLabel
-                        title={session.title}
-                        className={isActive ? "text-xs font-semibold text-cyan-50" : "text-xs font-medium text-slate-300"}
-                      />
-                    </button>
-                    {onRenameSession ? (
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          startEditing(session);
-                        }}
-                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-slate-400 opacity-0 transition-all duration-150 hover:bg-cyan-500/15 hover:text-cyan-200 active:scale-90 focus:opacity-100 group-hover:opacity-100"
-                        aria-label={`Rename ${session.title}`}
-                        title="Rename chat"
-                      >
-                        <Pencil className="h-3 w-3" />
-                      </button>
-                    ) : null}
-                  </>
-                )}
-                {onDeleteSession && !isEditing ? (
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onDeleteSession(session.id);
-                    }}
-                    disabled={deletingSessionId === session.id}
-                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-slate-400 opacity-0 transition-all duration-150 hover:bg-red-500/15 hover:text-red-200 active:scale-90 focus:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-40"
-                    aria-label={`Delete ${session.title}`}
-                    title="Delete chat"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                ) : null}
-              </li>
-            );
-          })}
-        </ul>
-      ) : sessions.length > 0 ? (
-        <p className="rounded-xl px-2.5 py-2 text-xs text-slate-500">No chats match &ldquo;{filterQuery}&rdquo;.</p>
-      ) : (
+      {filteredSessions.length === 0 ? (
         <p className="rounded-xl px-2.5 py-2 text-xs leading-5 text-slate-500">
-          Saved conversations appear here after you start chatting.
+          {getEmptyRecentChatsMessage(sessions.length, filterQuery)}
         </p>
+      ) : (
+        <ul className="space-y-1">
+          {filteredSessions.map((session) => (
+            <RecentChatRow
+              key={session.id}
+              session={session}
+              isEditing={editingSessionId === session.id}
+              canRename={Boolean(onRenameSession)}
+              draftTitle={draftTitle}
+              deletingSessionId={deletingSessionId}
+              onDraftTitleChange={setDraftTitle}
+              onStartEditing={startEditing}
+              onStopEditing={stopEditing}
+              onCommitRename={commitRename}
+              onRenameKeyDown={handleRenameKeyDown}
+              onOpenSession={onOpenSession}
+              onDeleteSession={onDeleteSession}
+            />
+          ))}
+        </ul>
       )}
     </section>
   );

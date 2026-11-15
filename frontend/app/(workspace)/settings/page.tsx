@@ -28,6 +28,14 @@ type ToggleRowProps = {
   onToggle: () => void;
 };
 
+function formatAccountSubtitle(indexedCount: number | null): string {
+  if (indexedCount === null) {
+    return "Authenticated workspace session";
+  }
+  const suffix = indexedCount === 1 ? "" : "s";
+  return `${indexedCount} indexed source${suffix} available for retrieval`;
+}
+
 function PreferenceToggleCard({
   icon: Icon,
   title,
@@ -201,9 +209,7 @@ export default function SettingsPage() {
                   </span>
                 </div>
                 <p className="mt-1 text-xs text-slate-400">
-                  {indexedCount !== null
-                    ? `${indexedCount} indexed source${indexedCount === 1 ? "" : "s"} available for retrieval`
-                    : "Authenticated workspace session"}
+                  {formatAccountSubtitle(indexedCount)}
                 </p>
               </div>
             </div>

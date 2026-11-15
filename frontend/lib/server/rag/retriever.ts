@@ -103,6 +103,40 @@ type ResolvedRpcScope =
   | { skip: true }
   | { skip: false; documentIds?: string[]; strictDocumentIds: boolean };
 
+function intersectIds(left: string[], right: string[]): string[] {
+  const rightSet = new Set(right);
+  return left.filter((id) => rightSet.has(id));
+}
+
+async function resolveSelectedDocumentRpcScope(
+  userId: string,
+  hintedIds: string[],
+  selectedDocumentIds: string[],
+  includeKnowledgeBase: boolean,
+  options: RetrievalScopeOptions,
+  log?: RequestLogger,
+): Promise<ResolvedRpcScope> {
+  const selectedIds = filterUuids(selectedDocumentIds);
+  if (!selectedIds.length) {
+    return { skip: true };
+  }
+
+  let allowed = hintedIds.length ? intersectIds(selectedIds, hintedIds) : selectedIds;
+  if (!includeKnowledgeBase) {
+    const personalIds = options.personalDocumentIds ?? (await listPersonalIndexedDocumentIds(userId, log));
+    allowed = intersectIds(allowed, personalIds);
+  }
+  if (!allowed.length) {
+    return { skip: true };
+  }
+
+  return {
+    skip: false,
+    documentIds: allowed,
+    strictDocumentIds: true,
+  };
+}
+
 async function resolveRpcScopedDocumentIds(
   userId: string,
   requestedDocumentIds: string[],
@@ -115,30 +149,14 @@ async function resolveRpcScopedDocumentIds(
   const includeKnowledgeBase = options.includeKnowledgeBase !== false;
 
   if (options.selectedDocumentIds !== undefined) {
-    const selectedIds = filterUuids(options.selectedDocumentIds);
-    if (!selectedIds.length) {
-      return { skip: true };
-    }
-
-    let allowed = selectedIds;
-    if (hintedIds.length) {
-      const hintedSet = new Set(hintedIds);
-      allowed = allowed.filter((id) => hintedSet.has(id));
-    }
-    if (!includeKnowledgeBase) {
-      const personalIds = options.personalDocumentIds ?? await listPersonalIndexedDocumentIds(userId, log);
-      const personalSet = new Set(personalIds);
-      allowed = allowed.filter((id) => personalSet.has(id));
-    }
-    if (!allowed.length) {
-      return { skip: true };
-    }
-
-    return {
-      skip: false,
-      documentIds: allowed,
-      strictDocumentIds: true,
-    };
+    return resolveSelectedDocumentRpcScope(
+      userId,
+      hintedIds,
+      options.selectedDocumentIds,
+      includeKnowledgeBase,
+      options,
+      log,
+    );
   }
 
   if (includeKnowledgeBase) {
@@ -149,19 +167,16 @@ async function resolveRpcScopedDocumentIds(
     };
   }
 
-  const personalIds = options.personalDocumentIds ?? await listPersonalIndexedDocumentIds(userId, log);
+  const personalIds = options.personalDocumentIds ?? (await listPersonalIndexedDocumentIds(userId, log));
   if (!personalIds.length) {
     return { skip: true };
   }
 
-  if (hintedIds.length) {
-    const personalSet = new Set(personalIds);
-    const allowed = hintedIds.filter((id) => personalSet.has(id));
-    if (!allowed.length) return { skip: true };
-    return { skip: false, documentIds: allowed, strictDocumentIds: true };
+  const allowed = hintedIds.length ? intersectIds(hintedIds, personalIds) : personalIds;
+  if (!allowed.length) {
+    return { skip: true };
   }
-
-  return { skip: false, documentIds: personalIds, strictDocumentIds: true };
+  return { skip: false, documentIds: allowed, strictDocumentIds: true };
 }
 
 function enforceAllowedDocuments<T extends { document_id: string }>(
@@ -489,7 +504,12 @@ export async function retrieveKeywordContext(
 
       // Term density bonus (up to +0.10) for frequent keyword mentions
       const densityBonus = lowerTerms.reduce((bonus, term) => {
-        const matches = (lowerText.match(new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi")) ?? []).length;
+        if (!term) return bonus;
+        const regex = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+        let matches = 0;
+        while (regex.exec(lowerText) !== null) {
+          matches += 1;
+        }
         return bonus + Math.min(matches * 0.02, 0.05);
       }, 0);
 

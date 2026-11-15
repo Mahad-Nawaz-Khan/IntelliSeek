@@ -10,6 +10,14 @@ type UseDocumentUploadToastsParams = {
   onNewIndexingDocument?: () => void;
 };
 
+function removeToastIds(idsToRemove: Set<string>) {
+  return (current: UploadIndexingToast[]) => current.filter((t) => !idsToRemove.has(t.toastId));
+}
+
+function getCompletedToastIds(toasts: UploadIndexingToast[]): string[] {
+  return toasts.filter((t) => t.status === "completed").map((t) => t.toastId);
+}
+
 export function useDocumentUploadToasts({
   completedDocumentIds,
   failedDocuments,
@@ -39,14 +47,12 @@ export function useDocumentUploadToasts({
 
   // Auto-dismiss completed toasts after green flash
   useEffect(() => {
-    const completedIds = uploadToasts
-      .filter((t) => t.status === "completed")
-      .map((t) => t.toastId);
-
+    const completedIds = getCompletedToastIds(uploadToasts);
     if (completedIds.length === 0) return;
 
+    const completedIdSet = new Set(completedIds);
     const timeout = window.setTimeout(() => {
-      setUploadToasts((current) => current.filter((t) => !completedIds.includes(t.toastId)));
+      setUploadToasts(removeToastIds(completedIdSet));
     }, 1800);
 
     return () => window.clearTimeout(timeout);

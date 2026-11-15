@@ -80,14 +80,7 @@ Do not cite uploaded files or imply that this answer came from the user's files.
 
 ${PRIMARY_STYLE_GUIDE}`;
 
-function buildGroundedInstructions(isQuiz = false) {
-  return isQuiz ? `${GROUNDED_SYSTEM_PROMPT}\n\n${QUIZ_SYSTEM_INSTRUCTIONS}` : GROUNDED_SYSTEM_PROMPT;
-}
-
-function buildGeneralInstructions(includeKnowledgeBase = true, isQuiz = false) {
-  const base = includeKnowledgeBase
-    ? GENERAL_SYSTEM_PROMPT
-    : `You are IntelliSeek, an academic assistant.
+const GENERAL_PERSONAL_ONLY_PROMPT = `You are IntelliSeek, an academic assistant.
 The shared Knowledge Base is currently turned off for this request, so only the user's personal uploaded files were searched and no relevant content was found.
 If it matters, briefly mention that Knowledge Base is disabled and no relevant personal uploaded files matched. Do not use a fixed opening sentence.
 Answer from general knowledge in a helpful study-assistant style.
@@ -95,17 +88,51 @@ Do not cite uploaded or knowledge-base files or imply that this answer came from
 
 ${PRIMARY_STYLE_GUIDE}`;
 
-  return isQuiz ? `${base}\n\n${QUIZ_SYSTEM_INSTRUCTIONS}` : base;
+type AnswerPromptMode = "standard" | "quiz";
+type KnowledgeBaseScopeMode = "included" | "personal-only" | "selected";
+
+function withQuizFormatting(prompt: string): string {
+  return `${prompt}\n\n${QUIZ_SYSTEM_INSTRUCTIONS}`;
 }
 
-function buildAgentInstructions(includeKnowledgeBase = true, hasSelectedDocumentFilter = false, isQuiz = false) {
-  let base = SYSTEM_PROMPT;
-  if (hasSelectedDocumentFilter) {
-    base = `${SYSTEM_PROMPT}\n\nNote: The user has explicitly restricted active sources for this turn. Only search and reference the selected documents.`;
-  } else if (!includeKnowledgeBase) {
-    base = `${SYSTEM_PROMPT}\n\nNote: The shared Knowledge Base is currently turned off by the user. Only search and reference the user's personal uploaded documents.`;
+function getGroundedInstructions(): string {
+  return GROUNDED_SYSTEM_PROMPT;
+}
+
+function getGroundedQuizInstructions(): string {
+  return withQuizFormatting(GROUNDED_SYSTEM_PROMPT);
+}
+
+function getGeneralBasePrompt(includeKnowledgeBase: boolean): string {
+  return includeKnowledgeBase ? GENERAL_SYSTEM_PROMPT : GENERAL_PERSONAL_ONLY_PROMPT;
+}
+
+function getGeneralInstructions(includeKnowledgeBase: boolean): string {
+  return getGeneralBasePrompt(includeKnowledgeBase);
+}
+
+function getGeneralQuizInstructions(includeKnowledgeBase: boolean): string {
+  return withQuizFormatting(getGeneralBasePrompt(includeKnowledgeBase));
+}
+
+function resolveScopeMode(includeKnowledgeBase: boolean, hasSelectedDocumentFilter: boolean): KnowledgeBaseScopeMode {
+  if (hasSelectedDocumentFilter) return "selected";
+  return includeKnowledgeBase ? "included" : "personal-only";
+}
+
+function getAgentBasePrompt(scopeMode: KnowledgeBaseScopeMode): string {
+  if (scopeMode === "selected") {
+    return `${SYSTEM_PROMPT}\n\nNote: The user has explicitly restricted active sources for this turn. Only search and reference the selected documents.`;
   }
-  return isQuiz ? `${base}\n\n${QUIZ_SYSTEM_INSTRUCTIONS}` : base;
+  if (scopeMode === "personal-only") {
+    return `${SYSTEM_PROMPT}\n\nNote: The shared Knowledge Base is currently turned off by the user. Only search and reference the user's personal uploaded documents.`;
+  }
+  return SYSTEM_PROMPT;
+}
+
+function getAgentInstructionsForMode(scopeMode: KnowledgeBaseScopeMode, promptMode: AnswerPromptMode): string {
+  const base = getAgentBasePrompt(scopeMode);
+  return promptMode === "quiz" ? withQuizFormatting(base) : base;
 }
 
 type AgentToolChunk = RetrievedChunk;
@@ -357,11 +384,82 @@ async function* streamAgentText(agent: Agent, input: string): AsyncGenerator<str
   return requireAnswer(stream.finalOutput);
 }
 
-function createAgentRun(userId: string, scopeOptions: RetrievalScopeOptions = {}, isQuiz = false) {
+type ResolvedChunkSearchScope =
+  | { skip: true }
+  | { skip: false; personalDocumentIds?: string[]; effectiveDocIds?: string[] };
+
+async function resolveChunkSearchScope(
+  userId: string,
+  scopeOptions: RetrievalScopeOptions,
+  includeKnowledgeBase: boolean,
+  selectedDocumentIds?: string[],
+): Promise<ResolvedChunkSearchScope> {
+  if (selectedDocumentIds !== undefined && selectedDocumentIds.length === 0) {
+    return { skip: true };
+  }
+
+  const personalDocumentIds = !includeKnowledgeBase
+    ? scopeOptions.personalDocumentIds ?? (await listPersonalIndexedDocumentIds(userId))
+    : undefined;
+  if (!includeKnowledgeBase && !personalDocumentIds?.length) {
+    return { skip: true };
+  }
+
+  if (selectedDocumentIds === undefined) {
+    return {
+      skip: false,
+      personalDocumentIds,
+      effectiveDocIds: includeKnowledgeBase ? undefined : personalDocumentIds,
+    };
+  }
+
+  let effectiveDocIds = selectedDocumentIds;
+  if (!includeKnowledgeBase && personalDocumentIds) {
+    const personalSet = new Set(personalDocumentIds);
+    effectiveDocIds = selectedDocumentIds.filter((id) => personalSet.has(id));
+  }
+
+  if (!effectiveDocIds.length) {
+    return { skip: true };
+  }
+
+  return { skip: false, personalDocumentIds, effectiveDocIds };
+}
+
+async function rescueWeakSearchCandidates(
+  validatedQuery: string,
+  userId: string,
+  candidates: RetrievedChunk[],
+  vectorOptions: { documentIds?: string[]; strictDocumentIds?: boolean },
+): Promise<RetrievedChunk[]> {
+  if (candidates.length > 0 && candidates.some((c) => c.score >= 0.5)) {
+    return candidates;
+  }
+
+  const expansions = await expandQuery(validatedQuery);
+  if (expansions.length <= 1) {
+    return candidates;
+  }
+
+  const expansionSearches = await Promise.all(
+    expansions.slice(1).map(async (exp) => {
+      const expEmbedding = await embedText(exp);
+      return matchUserChunks(userId, expEmbedding, 5, undefined, vectorOptions);
+    }),
+  );
+  return mergeRetrievedContext(candidates, ...expansionSearches);
+}
+
+function createAgentRun(
+  userId: string,
+  scopeOptions: RetrievalScopeOptions = {},
+  promptMode: AnswerPromptMode = "standard",
+) {
   configureAgentClient();
 
   const includeKnowledgeBase = scopeOptions.includeKnowledgeBase !== false;
   const selectedDocumentIds = scopeOptions.selectedDocumentIds;
+  const scopeMode = resolveScopeMode(includeKnowledgeBase, selectedDocumentIds !== undefined);
   const usedChunks: AgentToolChunk[] = [];
 
   const searchChunks = tool({
@@ -372,39 +470,26 @@ function createAgentRun(userId: string, scopeOptions: RetrievalScopeOptions = {}
       limit: z.number().int().min(1).max(10).default(5).describe("Maximum chunks to return."),
     }),
     execute: async ({ query, limit }) => {
-      if (selectedDocumentIds !== undefined && selectedDocumentIds.length === 0) {
+      const resolvedScope = await resolveChunkSearchScope(
+        userId,
+        scopeOptions,
+        includeKnowledgeBase,
+        selectedDocumentIds,
+      );
+      if (resolvedScope.skip) {
         return JSON.stringify([]);
-      }
-
-      const personalDocumentIds = !includeKnowledgeBase
-        ? scopeOptions.personalDocumentIds ?? await listPersonalIndexedDocumentIds(userId)
-        : undefined;
-      if (!includeKnowledgeBase && !personalDocumentIds?.length) {
-        return JSON.stringify([]);
-      }
-
-      let effectiveDocIds = !includeKnowledgeBase ? personalDocumentIds : undefined;
-      if (selectedDocumentIds !== undefined) {
-        if (!includeKnowledgeBase && personalDocumentIds) {
-          const personalSet = new Set(personalDocumentIds);
-          effectiveDocIds = selectedDocumentIds.filter((id) => personalSet.has(id));
-        } else {
-          effectiveDocIds = selectedDocumentIds;
-        }
-        if (!effectiveDocIds.length) {
-          return JSON.stringify([]);
-        }
       }
 
       const validatedQuery = validateQuestion(query);
       const queryEmbedding = await embedText(validatedQuery);
       const candidateLimit = Math.min(Math.max(limit * 2, 10), 20);
-      const vectorOptions = effectiveDocIds !== undefined
-        ? { documentIds: effectiveDocIds, strictDocumentIds: true }
-        : {};
+      const vectorOptions =
+        resolvedScope.effectiveDocIds !== undefined
+          ? { documentIds: resolvedScope.effectiveDocIds, strictDocumentIds: true }
+          : {};
       const ragScope: RetrievalScopeOptions = {
         includeKnowledgeBase,
-        personalDocumentIds,
+        personalDocumentIds: resolvedScope.personalDocumentIds,
         selectedDocumentIds,
       };
 
@@ -416,26 +501,18 @@ function createAgentRun(userId: string, scopeOptions: RetrievalScopeOptions = {}
         retrieveFullTextContext(validatedQuery, userId, limit, undefined, [], ragScope),
       ]);
 
-      let candidates = mergeRetrievedContext(
+      const initialCandidates = mergeRetrievedContext(
         semanticChunks,
         microChunks,
         keywordChunks,
         fullTextChunks,
       );
-
-      // Query expansion rescue if initial candidates are sparse or weak
-      if (candidates.length === 0 || candidates.every((c) => c.score < 0.5)) {
-        const expansions = await expandQuery(validatedQuery);
-        if (expansions.length > 1) {
-          const expansionSearches = await Promise.all(
-            expansions.slice(1).map(async (exp) => {
-              const expEmbedding = await embedText(exp);
-              return matchUserChunks(userId, expEmbedding, 5, undefined, vectorOptions);
-            }),
-          );
-          candidates = mergeRetrievedContext(candidates, ...expansionSearches);
-        }
-      }
+      const candidates = await rescueWeakSearchCandidates(
+        validatedQuery,
+        userId,
+        initialCandidates,
+        vectorOptions,
+      );
 
       // Re-rank with cross-encoder for precision
       const reranked = await rerankChunks(validatedQuery, candidates);
@@ -474,7 +551,7 @@ function createAgentRun(userId: string, scopeOptions: RetrievalScopeOptions = {}
   return {
     agent: new Agent({
       name: "IntelliSeek Academic Assistant",
-      instructions: buildAgentInstructions(includeKnowledgeBase, selectedDocumentIds !== undefined, isQuiz),
+      instructions: getAgentInstructionsForMode(scopeMode, promptMode),
       model: getChatModel(),
       tools: [searchChunks, findDocuments, getDocumentChunks],
     }),
@@ -488,7 +565,8 @@ export async function generateAgentAnswer(
   conversationContext: ConversationTurn[] = [],
   scopeOptions: RetrievalScopeOptions = {},
 ): Promise<AgentRunResult> {
-  const { agent, getSources } = createAgentRun(userId, scopeOptions, isQuizRequest(question));
+  const promptMode: AnswerPromptMode = isQuizRequest(question) ? "quiz" : "standard";
+  const { agent, getSources } = createAgentRun(userId, scopeOptions, promptMode);
   const result = await run(agent, buildConversationInput(question, conversationContext), { maxTurns: 6 });
   const answer = requireAnswer(result.finalOutput);
 
@@ -504,7 +582,8 @@ export async function* streamAgentAnswer(
   conversationContext: ConversationTurn[] = [],
   scopeOptions: RetrievalScopeOptions = {},
 ): AsyncGenerator<AgentAnswerStreamEvent> {
-  const { agent, getSources } = createAgentRun(userId, scopeOptions, isQuizRequest(question));
+  const promptMode: AnswerPromptMode = isQuizRequest(question) ? "quiz" : "standard";
+  const { agent, getSources } = createAgentRun(userId, scopeOptions, promptMode);
   const stream = await run(agent, buildConversationInput(question, conversationContext), { maxTurns: 6, stream: true });
 
   for await (const event of stream) {
@@ -526,6 +605,7 @@ export async function* streamGroundedAgentAnswer(
   log?: RequestLogger,
 ): AsyncGenerator<AgentAnswerStreamEvent> {
   const isQuiz = isQuizRequest(question);
+  const instructions = isQuiz ? getGroundedQuizInstructions() : getGroundedInstructions();
   const conversationInput = buildConversationInput(question, conversationContext);
 
   const answer = yield* streamTextWithFallback(
@@ -533,7 +613,7 @@ export async function* streamGroundedAgentAnswer(
       configureAgentClient();
       const agent = new Agent({
         name: "IntelliSeek Uploaded File Assistant",
-        instructions: buildGroundedInstructions(isQuiz),
+        instructions,
         model: getChatModel(),
       });
       return streamAgentText(agent, `Uploaded-file context chunks:\n${buildContextInput(context)}\n\n${conversationInput}`);
@@ -555,6 +635,9 @@ export async function* streamGeneralAgentAnswer(
 ): AsyncGenerator<AgentAnswerStreamEvent> {
   const includeKnowledgeBase = options.includeKnowledgeBase !== false;
   const isQuiz = isQuizRequest(question);
+  const instructions = isQuiz
+    ? getGeneralQuizInstructions(includeKnowledgeBase)
+    : getGeneralInstructions(includeKnowledgeBase);
   const conversationInput = buildConversationInput(question, conversationContext);
 
   const answer = yield* streamTextWithFallback(
@@ -562,7 +645,7 @@ export async function* streamGeneralAgentAnswer(
       configureAgentClient();
       const agent = new Agent({
         name: "IntelliSeek General Assistant",
-        instructions: buildGeneralInstructions(includeKnowledgeBase, isQuiz),
+        instructions,
         model: getChatModel(),
       });
       return streamAgentText(agent, conversationInput);

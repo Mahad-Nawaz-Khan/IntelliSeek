@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 
 /**
  * Chat/sidebar item title. Truncated by default; when it overflows, hovering
@@ -15,23 +15,39 @@ export function SessionTitleLabel({
   title: string;
   className?: string;
 }>) {
+  const containerRef = useRef<HTMLSpanElement>(null);
   const innerRef = useRef<HTMLSpanElement>(null);
   const [slideDistance, setSlideDistance] = useState<number | null>(null);
 
-  const measure = () => {
-    const el = innerRef.current;
-    if (!el) return;
-    setSlideDistance(el.scrollWidth > el.clientWidth ? el.clientWidth - el.scrollWidth : null);
-  };
-  const reset = () => setSlideDistance(null);
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const measure = () => {
+      const el = innerRef.current;
+      if (!el) return;
+      setSlideDistance(el.scrollWidth > el.clientWidth ? el.clientWidth - el.scrollWidth : null);
+    };
+    const reset = () => setSlideDistance(null);
+
+    container.addEventListener("mouseenter", measure);
+    container.addEventListener("mouseleave", reset);
+    container.addEventListener("focusin", measure);
+    container.addEventListener("focusout", reset);
+    return () => {
+      container.removeEventListener("mouseenter", measure);
+      container.removeEventListener("mouseleave", reset);
+      container.removeEventListener("focusin", measure);
+      container.removeEventListener("focusout", reset);
+    };
+  }, []);
 
   const sliding = slideDistance !== null;
   return (
     <span
+      ref={containerRef}
       className="block overflow-hidden"
       title={title}
-      onMouseEnter={measure}
-      onMouseLeave={reset}
     >
       <span
         ref={innerRef}

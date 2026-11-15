@@ -1,6 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
-import { ArrowUpRight, ShieldCheck, Lock, Sparkles, CheckCircle2 } from "lucide-react";
+import { ShieldCheck, Lock, CheckCircle2 } from "lucide-react";
 
 export function HomeFooter() {
   return (
@@ -32,7 +32,7 @@ export function HomeFooter() {
             <div className="mt-6 flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-medium text-emerald-300">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                Systems Operational
+                <span>Systems Operational</span>
               </span>
               <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-slate-300">
                 <Lock className="h-3 w-3 text-cyan-400" />
