@@ -476,7 +476,7 @@ export function ChatInput({
   return (
     <div
       style={{ backgroundColor: "var(--chat-input-bg, #161f33)" }}
-      className="chat-input-surface relative mx-auto w-full max-w-4xl place-self-center rounded-[26px] border border-white/10 bg-[#161f33] p-1.5 shadow-[0_14px_36px_rgba(0,0,0,0.34)] transition-[border-color] focus-within:border-cyan-400/50"
+      className="chat-input-surface pointer-events-auto relative z-20 mx-auto w-full max-w-4xl place-self-center rounded-[26px] border border-white/10 bg-[#161f33] p-1.5 shadow-[0_14px_36px_rgba(0,0,0,0.34)] transition-[border-color] focus-within:border-cyan-400/50"
     >
       {isSlashMenuOpen && slashMatch && (
         <div

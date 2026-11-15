@@ -8,6 +8,7 @@
   --intelliseek-violet: #7c3aed;
   --intelliseek-slate: #0f172a;
   --intelliseek-cyan: #06b6d4;
+  --chat-workspace-rgb: 10 14 34;
   --chat-workspace-bg: #0a0e22;
   --chat-input-bg: #161f33;
 }
@@ -17,6 +18,7 @@
   --background: #f4f7fb;
   --foreground: #172033;
   --intelliseek-slate: #e8edf5;
+  --chat-workspace-rgb: 241 245 249;
   --chat-workspace-bg: #f1f5f9;
   --chat-input-bg: #ffffff;
 }
@@ -781,6 +783,24 @@ button:hover,
 
 .chat-input-surface {
   background-color: var(--chat-input-bg, #161f33);
+}
+
+/* Gemini-style vertical fade under and behind the sticky chat composer */
+.chat-bottom-scrim {
+  position: absolute;
+  inset: -2.75rem 0 0 0;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    rgb(var(--chat-workspace-rgb) / 0) 0px,
+    rgb(var(--chat-workspace-rgb) / 0.08) 16px,
+    rgb(var(--chat-workspace-rgb) / 0.32) 34px,
+    rgb(var(--chat-workspace-rgb) / 0.66) 52px,
+    rgb(var(--chat-workspace-rgb) / 0.91) 74px,
+    rgb(var(--chat-workspace-rgb) / 1) 98px,
+    rgb(var(--chat-workspace-rgb) / 1) 100%
+  );
 }
 
 .chat-plus-menu {

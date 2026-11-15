@@ -1178,7 +1178,7 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
             onWheel={handleWheel}
             onTouchStart={handleTouchStart}
             onTouchMove={handleTouchMove}
-            className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-4 pt-4 pb-2 sm:px-6"
+            className={`scrollbar-hidden min-h-0 flex-1 overflow-y-auto px-4 pt-4 sm:px-6 ${isNewChatEmpty ? "pb-2" : "pb-0"}`}
           >
             <div className={`flex min-h-full flex-col ${isNewChatEmpty ? "justify-center py-6" : ""}`}>
               <div className={isNewChatEmpty ? "pb-6" : "flex-1 pb-4"}>
@@ -1203,16 +1203,16 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
               <div
                 className={
                   isNewChatEmpty
-                    ? "z-20 -mx-4 px-4 pb-2 pt-1 sm:-mx-6 sm:px-6"
-                    : "sticky bottom-0 z-20 -mx-4 px-4 pb-3 pt-2 sm:-mx-6 sm:px-6"
+                    ? "z-20 pb-2 pt-1"
+                    : "pointer-events-none sticky bottom-0 z-20 pt-2"
                 }
               >
                 {showScrollToBottom && messages.length > 0 && (
-                  <div className="chat-fade-in mb-3 flex justify-center">
+                  <div className="chat-fade-in relative z-10 mb-3 flex justify-center">
                     <button
                       type="button"
                       onClick={() => scrollToBottom("smooth")}
-                      className="chat-scroll-btn flex h-9 w-9 items-center justify-center rounded-full border border-cyan-300/30 bg-slate-950/90 text-cyan-300 shadow-lg shadow-cyan-950/30 backdrop-blur-xl transition hover:border-cyan-300/60 hover:bg-slate-900 hover:text-cyan-100"
+                      className="chat-scroll-btn pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full border border-cyan-300/30 bg-slate-950/90 text-cyan-300 shadow-lg shadow-cyan-950/30 backdrop-blur-xl transition hover:border-cyan-300/60 hover:bg-slate-900 hover:text-cyan-100"
                       aria-label="Scroll to latest message"
                       title="Scroll to latest message"
                     >
@@ -1221,57 +1221,61 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
                   </div>
                 )}
 
-                {demo && hasReachedLimit && (
-                  <div className="mx-auto mb-3 flex w-full max-w-4xl items-center gap-2 rounded-2xl border border-red-300/20 bg-red-400/10 px-4 py-2.5 text-sm text-red-100 shadow-lg">
-                    <span className="font-semibold">Demo limit reached.</span>
-                    <span>Sign up for free to continue chatting and unlock uploads.</span>
-                    <button
-                      type="button"
-                      onClick={() => setShowSignupModal(true)}
-                      className="ml-auto shrink-0 rounded-xl bg-red-300 px-3 py-1.5 text-xs font-semibold text-red-950 transition hover:bg-red-200"
-                    >
-                      Sign up
-                    </button>
-                  </div>
-                )}
-                <ChatComposer
-                  autocompleteSuggestions={autocompleteSuggestions}
-                  disabled={isLoadingSession || (demo && hasReachedLimit)}
-                  isResponding={isLoading}
-                  queuedMessages={queuedMessages}
-                  queueLimit={QUEUE_LIMIT}
-                  focusedDocument={focusedDocument}
-                  includeKnowledgeBase={includeKnowledgeBase}
-                  isTemporaryChat={isTemporaryChat}
-                  hasPriorMessages={messages.length > 0}
-                  knowledgeBaseCount={knowledgeBaseCount}
-                  sources={demo ? undefined : sources}
-                  selectedSourceIds={demo ? undefined : selectedSourceIds}
-                  onToggleKnowledgeBase={demo ? undefined : handleToggleKnowledgeBase}
-                  onToggleSourceSelection={demo ? undefined : handleToggleSourceSelection}
-                  onSetSectionSourcesSelected={demo ? undefined : handleSetSectionSourcesSelected}
-                  onSetAllSourcesSelected={demo ? undefined : handleSetAllSourcesSelected}
-                  onClearFocusedDocument={workspace ? () => workspace.setFocusedDocument(null) : undefined}
-                  onSubmit={handleSubmit}
-                  onRemoveQueuedMessage={handleRemoveQueuedMessage}
-                  onStopResponse={handleStopResponse}
-                  onOpenUpload={demo ? undefined : triggerOpenUpload}
-                  onUploadFiles={demo ? undefined : uploadDroppedFiles}
-                />
-                {demo && !hasReachedLimit && (
-                  <div className="mx-auto mt-2 flex w-full max-w-4xl items-center justify-between text-xs text-slate-500">
-                    <span>
-                      Demo mode — {remaining} question{remaining !== 1 ? "s" : ""} remaining
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setShowSignupModal(true)}
-                      className="text-cyan-200 underline transition hover:text-cyan-100"
-                    >
-                      Sign up for full access
-                    </button>
-                  </div>
-                )}
+                <div className={isNewChatEmpty ? "" : "relative -mx-4 px-4 pb-4 sm:-mx-6 sm:px-6 sm:pb-5"}>
+                  {!isNewChatEmpty && <div aria-hidden="true" className="chat-bottom-scrim" />}
+
+                  {demo && hasReachedLimit && (
+                    <div className="pointer-events-auto relative z-20 mx-auto mb-3 flex w-full max-w-4xl items-center gap-2 rounded-2xl border border-red-300/20 bg-red-400/10 px-4 py-2.5 text-sm text-red-100 shadow-lg">
+                      <span className="font-semibold">Demo limit reached.</span>
+                      <span>Sign up for free to continue chatting and unlock uploads.</span>
+                      <button
+                        type="button"
+                        onClick={() => setShowSignupModal(true)}
+                        className="ml-auto shrink-0 rounded-xl bg-red-300 px-3 py-1.5 text-xs font-semibold text-red-950 transition hover:bg-red-200"
+                      >
+                        Sign up
+                      </button>
+                    </div>
+                  )}
+                  <ChatComposer
+                    autocompleteSuggestions={autocompleteSuggestions}
+                    disabled={isLoadingSession || (demo && hasReachedLimit)}
+                    isResponding={isLoading}
+                    queuedMessages={queuedMessages}
+                    queueLimit={QUEUE_LIMIT}
+                    focusedDocument={focusedDocument}
+                    includeKnowledgeBase={includeKnowledgeBase}
+                    isTemporaryChat={isTemporaryChat}
+                    hasPriorMessages={messages.length > 0}
+                    knowledgeBaseCount={knowledgeBaseCount}
+                    sources={demo ? undefined : sources}
+                    selectedSourceIds={demo ? undefined : selectedSourceIds}
+                    onToggleKnowledgeBase={demo ? undefined : handleToggleKnowledgeBase}
+                    onToggleSourceSelection={demo ? undefined : handleToggleSourceSelection}
+                    onSetSectionSourcesSelected={demo ? undefined : handleSetSectionSourcesSelected}
+                    onSetAllSourcesSelected={demo ? undefined : handleSetAllSourcesSelected}
+                    onClearFocusedDocument={workspace ? () => workspace.setFocusedDocument(null) : undefined}
+                    onSubmit={handleSubmit}
+                    onRemoveQueuedMessage={handleRemoveQueuedMessage}
+                    onStopResponse={handleStopResponse}
+                    onOpenUpload={demo ? undefined : triggerOpenUpload}
+                    onUploadFiles={demo ? undefined : uploadDroppedFiles}
+                  />
+                  {demo && !hasReachedLimit && (
+                    <div className="pointer-events-auto relative z-20 mx-auto mt-2 flex w-full max-w-4xl items-center justify-between text-xs text-slate-500">
+                      <span>
+                        Demo mode — {remaining} question{remaining !== 1 ? "s" : ""} remaining
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowSignupModal(true)}
+                        className="text-cyan-200 underline transition hover:text-cyan-100"
+                      >
+                        Sign up for full access
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
