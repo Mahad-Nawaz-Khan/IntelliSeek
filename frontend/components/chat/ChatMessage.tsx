@@ -61,7 +61,7 @@ function CodeBlockPre({ children }: Readonly<{ children?: ReactNode }>) {
 
   return (
     <div className="my-4 overflow-hidden rounded-2xl border border-white/10 bg-slate-950/85 shadow-lg">
-      <div className="flex items-center justify-between border-b border-white/10 bg-white/[0.04] px-3.5 py-2 text-xs text-slate-400">
+      <div className="flex items-center justify-between border-b border-white/10 bg-white/4 px-3.5 py-2 text-xs text-slate-400">
         <span className="flex items-center gap-1.5 font-mono text-[0.7rem] uppercase tracking-wider text-cyan-200/80">
           <Terminal className="h-3.5 w-3.5" />
           {language}
@@ -85,7 +85,7 @@ function CodeBlockPre({ children }: Readonly<{ children?: ReactNode }>) {
           )}
         </button>
       </div>
-      <pre className="!my-0 overflow-x-auto !border-0 !bg-transparent p-4 text-xs leading-5 sm:text-[0.8125rem] sm:leading-6">
+      <pre className="my-0! overflow-x-auto border-0! bg-transparent! p-4 text-xs leading-5 sm:text-[0.8125rem] sm:leading-6">
         {children}
       </pre>
     </div>
