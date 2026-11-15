@@ -137,7 +137,7 @@ function renderMessageBody(
 
   return (
     <div
-      className={`max-w-none ${
+      className={`chat-markdown max-w-none ${
         compact
           ? "space-y-2 text-[0.78125rem] leading-5"
           : "space-y-2.5 text-[0.8125rem] leading-6 md:space-y-3 md:text-[0.84375rem] md:leading-6 lg:text-sm lg:leading-7"
