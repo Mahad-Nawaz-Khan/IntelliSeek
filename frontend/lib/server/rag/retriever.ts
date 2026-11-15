@@ -173,7 +173,7 @@ function enforceAllowedDocuments<T extends { document_id: string }>(
   return rows.filter((row) => allowedSet.has(row.document_id));
 }
 
-const SUMMARY_INTENT_PATTERN = /\b(summarize|summerize|summarise|summary|summery|overview|outline|key points|main points|topics covered)\b/i;
+const SUMMARY_INTENT_PATTERN = /\b(summarize|summerize|summarise|summary|summery|overview|outline|key points|main points|topics covered|quiz|quizzes|practice questions|exam prep|cheat[- ]?sheet|tldr)\b/i;
 const DOCUMENT_REFERENCE_PATTERNS = [
   /\b(my|uploaded|all|these|the)?\s*(notes|documents|files|file|material|uploads)\b/i,
   /\b(uploaded|document|file)\s+(notes|summary|overview|outline|topics)\b/i,
@@ -182,21 +182,35 @@ const DOCUMENT_REFERENCE_PATTERNS = [
 
 const FILENAME_STOP_WORDS = new Set([
   "all",
+  "choice",
+  "compact",
+  "create",
+  "exam",
   "from",
+  "generate",
   "give",
+  "interactive",
   "key",
   "main",
+  "make",
   "material",
+  "multiple",
   "notes",
   "overview",
   "please",
   "points",
+  "practice",
+  "prep",
+  "questions",
+  "quiz",
+  "quizzes",
   "summarise",
   "summarize",
   "summerize",
   "summery",
   "summary",
   "the",
+  "tldr",
   "topics",
   "uploaded",
   "what",

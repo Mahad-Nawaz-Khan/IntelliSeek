@@ -1,6 +1,7 @@
 import { after } from "next/server";
 
 import type { ChatRetrievalHint, SourceCitation } from "../../../lib/chat-api";
+import { isQuizRequest } from "../../../lib/quiz-parser";
 import { normalizeSourceCitations } from "../../../lib/source-citations";
 import { streamAgentAnswer, streamGeneralAgentAnswer, streamGroundedAgentAnswer, type AgentAnswerStreamEvent, type ConversationTurn } from "../../../lib/server/agents/chat-agent";
 import { getAuthenticatedUser } from "../../../lib/server/auth";
@@ -161,7 +162,10 @@ function parseSelectedDocumentIds(value: unknown): string[] | undefined {
 }
 
 function isLikelyUploadedMaterialRequest(question: string) {
-  return /\b(uploaded|document|documents|file|files|notes|material|source|sources)\b/i.test(question);
+  return (
+    /\b(uploaded|document|documents|file|files|notes|material|source|sources)\b/i.test(question) ||
+    isQuizRequest(question)
+  );
 }
 
 function parseChatSessionId(value: unknown) {

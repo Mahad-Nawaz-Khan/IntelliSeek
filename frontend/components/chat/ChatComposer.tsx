@@ -20,6 +20,7 @@ type ChatComposerProps = {
   focusedDocument?: FocusedDocument | null;
   includeKnowledgeBase?: boolean;
   isTemporaryChat?: boolean;
+  hasPriorMessages?: boolean;
   knowledgeBaseCount?: number;
   sources?: KnowledgeSource[];
   selectedSourceIds?: string[];
@@ -28,7 +29,11 @@ type ChatComposerProps = {
   onSetSectionSourcesSelected?: (sourceType: KnowledgeSource["sourceType"], selected: boolean) => void;
   onSetAllSourcesSelected?: (selected: boolean) => void;
   onClearFocusedDocument?: () => void;
-  onSubmit: (question: string, selectedSuggestion?: AutocompleteSuggestion) => boolean;
+  onSubmit: (
+    question: string,
+    selectedSuggestion?: AutocompleteSuggestion,
+    scopedDocumentIds?: string[],
+  ) => boolean;
   onRemoveQueuedMessage?: (queuedMessageId: string) => void;
   onStopResponse?: () => void;
   onOpenUpload?: () => void;
@@ -44,6 +49,7 @@ export function ChatComposer({
   focusedDocument = null,
   includeKnowledgeBase = true,
   isTemporaryChat = false,
+  hasPriorMessages = false,
   knowledgeBaseCount,
   sources,
   selectedSourceIds,
@@ -60,17 +66,21 @@ export function ChatComposer({
 }: Readonly<ChatComposerProps>) {
   const triggerScopedPrompt = (promptText: string) => {
     if (!focusedDocument || disabled) return;
-    onSubmit(promptText, {
-      id: `doc-scope-${focusedDocument.id}`,
-      label: promptText,
-      value: promptText,
-      type: "document",
-      metadata: {
-        source: "uploaded",
-        kind: "document",
-        documentId: focusedDocument.id,
+    onSubmit(
+      promptText,
+      {
+        id: `doc-scope-${focusedDocument.id}`,
+        label: promptText,
+        value: promptText,
+        type: "document",
+        metadata: {
+          source: "uploaded",
+          kind: "document",
+          documentId: focusedDocument.id,
+        },
       },
-    });
+      [focusedDocument.id],
+    );
   };
 
   return (
@@ -108,7 +118,7 @@ export function ChatComposer({
             <button
               type="button"
               disabled={disabled}
-              onClick={() => triggerScopedPrompt(`Create 3 study practice questions with answers based on ${focusedDocument.filename}.`)}
+              onClick={() => triggerScopedPrompt(`/quiz @${focusedDocument.filename}`)}
               className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[0.7rem] font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
             >
               Practice quiz
@@ -158,6 +168,7 @@ export function ChatComposer({
         includeKnowledgeBase={includeKnowledgeBase}
         knowledgeBaseCount={knowledgeBaseCount}
         isTemporaryChat={isTemporaryChat}
+        hasPriorMessages={hasPriorMessages}
         sources={sources}
         selectedSourceIds={selectedSourceIds}
         onToggleKnowledgeBase={onToggleKnowledgeBase}

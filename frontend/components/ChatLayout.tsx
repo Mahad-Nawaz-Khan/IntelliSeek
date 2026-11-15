@@ -56,6 +56,7 @@ type QueuedChatMessage = {
   id: string;
   question: string;
   selectedSuggestion?: AutocompleteSuggestion;
+  scopedDocumentIds?: string[];
   createdAt: number;
 };
 
@@ -143,6 +144,7 @@ type ChatConversationViewProps = {
   isDemo: boolean;
   isTemporaryChat: boolean;
   onRetryMessage?: (assistantMessageIndex: number) => void;
+  onSendFollowUp?: (prompt: string) => void;
   onOpenUpload?: () => void;
   bottomRef: React.RefObject<HTMLDivElement | null>;
 };
@@ -157,6 +159,7 @@ function ChatConversationView({
   isDemo,
   isTemporaryChat,
   onRetryMessage,
+  onSendFollowUp,
   onOpenUpload,
   bottomRef,
 }: Readonly<ChatConversationViewProps>) {
@@ -195,6 +198,7 @@ function ChatConversationView({
             key={message.id}
             message={message}
             onRetry={canRetry ? () => onRetryMessage?.(index) : undefined}
+            onSendFollowUp={message.role === "assistant" ? onSendFollowUp : undefined}
           />
         );
       })}
@@ -604,6 +608,7 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
       selectedSuggestion?: AutocompleteSuggestion,
       runScope = conversationRunRef.current,
       historyOverride?: ChatMessageType[],
+      scopedDocumentIds?: string[],
     ) => {
       const trimmedQuestion = question.trim();
       if (!trimmedQuestion || isLoadingSessionRef.current) return;
@@ -674,15 +679,25 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
       };
       abortController.signal.addEventListener("abort", handleAbort, { once: true });
 
+      const hasExplicitScopedDocs = Boolean(scopedDocumentIds && scopedDocumentIds.length > 0);
       const effectiveRetrievalHint: ChatRetrievalHint | undefined =
         selectedSuggestion?.metadata ??
-        (focusedDocument
+        (hasExplicitScopedDocs && scopedDocumentIds?.length === 1
           ? {
               source: "uploaded",
               kind: "document",
-              documentId: focusedDocument.id,
+              documentId: scopedDocumentIds[0],
             }
-          : undefined);
+          : focusedDocument
+            ? {
+                source: "uploaded",
+                kind: "document",
+                documentId: focusedDocument.id,
+              }
+            : undefined);
+      const turnIncludeKnowledgeBase = hasExplicitScopedDocs
+        ? includeKnowledgeBase || Boolean(scopedDocumentIds?.some((id) => knowledgeBaseDocumentIds.has(id)))
+        : includeKnowledgeBase;
 
       const streamHandlers: StreamChatHandlers = {
         onJob: demo
@@ -774,8 +789,12 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
                 : expectedSessionId
                   ? { chatSessionId: expectedSessionId }
                   : {}),
-              includeKnowledgeBase,
-              ...(hasExcludedSources ? { selectedDocumentIds: selectedSourceIds } : {}),
+              includeKnowledgeBase: turnIncludeKnowledgeBase,
+              ...(hasExplicitScopedDocs
+                ? { selectedDocumentIds: scopedDocumentIds }
+                : hasExcludedSources
+                  ? { selectedDocumentIds: selectedSourceIds }
+                  : {}),
               signal: abortController.signal,
             }));
 
@@ -845,6 +864,7 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
               nextQueuedMessage.selectedSuggestion,
               runScope,
               nextHistoryOverride,
+              nextQueuedMessage.scopedDocumentIds,
             ).catch(noop);
           }
         }
@@ -857,6 +877,7 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
       hasExcludedSources,
       includeKnowledgeBase,
       isLoadingSessionRef,
+      knowledgeBaseDocumentIds,
       loadedSessionRef,
       refreshRecentChats,
       selectedSourceIds,
@@ -867,7 +888,11 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
   );
 
   const handleSubmit = useCallback(
-    (question: string, selectedSuggestion?: AutocompleteSuggestion) => {
+    (
+      question: string,
+      selectedSuggestion?: AutocompleteSuggestion,
+      scopedDocumentIds?: string[],
+    ) => {
       const trimmedQuestion = question.trim();
       if (!trimmedQuestion || isLoadingSessionRef.current) return false;
 
@@ -884,7 +909,9 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
       }
 
       if (!isLoadingRef.current) {
-        runQuestion(trimmedQuestion, selectedSuggestion).catch(noop);
+        runQuestion(trimmedQuestion, selectedSuggestion, conversationRunRef.current, undefined, scopedDocumentIds).catch(
+          noop,
+        );
         return true;
       }
 
@@ -894,6 +921,7 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
         id: `queued-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         question: trimmedQuestion,
         selectedSuggestion,
+        ...(scopedDocumentIds?.length ? { scopedDocumentIds } : {}),
         createdAt: Date.now(),
       };
 
@@ -1164,6 +1192,9 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
                   isDemo={demo}
                   isTemporaryChat={isTemporaryChat}
                   onRetryMessage={handleRetryMessage}
+                  onSendFollowUp={(prompt) => {
+                    handleSubmit(prompt);
+                  }}
                   onOpenUpload={demo ? undefined : triggerOpenUpload}
                   bottomRef={bottomRef}
                 />
@@ -1212,6 +1243,7 @@ export function ChatLayout({ embedded = false, demo = false }: Readonly<ChatLayo
                   focusedDocument={focusedDocument}
                   includeKnowledgeBase={includeKnowledgeBase}
                   isTemporaryChat={isTemporaryChat}
+                  hasPriorMessages={messages.length > 0}
                   knowledgeBaseCount={knowledgeBaseCount}
                   sources={demo ? undefined : sources}
                   selectedSourceIds={demo ? undefined : selectedSourceIds}

@@ -5,14 +5,18 @@ import { isValidElement, useState, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 
 import type { ChatMessage as ChatMessageType } from "../../lib/chat-api";
+import { getSlashCommandDefinition } from "../../lib/chat-commands";
 import { usePreferences } from "../../lib/preferences";
+import { parseQuizFromContent } from "../../lib/quiz-parser";
 import { groupSourceCitations } from "../../lib/source-citations";
 import { SourceChip } from "../sources/SourceChip";
 import { BrandMark } from "../ui/BrandMark";
+import { QuizLoadingCard, QuizWidget } from "./QuizWidget";
 
 type ChatMessageProps = {
   message: ChatMessageType;
   onRetry?: () => void;
+  onSendFollowUp?: (prompt: string) => void;
 };
 
 function getMessageContainerClass(isUser: boolean, status: ChatMessageType["status"], compact: boolean): string {
@@ -92,12 +96,28 @@ const markdownComponents: Components = {
   pre: ({ children }) => <CodeBlockPre>{children}</CodeBlockPre>,
 };
 
+function renderUserContent(content: string) {
+  const match = /^(\/[a-zA-Z-]+)(\s+[\s\S]*)?$/.exec(content.trim());
+  if (match && getSlashCommandDefinition(match[1].slice(1))) {
+    return (
+      <p className="whitespace-pre-wrap text-sm leading-6">
+        <span className="mr-1.5 inline-flex items-center rounded-lg border border-cyan-300/35 bg-cyan-400/20 px-1.5 py-0.5 font-mono text-xs font-semibold text-cyan-100">
+          {match[1]}
+        </span>
+        {match[2]?.trimStart()}
+      </p>
+    );
+  }
+  return <p className="whitespace-pre-wrap text-sm leading-6">{content}</p>;
+}
+
 function renderMessageBody(
   isPreparing: boolean,
   isStreaming: boolean,
   isUser: boolean,
   content: string,
   compact: boolean,
+  onSendFollowUp?: (prompt: string) => void,
 ) {
   if (isPreparing) {
     return (
@@ -109,8 +129,12 @@ function renderMessageBody(
     );
   }
   if (isUser) {
-    return <p className="whitespace-pre-wrap text-sm leading-6">{content}</p>;
+    return renderUserContent(content);
   }
+
+  const parsedQuiz = parseQuizFromContent(content, isStreaming);
+  const hasQuizBlock = Boolean(parsedQuiz.quiz || parsedQuiz.isGeneratingQuiz);
+
   return (
     <div
       className={`max-w-none ${
@@ -119,8 +143,23 @@ function renderMessageBody(
           : "space-y-3 text-[0.8125rem] leading-6 md:space-y-4 md:text-sm md:leading-7 lg:text-base lg:leading-8"
       } text-slate-100 [&_a]:text-cyan-200 [&_a]:underline [&_blockquote]:my-4 [&_blockquote]:border-l-2 [&_blockquote]:border-cyan-300/40 [&_blockquote]:pl-4 [&_blockquote]:text-slate-300 [&_code]:rounded-md [&_code]:bg-slate-950/70 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-cyan-100 [&_h1]:mb-3 [&_h1]:mt-1 [&_h1]:text-lg [&_h1]:font-semibold [&_h1]:tracking-[-0.03em] [&_h1]:text-white md:[&_h1]:text-xl lg:[&_h1]:text-2xl [&_h2]:mb-3 [&_h2]:mt-5 [&_h2]:text-base [&_h2]:font-semibold [&_h2]:tracking-[-0.03em] [&_h2]:text-white md:[&_h2]:text-lg lg:[&_h2]:text-xl [&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:text-white md:[&_h3]:text-base lg:[&_h3]:text-lg [&_li]:my-1.5 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:space-y-1 [&_ol]:pl-6 [&_p]:my-3 md:[&_p]:text-justify md:[&_p]:hyphens-auto [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_strong]:font-semibold [&_strong]:text-white [&_table]:my-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-white/10 [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:border-white/10 [&_th]:bg-white/10 [&_th]:px-3 [&_th]:py-2 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:space-y-1 [&_ul]:pl-6`}
     >
-      <ReactMarkdown components={markdownComponents}>{content}</ReactMarkdown>
-      {isStreaming && (
+      {hasQuizBlock ? (
+        <>
+          {parsedQuiz.beforeText && (
+            <ReactMarkdown components={markdownComponents}>{parsedQuiz.beforeText}</ReactMarkdown>
+          )}
+          {parsedQuiz.isGeneratingQuiz && <QuizLoadingCard />}
+          {parsedQuiz.quiz && (
+            <QuizWidget quiz={parsedQuiz.quiz} onRequestNewQuiz={onSendFollowUp} />
+          )}
+          {parsedQuiz.afterText && (
+            <ReactMarkdown components={markdownComponents}>{parsedQuiz.afterText}</ReactMarkdown>
+          )}
+        </>
+      ) : (
+        <ReactMarkdown components={markdownComponents}>{content}</ReactMarkdown>
+      )}
+      {isStreaming && !parsedQuiz.isGeneratingQuiz && (
         <span
           aria-hidden="true"
           className="mt-1 inline-flex items-center gap-1.5 text-[0.7rem] font-medium tracking-wide text-cyan-200/75"
@@ -133,7 +172,7 @@ function renderMessageBody(
   );
 }
 
-export function ChatMessage({ message, onRetry }: Readonly<ChatMessageProps>) {
+export function ChatMessage({ message, onRetry, onSendFollowUp }: Readonly<ChatMessageProps>) {
   const { preferences } = usePreferences();
   const [copiedMessage, setCopiedMessage] = useState(false);
 
@@ -161,7 +200,7 @@ export function ChatMessage({ message, onRetry }: Readonly<ChatMessageProps>) {
       )}
 
       <div className={`transition ${getMessageContainerClass(isUser, message.status, preferences.compactMessages)}`}>
-        {renderMessageBody(isPreparing, isStreaming, isUser, content, preferences.compactMessages)}
+        {renderMessageBody(isPreparing, isStreaming, isUser, content, preferences.compactMessages, onSendFollowUp)}
 
         {!isUser && message.status === "complete" && (
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-3">

@@ -502,10 +502,88 @@ button:hover,
   background-color: rgb(255 255 255 / 0.08);
 }
 
-:root[data-theme="light"] .chat-plus-menu {
+:root[data-theme="light"] .chat-plus-menu,
+:root[data-theme="light"] .chat-command-menu {
   background-color: #ffffff;
   border-color: rgb(71 85 105 / 0.18);
   box-shadow: 0 18px 40px rgb(15 23 42 / 0.14);
+}
+
+:root[data-theme="light"] .chat-command-menu .border-white\/10 {
+  border-color: rgb(71 85 105 / 0.14);
+}
+
+:root[data-theme="light"] .chat-command-menu .bg-cyan-300\/15,
+:root[data-theme="light"] .chat-command-menu .bg-cyan-400\/15 {
+  background-color: rgb(14 116 144 / 0.12);
+}
+
+:root[data-theme="light"] .chat-command-menu .text-cyan-200,
+:root[data-theme="light"] .chat-command-menu .text-cyan-300 {
+  color: #0e7490;
+}
+
+:root[data-theme="light"] .chat-quiz-card {
+  background-color: #ffffff;
+  border-color: rgb(14 116 144 / 0.22);
+  box-shadow: 0 14px 32px rgb(15 23 42 / 0.08);
+}
+
+:root[data-theme="light"] .chat-quiz-card .text-white {
+  color: #0f172a;
+}
+
+:root[data-theme="light"] .chat-quiz-card .border-white\/10,
+:root[data-theme="light"] .chat-quiz-card .border-white\/5 {
+  border-color: rgb(71 85 105 / 0.15);
+}
+
+:root[data-theme="light"] .chat-quiz-card .bg-white\/\[0\.02\] {
+  background-color: rgb(248 250 252 / 0.9);
+}
+
+:root[data-theme="light"] .chat-quiz-card .bg-white\/\[0\.03\],
+:root[data-theme="light"] .chat-quiz-card .bg-white\/\[0\.04\],
+:root[data-theme="light"] .chat-quiz-card .bg-white\/5 {
+  background-color: rgb(241 245 249 / 0.85);
+}
+
+:root[data-theme="light"] .chat-quiz-card .bg-white\/10 {
+  background-color: rgb(226 232 240 / 0.9);
+}
+
+:root[data-theme="light"] .chat-quiz-card .hover\:bg-white\/10:hover,
+:root[data-theme="light"] .chat-quiz-card .hover\:bg-white\/\[0\.06\]:hover {
+  background-color: rgb(226 232 240 / 0.72);
+}
+
+:root[data-theme="light"] .chat-quiz-card .text-cyan-100,
+:root[data-theme="light"] .chat-quiz-card .text-cyan-200,
+:root[data-theme="light"] .chat-quiz-card .text-cyan-300 {
+  color: #0e7490;
+}
+
+:root[data-theme="light"] .chat-quiz-card .bg-cyan-400\/12,
+:root[data-theme="light"] .chat-quiz-card .bg-cyan-400\/15,
+:root[data-theme="light"] .chat-quiz-card .bg-cyan-400\/20,
+:root[data-theme="light"] .chat-quiz-card .bg-cyan-300\/15 {
+  background-color: rgb(14 116 144 / 0.12);
+}
+
+:root[data-theme="light"] .chat-quiz-card .text-amber-300 {
+  color: #b45309;
+}
+
+:root[data-theme="light"] .chat-quiz-card .text-emerald-200,
+:root[data-theme="light"] .chat-quiz-card .text-emerald-300 {
+  color: #047857;
+}
+
+:root[data-theme="light"] .chat-quiz-card .text-red-200,
+:root[data-theme="light"] .chat-quiz-card .text-red-300,
+:root[data-theme="light"] .chat-quiz-card .text-rose-200,
+:root[data-theme="light"] .chat-quiz-card .text-rose-300 {
+  color: #b91c1c;
 }
 
 :root[data-theme="light"] .chat-sources-trigger {
@@ -519,6 +597,8 @@ button:hover,
 }
 
 :root[data-theme="light"] .chat-plus-menu .hover\:bg-white\/5:hover,
+:root[data-theme="light"] .chat-command-menu .hover\:bg-white\/5:hover,
+:root[data-theme="light"] .chat-command-menu .hover\:bg-white\/10:hover,
 :root[data-theme="light"] .chat-input-surface .hover\:bg-white\/10:hover {
   background-color: rgb(226 232 240 / 0.72);
 }

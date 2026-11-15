@@ -3,6 +3,7 @@ import "server-only";
 import Groq from "groq-sdk";
 import type { ChatCompletionMessageParam } from "groq-sdk/resources/chat/completions";
 
+import { QUIZ_SYSTEM_INSTRUCTIONS } from "../quiz-parser";
 import { getServerEnv } from "./env";
 import type { RetrievedContext } from "./rag/retriever";
 
@@ -71,19 +72,26 @@ The user's uploaded files were searched before this answer and no relevant uploa
 
 ${STYLE_GUIDE}`;
 
-function buildGeneralSystemPrompt(includeKnowledgeBase = true) {
-  if (includeKnowledgeBase) return GENERAL_SYSTEM_PROMPT;
-  return `You are IntelliSeek, an academic assistant.
+function buildGroundedSystemPrompt(isQuiz = false) {
+  return isQuiz ? `${GROUNDED_SYSTEM_PROMPT}\n\n${QUIZ_SYSTEM_INSTRUCTIONS}` : GROUNDED_SYSTEM_PROMPT;
+}
+
+function buildGeneralSystemPrompt(includeKnowledgeBase = true, isQuiz = false) {
+  const base = includeKnowledgeBase
+    ? GENERAL_SYSTEM_PROMPT
+    : `You are IntelliSeek, an academic assistant.
 
 The shared Knowledge Base is currently turned off for this request, so only the user's personal uploaded files were searched and no relevant content was found.
 
 - Answer from general knowledge in a helpful study-assistant style.
 - Briefly mention missing uploaded context only if it helps the user understand why there are no citations. Do not use a fixed opening sentence.
-- Do not cite uploaded or knowledge-base files.
+- Do not cite uploaded files or knowledge-base files.
 - Do not imply that this answer came from retrieved documents.
 - Make the answer practical for a student: define terms, explain intuition, and give examples when helpful.
 
 ${STYLE_GUIDE}`;
+
+  return isQuiz ? `${base}\n\n${QUIZ_SYSTEM_INSTRUCTIONS}` : base;
 }
 
 function getGroqModel() {
@@ -110,13 +118,16 @@ function buildContext(context: RetrievedContext[]) {
     .join("\n\n");
 }
 
-async function* streamGroqText(messages: ChatCompletionMessageParam[]): AsyncGenerator<string, string> {
+async function* streamGroqText(
+  messages: ChatCompletionMessageParam[],
+  maxCompletionTokens = 1100,
+): AsyncGenerator<string, string> {
   const client = createGroqClient();
   const stream = await client.chat.completions.create({
     model: getGroqModel(),
     messages,
     temperature: 0.2,
-    max_completion_tokens: 1100,
+    max_completion_tokens: maxCompletionTokens,
     stream: true,
   });
 
@@ -137,24 +148,33 @@ async function* streamGroqText(messages: ChatCompletionMessageParam[]): AsyncGen
 export async function* streamGroqGroundedAnswer(
   question: string,
   context: RetrievedContext[],
+  options: { isQuiz?: boolean } = {},
 ): AsyncGenerator<string, string> {
-  return yield* streamGroqText([
-    { role: "system", content: GROUNDED_SYSTEM_PROMPT },
-    {
-      role: "user",
-      content: `Uploaded-file context chunks:\n${buildContext(context)}\n\nQuestion: ${question}`,
-    },
-  ]);
+  const isQuiz = options.isQuiz === true;
+  return yield* streamGroqText(
+    [
+      { role: "system", content: buildGroundedSystemPrompt(isQuiz) },
+      {
+        role: "user",
+        content: `Uploaded-file context chunks:\n${buildContext(context)}\n\nQuestion: ${question}`,
+      },
+    ],
+    isQuiz ? 1800 : 1100,
+  );
 }
 
 export async function* streamGroqGeneralAnswer(
   question: string,
-  options: { includeKnowledgeBase?: boolean } = {},
+  options: { includeKnowledgeBase?: boolean; isQuiz?: boolean } = {},
 ): AsyncGenerator<string, string> {
-  return yield* streamGroqText([
-    { role: "system", content: buildGeneralSystemPrompt(options.includeKnowledgeBase !== false) },
-    { role: "user", content: question },
-  ]);
+  const isQuiz = options.isQuiz === true;
+  return yield* streamGroqText(
+    [
+      { role: "system", content: buildGeneralSystemPrompt(options.includeKnowledgeBase !== false, isQuiz) },
+      { role: "user", content: question },
+    ],
+    isQuiz ? 1800 : 1100,
+  );
 }
 
 function cleanGeneratedTitle(title: string) {

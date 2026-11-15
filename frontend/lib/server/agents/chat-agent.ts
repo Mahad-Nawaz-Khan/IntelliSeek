@@ -6,6 +6,7 @@ import OpenAI from "openai";
 import { z } from "zod";
 
 import type { SourceCitation } from "../../chat-api";
+import { isQuizRequest, QUIZ_SYSTEM_INSTRUCTIONS } from "../../quiz-parser";
 import { selectCitedSources } from "../../source-citations";
 import { getServerEnv } from "../env";
 import { streamGroqGeneralAnswer, streamGroqGroundedAnswer } from "../groq";
@@ -79,23 +80,32 @@ Do not cite uploaded files or imply that this answer came from the user's files.
 
 ${PRIMARY_STYLE_GUIDE}`;
 
-function buildGeneralInstructions(includeKnowledgeBase = true) {
-  if (includeKnowledgeBase) return GENERAL_SYSTEM_PROMPT;
-  return `You are IntelliSeek, an academic assistant.
+function buildGroundedInstructions(isQuiz = false) {
+  return isQuiz ? `${GROUNDED_SYSTEM_PROMPT}\n\n${QUIZ_SYSTEM_INSTRUCTIONS}` : GROUNDED_SYSTEM_PROMPT;
+}
+
+function buildGeneralInstructions(includeKnowledgeBase = true, isQuiz = false) {
+  const base = includeKnowledgeBase
+    ? GENERAL_SYSTEM_PROMPT
+    : `You are IntelliSeek, an academic assistant.
 The shared Knowledge Base is currently turned off for this request, so only the user's personal uploaded files were searched and no relevant content was found.
 If it matters, briefly mention that Knowledge Base is disabled and no relevant personal uploaded files matched. Do not use a fixed opening sentence.
 Answer from general knowledge in a helpful study-assistant style.
 Do not cite uploaded or knowledge-base files or imply that this answer came from retrieved files.
 
 ${PRIMARY_STYLE_GUIDE}`;
+
+  return isQuiz ? `${base}\n\n${QUIZ_SYSTEM_INSTRUCTIONS}` : base;
 }
 
-function buildAgentInstructions(includeKnowledgeBase = true, hasSelectedDocumentFilter = false) {
+function buildAgentInstructions(includeKnowledgeBase = true, hasSelectedDocumentFilter = false, isQuiz = false) {
+  let base = SYSTEM_PROMPT;
   if (hasSelectedDocumentFilter) {
-    return `${SYSTEM_PROMPT}\n\nNote: The user has explicitly restricted active sources for this turn. Only search and reference the selected documents.`;
+    base = `${SYSTEM_PROMPT}\n\nNote: The user has explicitly restricted active sources for this turn. Only search and reference the selected documents.`;
+  } else if (!includeKnowledgeBase) {
+    base = `${SYSTEM_PROMPT}\n\nNote: The shared Knowledge Base is currently turned off by the user. Only search and reference the user's personal uploaded documents.`;
   }
-  if (includeKnowledgeBase) return SYSTEM_PROMPT;
-  return `${SYSTEM_PROMPT}\n\nNote: The shared Knowledge Base is currently turned off by the user. Only search and reference the user's personal uploaded documents.`;
+  return isQuiz ? `${base}\n\n${QUIZ_SYSTEM_INSTRUCTIONS}` : base;
 }
 
 type AgentToolChunk = RetrievedChunk;
@@ -347,7 +357,7 @@ async function* streamAgentText(agent: Agent, input: string): AsyncGenerator<str
   return requireAnswer(stream.finalOutput);
 }
 
-function createAgentRun(userId: string, scopeOptions: RetrievalScopeOptions = {}) {
+function createAgentRun(userId: string, scopeOptions: RetrievalScopeOptions = {}, isQuiz = false) {
   configureAgentClient();
 
   const includeKnowledgeBase = scopeOptions.includeKnowledgeBase !== false;
@@ -464,7 +474,7 @@ function createAgentRun(userId: string, scopeOptions: RetrievalScopeOptions = {}
   return {
     agent: new Agent({
       name: "IntelliSeek Academic Assistant",
-      instructions: buildAgentInstructions(includeKnowledgeBase, selectedDocumentIds !== undefined),
+      instructions: buildAgentInstructions(includeKnowledgeBase, selectedDocumentIds !== undefined, isQuiz),
       model: getChatModel(),
       tools: [searchChunks, findDocuments, getDocumentChunks],
     }),
@@ -478,7 +488,7 @@ export async function generateAgentAnswer(
   conversationContext: ConversationTurn[] = [],
   scopeOptions: RetrievalScopeOptions = {},
 ): Promise<AgentRunResult> {
-  const { agent, getSources } = createAgentRun(userId, scopeOptions);
+  const { agent, getSources } = createAgentRun(userId, scopeOptions, isQuizRequest(question));
   const result = await run(agent, buildConversationInput(question, conversationContext), { maxTurns: 6 });
   const answer = requireAnswer(result.finalOutput);
 
@@ -494,7 +504,7 @@ export async function* streamAgentAnswer(
   conversationContext: ConversationTurn[] = [],
   scopeOptions: RetrievalScopeOptions = {},
 ): AsyncGenerator<AgentAnswerStreamEvent> {
-  const { agent, getSources } = createAgentRun(userId, scopeOptions);
+  const { agent, getSources } = createAgentRun(userId, scopeOptions, isQuizRequest(question));
   const stream = await run(agent, buildConversationInput(question, conversationContext), { maxTurns: 6, stream: true });
 
   for await (const event of stream) {
@@ -515,6 +525,7 @@ export async function* streamGroundedAgentAnswer(
   conversationContext: ConversationTurn[] = [],
   log?: RequestLogger,
 ): AsyncGenerator<AgentAnswerStreamEvent> {
+  const isQuiz = isQuizRequest(question);
   const conversationInput = buildConversationInput(question, conversationContext);
 
   const answer = yield* streamTextWithFallback(
@@ -522,12 +533,12 @@ export async function* streamGroundedAgentAnswer(
       configureAgentClient();
       const agent = new Agent({
         name: "IntelliSeek Uploaded File Assistant",
-        instructions: GROUNDED_SYSTEM_PROMPT,
+        instructions: buildGroundedInstructions(isQuiz),
         model: getChatModel(),
       });
       return streamAgentText(agent, `Uploaded-file context chunks:\n${buildContextInput(context)}\n\n${conversationInput}`);
     },
-    () => streamGroqGroundedAnswer(conversationInput, context),
+    () => streamGroqGroundedAnswer(conversationInput, context, { isQuiz }),
     log,
   );
 
@@ -543,6 +554,7 @@ export async function* streamGeneralAgentAnswer(
   options: { includeKnowledgeBase?: boolean } = {},
 ): AsyncGenerator<AgentAnswerStreamEvent> {
   const includeKnowledgeBase = options.includeKnowledgeBase !== false;
+  const isQuiz = isQuizRequest(question);
   const conversationInput = buildConversationInput(question, conversationContext);
 
   const answer = yield* streamTextWithFallback(
@@ -550,12 +562,12 @@ export async function* streamGeneralAgentAnswer(
       configureAgentClient();
       const agent = new Agent({
         name: "IntelliSeek General Assistant",
-        instructions: buildGeneralInstructions(includeKnowledgeBase),
+        instructions: buildGeneralInstructions(includeKnowledgeBase, isQuiz),
         model: getChatModel(),
       });
       return streamAgentText(agent, conversationInput);
     },
-    () => streamGroqGeneralAnswer(conversationInput, { includeKnowledgeBase }),
+    () => streamGroqGeneralAnswer(conversationInput, { includeKnowledgeBase, isQuiz }),
     log,
   );
 

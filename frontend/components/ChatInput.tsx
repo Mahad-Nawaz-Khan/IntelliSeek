@@ -9,20 +9,47 @@ import {
   FileText,
   FolderOpen,
   GitBranch,
+  GraduationCap,
+  Lightbulb,
+  ListChecks,
+  Minimize2,
   Minus,
   Paperclip,
   Plus,
+  Scale,
   Send,
   Sparkles,
   Square,
+  Terminal,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 
+import {
+  applyFileMentionSelection,
+  applySlashCommandSelection,
+  detectFileMentionQuery,
+  detectSlashCommandQuery,
+  resolveSubmissionCommands,
+  syncMentionedSourcesWithText,
+  type SlashCommandDefinition,
+  type SlashCommandId,
+} from "../lib/chat-commands";
 import { usePreferences } from "../lib/preferences";
 import { type AutocompleteSuggestion, TrieAutocomplete } from "../lib/trie-autocomplete";
 import { formatSourcesButtonLabel, isSelectableSource, type KnowledgeSource } from "../lib/ui-state";
 import { ALLOWED_EXTENSIONS } from "../lib/upload-config";
+
+const SLASH_COMMAND_ICONS: Record<SlashCommandId, React.ComponentType<{ className?: string }>> = {
+  quiz: ListChecks,
+  summarize: Sparkles,
+  concepts: BookOpen,
+  explain: Lightbulb,
+  compare: Scale,
+  exam: GraduationCap,
+  compact: Minimize2,
+};
 
 const TYPE_CONFIG: Record<
   string,
@@ -84,13 +111,18 @@ type ChatInputProps = {
   includeKnowledgeBase?: boolean;
   knowledgeBaseCount?: number;
   isTemporaryChat?: boolean;
+  hasPriorMessages?: boolean;
   sources?: KnowledgeSource[];
   selectedSourceIds?: string[];
   onToggleKnowledgeBase?: () => void;
   onToggleSourceSelection?: (sourceId: string) => void;
   onSetSectionSourcesSelected?: (sourceType: KnowledgeSource["sourceType"], selected: boolean) => void;
   onSetAllSourcesSelected?: (selected: boolean) => void;
-  onSubmit: (question: string, selectedSuggestion?: AutocompleteSuggestion) => boolean;
+  onSubmit: (
+    question: string,
+    selectedSuggestion?: AutocompleteSuggestion,
+    scopedDocumentIds?: string[],
+  ) => boolean;
   onStopResponse?: () => void;
   onOpenUpload?: () => void;
   onUploadFiles?: (files: File[]) => void;
@@ -104,6 +136,7 @@ export function ChatInput({
   includeKnowledgeBase = true,
   knowledgeBaseCount,
   isTemporaryChat = false,
+  hasPriorMessages = false,
   sources,
   selectedSourceIds,
   onToggleKnowledgeBase,
@@ -117,6 +150,8 @@ export function ChatInput({
 }: Readonly<ChatInputProps>) {
   const { preferences } = usePreferences();
   const [value, setValue] = useState("");
+  const [cursorPosition, setCursorPosition] = useState(0);
+  const [mentionedSources, setMentionedSources] = useState<KnowledgeSource[]>([]);
   const [selectedSuggestion, setSelectedSuggestion] = useState<AutocompleteSuggestion | undefined>();
   const [isAutocompleteDismissed, setIsAutocompleteDismissed] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
@@ -180,22 +215,47 @@ export function ChatInput({
     };
   }, [includeKnowledgeBase, selectedSourceIds, sources]);
 
+  const slashMatch = useMemo(() => {
+    if (disabled || isAutocompleteDismissed) return null;
+    return detectSlashCommandQuery(value, cursorPosition);
+  }, [cursorPosition, disabled, isAutocompleteDismissed, value]);
+
+  const mentionMatch = useMemo(() => {
+    if (disabled || isAutocompleteDismissed || slashMatch || sources === undefined) return null;
+    return detectFileMentionQuery(value, cursorPosition, sources);
+  }, [cursorPosition, disabled, isAutocompleteDismissed, slashMatch, sources, value]);
+
+  const isSlashMenuOpen = Boolean(slashMatch && slashMatch.matches.length > 0);
+  const isMentionMenuOpen = Boolean(mentionMatch);
+
   const trie = useMemo(
     () => TrieAutocomplete.fromSuggestions(autocompleteSuggestions),
     [autocompleteSuggestions],
   );
   const matches = useMemo(() => {
     const query = value.trim();
-    if (query.length < 2 || disabled) return [];
+    if (query.length < 2 || disabled || isSlashMenuOpen || isMentionMenuOpen || query.startsWith("/")) {
+      return [];
+    }
     return trie.search(query, 6);
-  }, [disabled, trie, value]);
+  }, [disabled, isMentionMenuOpen, isSlashMenuOpen, trie, value]);
+
+  const activeListLength = isSlashMenuOpen
+    ? (slashMatch?.matches.length ?? 0)
+    : isMentionMenuOpen
+      ? (mentionMatch?.matches.length ?? 0)
+      : matches.length;
   const boundedHighlightedIndex =
-    highlightedIndex === null || !matches.length
-      ? null
-      : Math.min(highlightedIndex, matches.length - 1);
-  const isAutocompleteOpen = !isAutocompleteDismissed && matches.length > 0;
-  const showPlusMenu = hasPlusMenu && isPlusMenuOpen && !disabled && !isAutocompleteOpen;
-  const showSourcesMenu = hasSourcesMenu && isSourcesMenuOpen && !disabled && !isAutocompleteOpen;
+    highlightedIndex === null || activeListLength === 0
+      ? isSlashMenuOpen || (isMentionMenuOpen && activeListLength > 0)
+        ? 0
+        : null
+      : Math.min(highlightedIndex, activeListLength - 1);
+  const isAutocompleteOpen =
+    !isSlashMenuOpen && !isMentionMenuOpen && !isAutocompleteDismissed && matches.length > 0;
+  const anyComposerMenuOpen = isSlashMenuOpen || isMentionMenuOpen || isAutocompleteOpen;
+  const showPlusMenu = hasPlusMenu && isPlusMenuOpen && !disabled && !anyComposerMenuOpen;
+  const showSourcesMenu = hasSourcesMenu && isSourcesMenuOpen && !disabled && !anyComposerMenuOpen;
 
   useEffect(() => {
     if (!isPlusMenuOpen && !isSourcesMenuOpen) return;
@@ -235,7 +295,7 @@ export function ChatInput({
 
     const rect = plusMenuRef.current?.getBoundingClientRect();
     const spaceBelow = rect ? window.innerHeight - rect.bottom : 0;
-    setPlusMenuPlacement(spaceBelow >= 230 ? "down" : "up");
+    setPlusMenuPlacement(spaceBelow >= 285 ? "down" : "up");
     setIsPlusMenuOpen(true);
   };
 
@@ -307,45 +367,234 @@ export function ChatInput({
     return () => window.removeEventListener("keydown", handleGlobalKeyDown);
   }, [disabled]);
 
+  function updateCursor(element: HTMLTextAreaElement) {
+    setCursorPosition(element.selectionStart ?? element.value.length);
+  }
+
+  function focusAndSetCaret(caret: number) {
+    window.requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      textarea.focus();
+      textarea.setSelectionRange(caret, caret);
+    });
+  }
+
   function selectSuggestion(suggestion: AutocompleteSuggestion) {
     setValue(suggestion.value);
+    setCursorPosition(suggestion.value.length);
     setSelectedSuggestion(suggestion);
     setIsAutocompleteDismissed(true);
     setHighlightedIndex(null);
     textareaRef.current?.focus();
   }
 
-  function submit() {
-    const question = value.trim();
-    if (!question || disabled) return false;
+  function selectSlashCommand(command: SlashCommandDefinition) {
+    if (!slashMatch) return;
+    const { nextValue, nextCursor } = applySlashCommandSelection(value, slashMatch, command);
+    setValue(nextValue);
+    setCursorPosition(nextCursor);
+    setSelectedSuggestion(undefined);
+    setIsAutocompleteDismissed(false);
+    setHighlightedIndex(null);
+    focusAndSetCaret(nextCursor);
+  }
 
+  function selectFileMention(source: KnowledgeSource) {
+    if (!mentionMatch) return;
+    const { nextValue, nextCursor } = applyFileMentionSelection(value, mentionMatch, source);
+    setValue(nextValue);
+    setCursorPosition(nextCursor);
+    setMentionedSources((current) =>
+      current.some((item) => item.id === source.id) ? current : [...current, source],
+    );
+    setSelectedSuggestion(undefined);
+    setIsAutocompleteDismissed(false);
+    setHighlightedIndex(null);
+    focusAndSetCaret(nextCursor);
+  }
+
+  function handleRemoveMentionedSource(sourceId: string) {
+    const target = mentionedSources.find((item) => item.id === sourceId);
+    setMentionedSources((current) => current.filter((item) => item.id !== sourceId));
+    if (!target) return;
+
+    const escaped = target.filename.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const nextValue = value
+      .replace(new RegExp(`@${escaped}\\s*`, "gi"), "")
+      .replace(/[ \t]{2,}/g, " ");
+    setValue(nextValue);
+    setCursorPosition(nextValue.length);
+    textareaRef.current?.focus();
+  }
+
+  function submit(rawOverride?: string) {
+    const raw = (rawOverride ?? value).trim();
+    if (!raw || disabled) return false;
+
+    const resolved = resolveSubmissionCommands(
+      raw,
+      sources ?? [],
+      mentionedSources,
+      hasPriorMessages,
+    );
     const accepted = onSubmit(
-      question,
-      selectedSuggestion?.value.trim() === question ? selectedSuggestion : undefined,
+      resolved.promptToSend,
+      !resolved.slashCommand && selectedSuggestion?.value.trim() === raw ? selectedSuggestion : undefined,
+      resolved.mentionedDocumentIds.length ? resolved.mentionedDocumentIds : undefined,
     );
     if (!accepted) return false;
+
     setValue("");
+    setCursorPosition(0);
+    setMentionedSources([]);
     setSelectedSuggestion(undefined);
     setIsAutocompleteDismissed(false);
     setHighlightedIndex(null);
     return true;
   }
 
+  const handleQuickPracticeQuiz = () => {
+    setIsPlusMenuOpen(false);
+    const trimmed = value.trim();
+    const quizRaw = trimmed
+      ? trimmed.startsWith("/quiz")
+        ? trimmed
+        : `/quiz ${trimmed}`
+      : "/quiz";
+    submit(quizRaw);
+  };
+
   const placeholderText = focusedDocumentName
-    ? `Ask about ${focusedDocumentName}...`
+    ? `Ask about ${focusedDocumentName}... (Type / or @)`
     : isTemporaryChat
-      ? "Ask in a temporary chat... (Press / to focus)"
+      ? "Ask in a temporary chat... (Type / for commands, @ for files)"
       : includeKnowledgeBase
-        ? "Ask IntelliSeek about your uploaded material... (Press / to focus)"
-        : "Ask only from your uploaded documents... (Press / to focus)";
+        ? "Ask IntelliSeek... (Type / for commands, @ for files)"
+        : "Ask only from your uploaded documents... (Type / or @)";
 
   return (
     <div
       style={{ backgroundColor: "var(--chat-input-bg, #161f33)" }}
       className="chat-input-surface relative mx-auto w-full max-w-4xl place-self-center rounded-[26px] border border-white/10 bg-[#161f33] p-1.5 shadow-[0_14px_36px_rgba(0,0,0,0.34)] transition-[border-color] focus-within:border-cyan-400/50"
     >
+      {isSlashMenuOpen && slashMatch && (
+        <div
+          role="listbox"
+          aria-label="Slash commands"
+          className="chat-command-menu absolute inset-x-3 bottom-full z-20 mb-2 overflow-hidden rounded-2xl border border-cyan-300/20 bg-slate-950/95 shadow-2xl shadow-cyan-950/30 backdrop-blur-xl"
+        >
+          <div className="flex items-center justify-between gap-2 border-b border-white/10 px-3 py-2 text-xs font-medium uppercase tracking-[0.22em] text-cyan-200">
+            <span className="flex items-center gap-2">
+              <Terminal className="h-3.5 w-3.5" />
+              Slash commands
+            </span>
+            <span className="text-[0.65rem] tracking-normal text-slate-500 normal-case">
+              ↑↓ to navigate • Enter/Tab to select • Esc to dismiss
+            </span>
+          </div>
+          <div className="max-h-64 overflow-y-auto p-1">
+            {slashMatch.matches.map((command, index) => {
+              const Icon = SLASH_COMMAND_ICONS[command.id];
+              const isHighlighted = boundedHighlightedIndex === index;
+              return (
+                <button
+                  key={command.id}
+                  type="button"
+                  role="option"
+                  aria-selected={isHighlighted}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => selectSlashCommand(command)}
+                  className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm transition ${
+                    isHighlighted
+                      ? "bg-cyan-300/15 text-cyan-50"
+                      : "text-slate-300 hover:bg-white/5 hover:text-white"
+                  }`}
+                >
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <Icon className="h-4 w-4 shrink-0 text-cyan-300" />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs font-semibold text-cyan-200">{command.command}</span>
+                        <span className="text-xs font-medium text-slate-200">{command.label}</span>
+                      </div>
+                      <p className="truncate text-[0.7rem] text-slate-400">{command.description}</p>
+                    </div>
+                  </div>
+                  <span className="hidden shrink-0 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 font-mono text-[0.62rem] text-slate-400 sm:inline-block">
+                    {command.usageHint}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {isMentionMenuOpen && mentionMatch && (
+        <div
+          role="listbox"
+          aria-label="Mention files for context"
+          className="chat-command-menu absolute inset-x-3 bottom-full z-20 mb-2 overflow-hidden rounded-2xl border border-cyan-300/20 bg-slate-950/95 shadow-2xl shadow-cyan-950/30 backdrop-blur-xl"
+        >
+          <div className="flex items-center justify-between gap-2 border-b border-white/10 px-3 py-2 text-xs font-medium uppercase tracking-[0.22em] text-cyan-200">
+            <span className="flex items-center gap-2">
+              <FileText className="h-3.5 w-3.5" />
+              Files &amp; Sources
+            </span>
+            <span className="text-[0.65rem] tracking-normal text-slate-500 normal-case">
+              ↑↓ to navigate • Enter/Tab to attach • Esc to dismiss
+            </span>
+          </div>
+          <div className="max-h-64 overflow-y-auto p-1">
+            {mentionMatch.matches.length === 0 ? (
+              <p className="px-3 py-3 text-center text-xs text-slate-400">
+                {sources?.length ? "No matching files found." : "No uploaded or knowledge-base files yet."}
+              </p>
+            ) : (
+              mentionMatch.matches.map((source, index) => {
+                const isHighlighted = boundedHighlightedIndex === index;
+                const isKb = source.sourceType === "knowledge-base";
+                return (
+                  <button
+                    key={source.id}
+                    type="button"
+                    role="option"
+                    aria-selected={isHighlighted}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => selectFileMention(source)}
+                    className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm transition ${
+                      isHighlighted
+                        ? "bg-cyan-300/15 text-cyan-50"
+                        : "text-slate-300 hover:bg-white/5 hover:text-white"
+                    }`}
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <FileText className="h-3.5 w-3.5 shrink-0 text-cyan-300" />
+                      <span className="truncate font-medium">{source.filename}</span>
+                      {source.status === "indexing" && (
+                        <span className="shrink-0 text-[0.62rem] text-purple-300">Indexing</span>
+                      )}
+                    </div>
+                    <span
+                      className={`shrink-0 rounded-full border px-2 py-0.5 text-[0.62rem] font-medium uppercase tracking-[0.14em] ${
+                        isKb
+                          ? "border-violet-400/30 bg-violet-400/10 text-violet-200"
+                          : "border-cyan-400/30 bg-cyan-400/10 text-cyan-200"
+                      }`}
+                    >
+                      {isKb ? "Knowledge Base" : "Your Upload"}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+
       {isAutocompleteOpen && matches.length > 0 && (
-        <div className="absolute inset-x-3 bottom-full z-20 mb-2 overflow-hidden rounded-2xl border border-cyan-300/20 bg-slate-950/95 shadow-2xl shadow-cyan-950/30 backdrop-blur-xl">
+        <div className="chat-command-menu absolute inset-x-3 bottom-full z-20 mb-2 overflow-hidden rounded-2xl border border-cyan-300/20 bg-slate-950/95 shadow-2xl shadow-cyan-950/30 backdrop-blur-xl">
           <div className="flex items-center justify-between gap-2 border-b border-white/10 px-3 py-2 text-xs font-medium uppercase tracking-[0.22em] text-cyan-200">
             <span className="flex items-center gap-2">
               <GitBranch className="h-3.5 w-3.5" />
@@ -384,6 +633,28 @@ export function ChatInput({
               );
             })}
           </div>
+        </div>
+      )}
+
+      {mentionedSources.length > 0 && (
+        <div className="mb-1 flex flex-wrap items-center gap-1.5 px-2 pt-1">
+          {mentionedSources.map((source) => (
+            <span
+              key={source.id}
+              className="inline-flex items-center gap-1.5 rounded-full border border-cyan-300/30 bg-cyan-400/12 px-2.5 py-0.5 text-xs font-medium text-cyan-100"
+            >
+              <FileText className="h-3 w-3 shrink-0 text-cyan-300" />
+              <span className="max-w-44 truncate">@{source.filename}</span>
+              <button
+                type="button"
+                onClick={() => handleRemoveMentionedSource(source.id)}
+                className="rounded-full p-0.5 text-cyan-200/75 transition hover:bg-white/10 hover:text-white"
+                aria-label={`Remove ${source.filename} mention`}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
         </div>
       )}
       <div className="flex items-end gap-1.5">
@@ -448,6 +719,21 @@ export function ChatInput({
                     </div>
                   </button>
                 )}
+
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={handleQuickPracticeQuiz}
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-slate-200 transition hover:bg-white/5 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan-300"
+                >
+                  <ListChecks className="h-4 w-4 shrink-0 text-cyan-300" />
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium leading-tight">Practice quiz</div>
+                    <div className="mt-0.5 text-[0.7rem] text-slate-400">
+                      Interactive quiz from sources
+                    </div>
+                  </div>
+                </button>
 
                 <Link
                   href="/library"
@@ -534,42 +820,113 @@ export function ChatInput({
             disabled={disabled}
             aria-label="Ask IntelliSeek about your uploaded material"
             onChange={(event) => {
-              setValue(event.target.value);
+              const nextValue = event.target.value;
+              setValue(nextValue);
+              updateCursor(event.currentTarget);
+              setMentionedSources((current) => syncMentionedSourcesWithText(nextValue, current));
               setSelectedSuggestion(undefined);
               setIsAutocompleteDismissed(false);
               setHighlightedIndex(null);
             }}
+            onClick={(event) => updateCursor(event.currentTarget)}
+            onKeyUp={(event) => {
+              if (
+                event.key === "ArrowDown" ||
+                event.key === "ArrowUp" ||
+                event.key === "Enter" ||
+                event.key === "Escape" ||
+                event.key === "Tab"
+              ) {
+                return;
+              }
+              updateCursor(event.currentTarget);
+            }}
             onKeyDown={(event) => {
-              if (event.key === "Escape" && isAutocompleteOpen) {
+              if (event.key === "Escape" && anyComposerMenuOpen) {
                 event.preventDefault();
                 setIsAutocompleteDismissed(true);
                 return;
               }
 
-              if (event.key === "ArrowDown" && isAutocompleteOpen && matches.length > 0) {
+              if (event.key === "ArrowDown" && anyComposerMenuOpen && activeListLength > 0) {
                 event.preventDefault();
-                setHighlightedIndex((current) => (current === null ? 0 : (current + 1) % matches.length));
+                setHighlightedIndex((current) => {
+                  const base =
+                    current === null
+                      ? isSlashMenuOpen || isMentionMenuOpen
+                        ? 0
+                        : -1
+                      : current;
+                  return (base + 1) % activeListLength;
+                });
                 return;
               }
 
-              if (event.key === "ArrowUp" && isAutocompleteOpen && matches.length > 0) {
+              if (event.key === "ArrowUp" && anyComposerMenuOpen && activeListLength > 0) {
                 event.preventDefault();
                 setHighlightedIndex((current) =>
-                  current === null || current === 0 ? matches.length - 1 : current - 1,
+                  current === null || current === 0 ? activeListLength - 1 : current - 1,
                 );
                 return;
               }
 
+              if (event.key === "Tab" && !event.shiftKey) {
+                if (isSlashMenuOpen && slashMatch && boundedHighlightedIndex !== null) {
+                  const cmd = slashMatch.matches[boundedHighlightedIndex];
+                  if (cmd) {
+                    event.preventDefault();
+                    selectSlashCommand(cmd);
+                    return;
+                  }
+                }
+                if (isMentionMenuOpen && mentionMatch && boundedHighlightedIndex !== null) {
+                  const source = mentionMatch.matches[boundedHighlightedIndex];
+                  if (source) {
+                    event.preventDefault();
+                    selectFileMention(source);
+                    return;
+                  }
+                }
+              }
+
               if (event.key === "Enter") {
-                if (isAutocompleteOpen && boundedHighlightedIndex !== null && matches[boundedHighlightedIndex] && !event.shiftKey) {
+                const shouldSend = preferences.sendOnEnter
+                  ? !event.shiftKey
+                  : event.ctrlKey || event.metaKey;
+
+                if (isSlashMenuOpen && slashMatch && boundedHighlightedIndex !== null && !event.shiftKey) {
+                  const cmd = slashMatch.matches[boundedHighlightedIndex];
+                  const isExactNoArgMatch =
+                    cmd &&
+                    !cmd.requiresArgs &&
+                    cmd.command.toLowerCase() === value.trim().toLowerCase() &&
+                    shouldSend;
+                  if (cmd && !isExactNoArgMatch) {
+                    event.preventDefault();
+                    selectSlashCommand(cmd);
+                    return;
+                  }
+                }
+
+                if (isMentionMenuOpen && mentionMatch && boundedHighlightedIndex !== null && !event.shiftKey) {
+                  const source = mentionMatch.matches[boundedHighlightedIndex];
+                  if (source) {
+                    event.preventDefault();
+                    selectFileMention(source);
+                    return;
+                  }
+                }
+
+                if (
+                  isAutocompleteOpen &&
+                  boundedHighlightedIndex !== null &&
+                  matches[boundedHighlightedIndex] &&
+                  !event.shiftKey
+                ) {
                   event.preventDefault();
                   selectSuggestion(matches[boundedHighlightedIndex]);
                   return;
                 }
-
-                const shouldSend = preferences.sendOnEnter
-                  ? !event.shiftKey
-                  : event.ctrlKey || event.metaKey;
 
                 if (shouldSend) {
                   event.preventDefault();
@@ -578,7 +935,7 @@ export function ChatInput({
               }
             }}
             className={`block max-h-36 min-h-9 w-full resize-none bg-transparent py-2 text-sm leading-5 text-slate-100 outline-hidden disabled:cursor-not-allowed disabled:opacity-60 ${
-              onOpenUpload ? "px-2" : "pl-3.5 pr-2"
+              hasPlusMenu ? "px-2" : "pl-3.5 pr-2"
             }`}
           />
         </div>
