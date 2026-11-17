@@ -165,7 +165,7 @@ function SignInForm() {
                   <span className="brand-wordmark-primary">
                     Intelli
                   </span>
-                  <span className="ml-1 bg-linear-to-br from-purple-600 to-cyan-600 bg-clip-text text-transparent dark:from-purple-600 dark:to-sky-500">
+                  <span className="brand-wordmark-accent ml-1 bg-clip-text text-transparent">
                     Seek
                   </span>
                 </h1>

@@ -89,23 +89,40 @@ function getQuizStorageKey(quiz: QuizPayload): string {
   return `${QUIZ_PROGRESS_PREFIX}${(hash >>> 0).toString(36)}`;
 }
 
+function parseSelectedAnswers(rawAnswers: unknown, total: number): Record<number, number> {
+  const selectedAnswers: Record<number, number> = {};
+  if (!rawAnswers || typeof rawAnswers !== "object") return selectedAnswers;
+
+  Object.entries(rawAnswers).forEach(([questionIndex, optionIndex]) => {
+    const qIndex = Number(questionIndex);
+    if (
+      Number.isInteger(qIndex) &&
+      qIndex >= 0 &&
+      qIndex < total &&
+      typeof optionIndex === "number" &&
+      Number.isInteger(optionIndex)
+    ) {
+      selectedAnswers[qIndex] = optionIndex;
+    }
+  });
+
+  return selectedAnswers;
+}
+
 function readQuizProgress(key: string, total: number): StoredQuizProgress | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(key);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<StoredQuizProgress>;
-    const selectedAnswers: Record<number, number> = {};
-    if (parsed.selectedAnswers && typeof parsed.selectedAnswers === "object") {
-      Object.entries(parsed.selectedAnswers).forEach(([questionIndex, optionIndex]) => {
-        const qIndex = Number(questionIndex);
-        if (Number.isInteger(qIndex) && qIndex >= 0 && qIndex < total && Number.isInteger(optionIndex)) {
-          selectedAnswers[qIndex] = optionIndex as number;
-        }
-      });
-    }
-    const currentIndex = Number.isInteger(parsed.currentIndex) ? (parsed.currentIndex as number) : 0;
-    return { currentIndex, selectedAnswers, showSummary: parsed.showSummary === true };
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    const record = parsed as Record<string, unknown>;
+    const selectedAnswers = parseSelectedAnswers(record.selectedAnswers, total);
+    const currentIndex =
+      typeof record.currentIndex === "number" && Number.isInteger(record.currentIndex)
+        ? record.currentIndex
+        : 0;
+    return { currentIndex, selectedAnswers, showSummary: record.showSummary === true };
   } catch {
     return null;
   }

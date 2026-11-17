@@ -257,10 +257,7 @@ function handleArrowNavigation(
 ) {
   if (key === "ArrowDown") {
     onChangeHighlightedIndex((current) => {
-      let base = current;
-      if (base === null) {
-        base = hasInitialZero ? 0 : -1;
-      }
+      const base = current ?? (hasInitialZero ? 0 : -1);
       return (base + 1) % activeListLength;
     });
     return;
@@ -445,9 +442,8 @@ function SlashCommandPopover({
   );
 }
 
-function getEmptyMentionMessage(hasAnySources: boolean): string {
-  return hasAnySources ? "No matching files found." : "No uploaded or knowledge-base files yet.";
-}
+const EMPTY_MENTION_NO_MATCH_MESSAGE = "No matching files found.";
+const EMPTY_MENTION_NO_SOURCES_MESSAGE = "No uploaded or knowledge-base files yet.";
 
 function FileMentionRow({
   source,
@@ -503,7 +499,7 @@ function FileMentionListBody({
   if (matches.length === 0) {
     return (
       <p className="px-3 py-3 text-center text-xs text-slate-400">
-        {getEmptyMentionMessage(hasAnySources)}
+        {hasAnySources ? EMPTY_MENTION_NO_MATCH_MESSAGE : EMPTY_MENTION_NO_SOURCES_MESSAGE}
       </p>
     );
   }

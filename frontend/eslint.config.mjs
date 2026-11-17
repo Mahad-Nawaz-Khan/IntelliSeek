@@ -9,6 +9,10 @@ const eslintConfig = defineConfig([
     rules: {
       "react-hooks/set-state-in-effect": "off",
       "react-hooks/preserve-manual-memoization": "off",
+      "jsx-a11y/prefer-tag-over-role": "error",
+      "jsx-a11y/no-static-element-interactions": "error",
+      "jsx-a11y/click-events-have-key-events": "error",
+      "react/no-array-index-key": "error",
     },
   },
   // Override default ignores of eslint-config-next.

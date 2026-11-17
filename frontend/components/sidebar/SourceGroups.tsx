@@ -104,10 +104,6 @@ type SourceGroupItemProps = {
   onDeleteSource?: (sourceId: string) => void;
 };
 
-function getFocusSourceTitle(isFocused: boolean, filename: string): string {
-  return isFocused ? `Focused on ${filename} — click to ask` : `Focus chat on ${filename}`;
-}
-
 function FocusedSourceButton({
   source,
   isFocused,
@@ -119,13 +115,16 @@ function FocusedSourceButton({
 }>) {
   const focusIconClass = isFocused ? "text-cyan-300" : "text-cyan-200/80 group-hover:text-cyan-200";
   const focusTitleClass = isFocused ? "text-xs font-semibold text-cyan-50" : "text-xs font-medium text-slate-200";
+  const focusTitle = isFocused
+    ? `Focused on ${source.filename} — click to ask`
+    : `Focus chat on ${source.filename}`;
 
   return (
     <button
       type="button"
       onClick={() => onSelectSource?.(source)}
       className="flex min-w-0 flex-1 items-center gap-2 text-left"
-      title={getFocusSourceTitle(isFocused, source.filename)}
+      title={focusTitle}
     >
       <FileText className={`h-3.5 w-3.5 shrink-0 transition ${focusIconClass}`} />
       <div className="min-w-0 flex-1">
@@ -255,15 +254,10 @@ function toggleGroupIdInSet(current: Set<string>, groupId: string): Set<string> 
   return next;
 }
 
-function getKnowledgeBaseToggleLabel(includeKnowledgeBase: boolean): string {
-  return includeKnowledgeBase ? "Exclude Knowledge Base from chat AI" : "Include Knowledge Base in chat AI";
-}
-
-function getKnowledgeBaseToggleTitle(includeKnowledgeBase: boolean): string {
-  return includeKnowledgeBase
-    ? "Knowledge Base active in chat (click to turn off)"
-    : "Knowledge Base off (click to enable in chat)";
-}
+const KB_ACTIVE_LABEL = "Exclude Knowledge Base from chat AI";
+const KB_OFF_LABEL = "Include Knowledge Base in chat AI";
+const KB_ACTIVE_TITLE = "Knowledge Base active in chat (click to turn off)";
+const KB_OFF_TITLE = "Knowledge Base off (click to enable in chat)";
 
 type SourceGroupSectionProps = {
   group: KnowledgeSourceGroup;
@@ -335,8 +329,8 @@ function SourceGroupSection({
             type="button"
             role="switch"
             aria-checked={includeKnowledgeBase}
-            aria-label={getKnowledgeBaseToggleLabel(includeKnowledgeBase)}
-            title={getKnowledgeBaseToggleTitle(includeKnowledgeBase)}
+            aria-label={includeKnowledgeBase ? KB_ACTIVE_LABEL : KB_OFF_LABEL}
+            title={includeKnowledgeBase ? KB_ACTIVE_TITLE : KB_OFF_TITLE}
             onClick={onToggleKnowledgeBase}
             className={`relative mr-1 inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 ${trackTone}`}
           >

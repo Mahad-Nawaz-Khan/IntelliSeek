@@ -96,6 +96,11 @@ function withQuizFormatting(prompt: string): string {
   return `${prompt}\n\n${QUIZ_SYSTEM_INSTRUCTIONS}`;
 }
 
+const GENERAL_PROMPTS_BY_SCOPE: Record<Exclude<KnowledgeBaseScopeMode, "selected">, string> = {
+  included: GENERAL_SYSTEM_PROMPT,
+  "personal-only": GENERAL_PERSONAL_ONLY_PROMPT,
+};
+
 function getGroundedInstructions(): string {
   return GROUNDED_SYSTEM_PROMPT;
 }
@@ -104,19 +109,21 @@ function getGroundedQuizInstructions(): string {
   return withQuizFormatting(GROUNDED_SYSTEM_PROMPT);
 }
 
-function getGeneralBasePrompt(includeKnowledgeBase: boolean): string {
-  return includeKnowledgeBase ? GENERAL_SYSTEM_PROMPT : GENERAL_PERSONAL_ONLY_PROMPT;
+function getGeneralAgentInstructions(
+  scopeMode: Exclude<KnowledgeBaseScopeMode, "selected">,
+  promptMode: AnswerPromptMode,
+): string {
+  const base = GENERAL_PROMPTS_BY_SCOPE[scopeMode];
+  return promptMode === "quiz" ? withQuizFormatting(base) : base;
 }
 
-function getGeneralInstructions(includeKnowledgeBase: boolean): string {
-  return getGeneralBasePrompt(includeKnowledgeBase);
-}
-
-function getGeneralQuizInstructions(includeKnowledgeBase: boolean): string {
-  return withQuizFormatting(getGeneralBasePrompt(includeKnowledgeBase));
-}
-
-function resolveScopeMode(includeKnowledgeBase: boolean, hasSelectedDocumentFilter: boolean): KnowledgeBaseScopeMode {
+function resolveScopeMode({
+  includeKnowledgeBase,
+  hasSelectedDocumentFilter,
+}: Readonly<{
+  includeKnowledgeBase: boolean;
+  hasSelectedDocumentFilter: boolean;
+}>): KnowledgeBaseScopeMode {
   if (hasSelectedDocumentFilter) return "selected";
   return includeKnowledgeBase ? "included" : "personal-only";
 }
@@ -256,9 +263,7 @@ async function* streamTextWithFallback(
     while (true) {
       const next = await stream.next();
       if (next.done) return requireAnswer(next.value);
-      if (!emittedDelta) {
-        emittedDelta = true;
-      }
+      emittedDelta = true;
       yield { type: "delta", text: next.value };
     }
   } catch (error) {
@@ -565,7 +570,10 @@ function createAgentRun(
 
   const includeKnowledgeBase = scopeOptions.includeKnowledgeBase !== false;
   const selectedDocumentIds = scopeOptions.selectedDocumentIds;
-  const scopeMode = resolveScopeMode(includeKnowledgeBase, selectedDocumentIds !== undefined);
+  const scopeMode = resolveScopeMode({
+    includeKnowledgeBase,
+    hasSelectedDocumentFilter: selectedDocumentIds !== undefined,
+  });
   const usedChunks: AgentToolChunk[] = [];
 
   const tools = buildKnowledgeAgentTools({
@@ -729,10 +737,10 @@ export async function* streamGeneralAgentAnswer(
   options: { includeKnowledgeBase?: boolean } = {},
 ): AsyncGenerator<AgentAnswerStreamEvent> {
   const includeKnowledgeBase = options.includeKnowledgeBase !== false;
+  const scopeMode: Exclude<KnowledgeBaseScopeMode, "selected"> = includeKnowledgeBase ? "included" : "personal-only";
   const isQuiz = isQuizRequest(question);
-  const instructions = isQuiz
-    ? getGeneralQuizInstructions(includeKnowledgeBase)
-    : getGeneralInstructions(includeKnowledgeBase);
+  const promptMode: AnswerPromptMode = isQuiz ? "quiz" : "standard";
+  const instructions = getGeneralAgentInstructions(scopeMode, promptMode);
   const conversationInput = buildConversationInput(question, conversationContext);
 
   const answer = yield* streamTextWithFallback(

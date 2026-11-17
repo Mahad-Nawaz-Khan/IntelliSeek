@@ -40,6 +40,80 @@ export function getDistanceFromBottom(metrics: ScrollMetrics): number {
   return Math.max(0, metrics.scrollHeight - metrics.currentTop - metrics.clientHeight);
 }
 
+function resolveUpwardScrollTransition(
+  state: ScrollTrackingState,
+  currentTop: number,
+  distanceFromBottom: number,
+): ScrollTransitionResult {
+  return {
+    nextState: {
+      isPinnedToBottom: distanceFromBottom <= UNPIN_BOTTOM_DISTANCE_PX && state.isPinnedToBottom,
+      lastScrollTop: currentTop,
+      downwardScrollDistance: 0,
+      isProgrammaticScrollToBottom: false,
+    },
+    action: "hide",
+  };
+}
+
+function resolveStationaryScrollTransition(
+  state: ScrollTrackingState,
+  currentTop: number,
+  distanceFromBottom: number,
+): ScrollTransitionResult {
+  const reachedBottom = distanceFromBottom <= REPIN_BOTTOM_DISTANCE_PX;
+  const isNearBottom = distanceFromBottom <= SCROLL_TO_BOTTOM_MIN_DISTANCE_PX;
+  return {
+    nextState: {
+      isPinnedToBottom: reachedBottom || state.isPinnedToBottom,
+      lastScrollTop: currentTop,
+      downwardScrollDistance: isNearBottom ? 0 : state.downwardScrollDistance,
+      isProgrammaticScrollToBottom: !reachedBottom && state.isProgrammaticScrollToBottom,
+    },
+    action: isNearBottom ? "hide" : "none",
+  };
+}
+
+function resolveDownwardScrollTransition(
+  state: ScrollTrackingState,
+  currentTop: number,
+  delta: number,
+  distanceFromBottom: number,
+): ScrollTransitionResult {
+  if (distanceFromBottom <= REPIN_BOTTOM_DISTANCE_PX) {
+    return {
+      nextState: {
+        isPinnedToBottom: true,
+        lastScrollTop: currentTop,
+        downwardScrollDistance: 0,
+        isProgrammaticScrollToBottom: false,
+      },
+      action: "hide",
+    };
+  }
+
+  if (state.isProgrammaticScrollToBottom || distanceFromBottom <= SCROLL_TO_BOTTOM_MIN_DISTANCE_PX) {
+    return {
+      nextState: {
+        ...state,
+        lastScrollTop: currentTop,
+        downwardScrollDistance: 0,
+      },
+      action: "hide",
+    };
+  }
+
+  const nextDownwardDistance = state.downwardScrollDistance + delta;
+  return {
+    nextState: {
+      ...state,
+      lastScrollTop: currentTop,
+      downwardScrollDistance: nextDownwardDistance,
+    },
+    action: nextDownwardDistance >= SCROLL_DOWN_TRIGGER_PX ? "show" : "none",
+  };
+}
+
 /**
  * Resolves how the scroll-to-bottom control should respond to a scroll event.
  * The button only appears during deliberate downward movement well above the bottom,
@@ -53,72 +127,10 @@ export function evaluateScrollTransition(
   const delta = metrics.currentTop - state.lastScrollTop;
 
   if (delta < -DIRECTION_JITTER_PX) {
-    return {
-      nextState: {
-        isPinnedToBottom: distanceFromBottom > UNPIN_BOTTOM_DISTANCE_PX ? false : state.isPinnedToBottom,
-        lastScrollTop: metrics.currentTop,
-        downwardScrollDistance: 0,
-        isProgrammaticScrollToBottom: false,
-      },
-      action: "hide",
-    };
+    return resolveUpwardScrollTransition(state, metrics.currentTop, distanceFromBottom);
   }
-
   if (delta <= DIRECTION_JITTER_PX) {
-    const reachedBottom = distanceFromBottom <= REPIN_BOTTOM_DISTANCE_PX;
-    const isNearBottom = distanceFromBottom <= SCROLL_TO_BOTTOM_MIN_DISTANCE_PX;
-    return {
-      nextState: {
-        isPinnedToBottom: reachedBottom ? true : state.isPinnedToBottom,
-        lastScrollTop: metrics.currentTop,
-        downwardScrollDistance: isNearBottom ? 0 : state.downwardScrollDistance,
-        isProgrammaticScrollToBottom: reachedBottom ? false : state.isProgrammaticScrollToBottom,
-      },
-      action: isNearBottom ? "hide" : "none",
-    };
+    return resolveStationaryScrollTransition(state, metrics.currentTop, distanceFromBottom);
   }
-
-  if (distanceFromBottom <= REPIN_BOTTOM_DISTANCE_PX) {
-    return {
-      nextState: {
-        isPinnedToBottom: true,
-        lastScrollTop: metrics.currentTop,
-        downwardScrollDistance: 0,
-        isProgrammaticScrollToBottom: false,
-      },
-      action: "hide",
-    };
-  }
-
-  if (state.isProgrammaticScrollToBottom) {
-    return {
-      nextState: {
-        ...state,
-        lastScrollTop: metrics.currentTop,
-        downwardScrollDistance: 0,
-      },
-      action: "hide",
-    };
-  }
-
-  if (distanceFromBottom <= SCROLL_TO_BOTTOM_MIN_DISTANCE_PX) {
-    return {
-      nextState: {
-        ...state,
-        lastScrollTop: metrics.currentTop,
-        downwardScrollDistance: 0,
-      },
-      action: "hide",
-    };
-  }
-
-  const nextDownwardDistance = state.downwardScrollDistance + delta;
-  return {
-    nextState: {
-      ...state,
-      lastScrollTop: metrics.currentTop,
-      downwardScrollDistance: nextDownwardDistance,
-    },
-    action: nextDownwardDistance >= SCROLL_DOWN_TRIGGER_PX ? "show" : "none",
-  };
+  return resolveDownwardScrollTransition(state, metrics.currentTop, delta, distanceFromBottom);
 }

@@ -84,6 +84,13 @@ The shared Knowledge Base is currently turned off for this request, so only the 
 
 ${STYLE_GUIDE}`;
 
+type GroqKnowledgeScope = "included" | "personal-only";
+
+const GENERAL_PROMPTS_BY_SCOPE: Record<GroqKnowledgeScope, string> = {
+  included: GENERAL_SYSTEM_PROMPT,
+  "personal-only": GENERAL_PERSONAL_ONLY_PROMPT,
+};
+
 function withQuizInstructions(prompt: string): string {
   return `${prompt}\n\n${QUIZ_SYSTEM_INSTRUCTIONS}`;
 }
@@ -96,12 +103,12 @@ function getGroundedQuizSystemPrompt(): string {
   return withQuizInstructions(GROUNDED_SYSTEM_PROMPT);
 }
 
-function getGeneralSystemPrompt(includeKnowledgeBase: boolean): string {
-  return includeKnowledgeBase ? GENERAL_SYSTEM_PROMPT : GENERAL_PERSONAL_ONLY_PROMPT;
+function getGeneralPromptForScope(scope: GroqKnowledgeScope): string {
+  return GENERAL_PROMPTS_BY_SCOPE[scope];
 }
 
-function getGeneralQuizSystemPrompt(includeKnowledgeBase: boolean): string {
-  return withQuizInstructions(getGeneralSystemPrompt(includeKnowledgeBase));
+function getGeneralQuizPromptForScope(scope: GroqKnowledgeScope): string {
+  return withQuizInstructions(GENERAL_PROMPTS_BY_SCOPE[scope]);
 }
 
 function getGroqModel() {
@@ -179,10 +186,8 @@ export async function* streamGroqGeneralAnswer(
   options: { includeKnowledgeBase?: boolean; isQuiz?: boolean } = {},
 ): AsyncGenerator<string, string> {
   const isQuiz = options.isQuiz === true;
-  const includeKnowledgeBase = options.includeKnowledgeBase !== false;
-  const systemPrompt = isQuiz
-    ? getGeneralQuizSystemPrompt(includeKnowledgeBase)
-    : getGeneralSystemPrompt(includeKnowledgeBase);
+  const scope: GroqKnowledgeScope = options.includeKnowledgeBase === false ? "personal-only" : "included";
+  const systemPrompt = isQuiz ? getGeneralQuizPromptForScope(scope) : getGeneralPromptForScope(scope);
   return yield* streamGroqText(
     [
       { role: "system", content: systemPrompt },

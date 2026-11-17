@@ -220,6 +220,128 @@ async function getFallbackTopicRows(
   );
 }
 
+function buildTopicSuggestionMetadata(
+  row: TopicRow,
+  documentIds: string[],
+): AutocompleteSuggestionMetadata | undefined {
+  if (!documentIds.length) return undefined;
+  return {
+    source: "uploaded",
+    kind: "topic",
+    topic: row.topic,
+    topicId: row.id.startsWith("fallback-") ? undefined : row.id,
+    documentIds,
+  };
+}
+
+function appendTopicSuggestions(suggestions: Suggestion[], seen: Set<string>, topicRows: TopicRow[]) {
+  // Four templates per topic row; past ~12 rows the extra suggestions only
+  // inflate the payload — the dropdown shows six, ranked.
+  topicRows.slice(0, 12).forEach((row) => {
+    const topic = normalizeTopicForSuggestion(row.topic);
+    if (!topic || !isUsefulTopic(topic)) return;
+
+    const documentIds = getTopicDocuments(row).map((document) => document.id);
+    const metadata = buildTopicSuggestionMetadata(row, documentIds);
+
+    topicToSuggestions(topic).forEach((value) => {
+      pushUnique(suggestions, seen, {
+        id: `topic-${row.id}-${toAutocompleteId(value)}`,
+        label: value,
+        value,
+        type: "topic",
+        keywords: [topic, row.topic],
+        metadata,
+      });
+    });
+  });
+}
+
+function appendKeyphraseSuggestions(suggestions: Suggestion[], seen: Set<string>, rows: KeyphraseRow[]) {
+  rows.forEach((row) => {
+    const phrase = row.phrase.trim();
+    if (!phrase) return;
+
+    const doc = Array.isArray(row.documents) ? row.documents[0] : row.documents;
+    const metadata: AutocompleteSuggestionMetadata | undefined = doc?.id
+      ? {
+          source: "uploaded",
+          kind: "document",
+          documentId: doc.id,
+        }
+      : undefined;
+
+    const phraseKeywords = [phrase, ...phrase.toLowerCase().split(/\s+/)];
+
+    [
+      `What is ${phrase}?`,
+      `Explain ${phrase}`,
+      `Tell me about ${phrase}`,
+    ].forEach((value) => {
+      pushUnique(suggestions, seen, {
+        id: `kp-${row.id}-${toAutocompleteId(value)}`,
+        label: value,
+        value,
+        type: "topic",
+        keywords: phraseKeywords,
+        metadata,
+      });
+    });
+  });
+}
+
+function appendDocumentSuggestions(suggestions: Suggestion[], seen: Set<string>, documents: DocumentRow[]) {
+  documents.forEach((document) => {
+    [
+      `Summarize ${document.filename}`,
+      `What topics are covered in ${document.filename}?`,
+      `Explain key concepts from ${document.filename}`,
+    ].forEach((value) => {
+      pushUnique(suggestions, seen, {
+        id: `document-${document.id}-${toAutocompleteId(value)}`,
+        label: value,
+        value,
+        type: "document",
+        metadata: {
+          source: "uploaded",
+          kind: "document",
+          documentId: document.id,
+        },
+      });
+    });
+  });
+}
+
+function appendHistoryAndDefaultSuggestions(
+  suggestions: Suggestion[],
+  seen: Set<string>,
+  historyRows: HistoryRow[],
+) {
+  historyRows.forEach((row) => {
+    const historyTokens = row.question
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((t) => t.length >= 2);
+
+    pushUnique(suggestions, seen, {
+      id: `history-${row.id}`,
+      label: row.question,
+      value: row.question,
+      type: "history",
+      keywords: historyTokens,
+    });
+  });
+
+  SUGGESTIONS.forEach((prompt) => {
+    pushUnique(suggestions, seen, {
+      id: `prompt-${toAutocompleteId(prompt)}`,
+      label: prompt,
+      value: prompt,
+      type: "prompt",
+    });
+  });
+}
+
 export async function GET(request: Request) {
   const user = await getAuthenticatedUser();
   if (!user) {
@@ -297,110 +419,10 @@ export async function GET(request: Request) {
   const suggestions: Suggestion[] = [];
   const seen = new Set<string>();
 
-  // Four templates per topic row; past ~12 rows the extra suggestions only
-  // inflate the payload — the dropdown shows six, ranked.
-  topicRows.slice(0, 12).forEach((row) => {
-    const topic = normalizeTopicForSuggestion(row.topic);
-    if (!topic || !isUsefulTopic(topic)) return;
-
-    const topicDocuments = getTopicDocuments(row);
-    const documentIds = topicDocuments.map((document) => document.id);
-    const metadata: AutocompleteSuggestionMetadata | undefined = documentIds.length
-      ? {
-          source: "uploaded",
-          kind: "topic",
-          topic: row.topic,
-          topicId: row.id.startsWith("fallback-") ? undefined : row.id,
-          documentIds,
-        }
-      : undefined;
-
-    topicToSuggestions(topic).forEach((value) => {
-      pushUnique(suggestions, seen, {
-        id: `topic-${row.id}-${toAutocompleteId(value)}`,
-        label: value,
-        value,
-        type: "topic",
-        keywords: [topic, row.topic],
-        metadata,
-      });
-    });
-  });
-
-  ((keyphrasesResult.data ?? []) as KeyphraseRow[]).forEach((row) => {
-    const phrase = row.phrase.trim();
-    if (!phrase) return;
-
-    const doc = Array.isArray(row.documents) ? row.documents[0] : row.documents;
-    const metadata: AutocompleteSuggestionMetadata | undefined = doc?.id
-      ? {
-          source: "uploaded",
-          kind: "document",
-          documentId: doc.id,
-        }
-      : undefined;
-
-    const phraseKeywords = [phrase, ...phrase.toLowerCase().split(/\s+/)];
-
-    [
-      `What is ${phrase}?`,
-      `Explain ${phrase}`,
-      `Tell me about ${phrase}`,
-    ].forEach((value) => {
-      pushUnique(suggestions, seen, {
-        id: `kp-${row.id}-${toAutocompleteId(value)}`,
-        label: value,
-        value,
-        type: "topic",
-        keywords: phraseKeywords,
-        metadata,
-      });
-    });
-  });
-
-  documents.forEach((document) => {
-    [
-      `Summarize ${document.filename}`,
-      `What topics are covered in ${document.filename}?`,
-      `Explain key concepts from ${document.filename}`,
-    ].forEach((value) => {
-      pushUnique(suggestions, seen, {
-        id: `document-${document.id}-${toAutocompleteId(value)}`,
-        label: value,
-        value,
-        type: "document",
-        metadata: {
-          source: "uploaded",
-          kind: "document",
-          documentId: document.id,
-        },
-      });
-    });
-  });
-
-  ((historyResult.data ?? []) as HistoryRow[]).forEach((row) => {
-    const historyTokens = row.question
-      .toLowerCase()
-      .split(/[^a-z0-9]+/)
-      .filter((t) => t.length >= 2);
-
-    pushUnique(suggestions, seen, {
-      id: `history-${row.id}`,
-      label: row.question,
-      value: row.question,
-      type: "history",
-      keywords: historyTokens,
-    });
-  });
-
-  SUGGESTIONS.forEach((prompt) => {
-    pushUnique(suggestions, seen, {
-      id: `prompt-${toAutocompleteId(prompt)}`,
-      label: prompt,
-      value: prompt,
-      type: "prompt",
-    });
-  });
+  appendTopicSuggestions(suggestions, seen, topicRows);
+  appendKeyphraseSuggestions(suggestions, seen, (keyphrasesResult.data ?? []) as KeyphraseRow[]);
+  appendDocumentSuggestions(suggestions, seen, documents);
+  appendHistoryAndDefaultSuggestions(suggestions, seen, (historyResult.data ?? []) as HistoryRow[]);
 
   return Response.json(
     { ok: true, suggestions: suggestions.slice(0, 300) },

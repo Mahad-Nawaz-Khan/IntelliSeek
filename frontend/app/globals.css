@@ -1,5 +1,4 @@
 @import "tailwindcss";
-@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
 
 :root {
   color-scheme: dark;
@@ -29,6 +28,14 @@
 
 :root[data-theme="dark"] .brand-wordmark-primary {
   color: #fff;
+}
+
+.brand-wordmark-accent {
+  background-image: linear-gradient(to bottom right, #9333ea, #0891b2);
+}
+
+:root[data-theme="dark"] .brand-wordmark-accent {
+  background-image: linear-gradient(to bottom right, #9333ea, #0ea5e9);
 }
 
 @theme inline {

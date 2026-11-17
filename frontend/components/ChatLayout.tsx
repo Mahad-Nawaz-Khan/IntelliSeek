@@ -227,11 +227,15 @@ function resolveIncludeKnowledgeBase(
   return workspace ? workspace.includeKnowledgeBase : preferenceValue;
 }
 
-function getRetrievalStatusMessage(
-  isLoading: boolean,
-  hasStartedAnswer: boolean,
-  includeKnowledgeBase: boolean,
-): string {
+function getRetrievalStatusMessage({
+  isLoading,
+  hasStartedAnswer,
+  includeKnowledgeBase,
+}: Readonly<{
+  isLoading: boolean;
+  hasStartedAnswer: boolean;
+  includeKnowledgeBase: boolean;
+}>): string {
   if (isLoading && hasStartedAnswer) {
     return "Writing your answer...";
   }
@@ -732,6 +736,154 @@ function performScrollContainerToBottom(
   bottomRef.current?.scrollIntoView({ behavior });
 }
 
+function clearWindowTimer(timerRef: React.MutableRefObject<number | null>) {
+  if (timerRef.current === null) return;
+  window.clearTimeout(timerRef.current);
+  timerRef.current = null;
+}
+
+function cancelAutoScrollOnUpIntent(params: {
+  scrollStateRef: React.MutableRefObject<ScrollTrackingState>;
+  programmaticTimerRef: React.MutableRefObject<number | null>;
+  hideScrollButton: () => void;
+}) {
+  params.scrollStateRef.current.isPinnedToBottom = false;
+  params.scrollStateRef.current.isProgrammaticScrollToBottom = false;
+  clearWindowTimer(params.programmaticTimerRef);
+  params.hideScrollButton();
+}
+
+function attachProgrammaticScrollEndListener(
+  el: HTMLDivElement | null,
+  scrollStateRef: React.MutableRefObject<ScrollTrackingState>,
+  programmaticTimerRef: React.MutableRefObject<number | null>,
+) {
+  const finishProgrammatic = () => {
+    scrollStateRef.current.isProgrammaticScrollToBottom = false;
+    clearWindowTimer(programmaticTimerRef);
+  };
+  el?.addEventListener("scrollend", finishProgrammatic, { once: true });
+  programmaticTimerRef.current = window.setTimeout(() => {
+    el?.removeEventListener("scrollend", finishProgrammatic);
+    finishProgrammatic();
+  }, PROGRAMMATIC_SCROLL_GRACE_MS);
+}
+
+function syncScrollOnMessagesUpdate(params: {
+  el: HTMLDivElement | null;
+  bottomRef: React.RefObject<HTMLDivElement | null>;
+  messagesLength: number;
+  autoScrollOnStream: boolean;
+  scrollStateRef: React.MutableRefObject<ScrollTrackingState>;
+  programmaticTimerRef: React.MutableRefObject<number | null>;
+  hideScrollButton: () => void;
+}) {
+  if (!params.messagesLength) {
+    params.scrollStateRef.current = createInitialScrollState();
+    clearWindowTimer(params.programmaticTimerRef);
+    params.hideScrollButton();
+    return;
+  }
+  if (!params.autoScrollOnStream || !params.scrollStateRef.current.isPinnedToBottom) {
+    if (!params.el) return;
+    const distanceFromBottom = getDistanceFromBottom({
+      currentTop: params.el.scrollTop,
+      scrollHeight: params.el.scrollHeight,
+      clientHeight: params.el.clientHeight,
+    });
+    if (distanceFromBottom <= SCROLL_TO_BOTTOM_MIN_DISTANCE_PX) {
+      params.hideScrollButton();
+    }
+    return;
+  }
+  if (params.el) {
+    scrollElementImmediatelyToBottom(params.el, params.scrollStateRef);
+  } else {
+    params.bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }
+  params.hideScrollButton();
+}
+
+function processScrollContainerEvent(params: {
+  el: HTMLDivElement | null;
+  scrollStateRef: React.MutableRefObject<ScrollTrackingState>;
+  programmaticTimerRef: React.MutableRefObject<number | null>;
+  hideScrollButton: () => void;
+  showScrollButtonAndScheduleHide: () => void;
+}) {
+  if (!params.el) return;
+  const { nextState, action } = evaluateScrollTransition(params.scrollStateRef.current, {
+    currentTop: params.el.scrollTop,
+    scrollHeight: params.el.scrollHeight,
+    clientHeight: params.el.clientHeight,
+  });
+  params.scrollStateRef.current = nextState;
+
+  if (!nextState.isProgrammaticScrollToBottom) {
+    clearWindowTimer(params.programmaticTimerRef);
+  }
+  if (action === "hide") {
+    params.hideScrollButton();
+  } else if (action === "show") {
+    params.showScrollButtonAndScheduleHide();
+  }
+}
+
+function handleWheelScrollIntent(params: {
+  el: HTMLDivElement | null;
+  deltaY: number;
+  scrollStateRef: React.MutableRefObject<ScrollTrackingState>;
+  programmaticTimerRef: React.MutableRefObject<number | null>;
+  hideScrollButton: () => void;
+}) {
+  if (!params.el || params.el.scrollHeight <= params.el.clientHeight || params.deltaY >= 0) return;
+  cancelAutoScrollOnUpIntent(params);
+}
+
+function handleTouchMoveScrollIntent(params: {
+  el: HTMLDivElement | null;
+  touchStartYRef: React.MutableRefObject<number | null>;
+  currentY: number | undefined;
+  scrollStateRef: React.MutableRefObject<ScrollTrackingState>;
+  programmaticTimerRef: React.MutableRefObject<number | null>;
+  hideScrollButton: () => void;
+}) {
+  const startY = params.touchStartYRef.current;
+  if (!params.el || params.el.scrollHeight <= params.el.clientHeight || startY === null || params.currentY === undefined) {
+    return;
+  }
+  // Finger moving downward scrolls the viewport upward toward earlier messages.
+  if (params.currentY > startY + 4) {
+    cancelAutoScrollOnUpIntent(params);
+  }
+  params.touchStartYRef.current = params.currentY;
+}
+
+function executeScrollToBottom(params: {
+  el: HTMLDivElement | null;
+  bottomRef: React.RefObject<HTMLDivElement | null>;
+  behavior: ScrollBehavior;
+  isInteractingWithButtonRef: React.MutableRefObject<boolean>;
+  scrollStateRef: React.MutableRefObject<ScrollTrackingState>;
+  programmaticTimerRef: React.MutableRefObject<number | null>;
+  hideScrollButton: () => void;
+}) {
+  const isSmooth = params.behavior === "smooth";
+  params.isInteractingWithButtonRef.current = false;
+  params.scrollStateRef.current = {
+    ...params.scrollStateRef.current,
+    isPinnedToBottom: true,
+    downwardScrollDistance: 0,
+    isProgrammaticScrollToBottom: isSmooth,
+  };
+  params.hideScrollButton();
+  performScrollContainerToBottom(params.el, params.bottomRef, params.behavior, params.scrollStateRef);
+  clearWindowTimer(params.programmaticTimerRef);
+  if (isSmooth) {
+    attachProgrammaticScrollEndListener(params.el, params.scrollStateRef, params.programmaticTimerRef);
+  }
+}
+
 function useChatScrollTracking(messages: ChatMessageType[], autoScrollOnStream: boolean) {
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -743,60 +895,50 @@ function useChatScrollTracking(messages: ChatMessageType[], autoScrollOnStream: 
   const isInteractingWithButtonRef = useRef(false);
   const showScrollToBottomRef = useRef(false);
 
-  const clearIdleHideTimer = useCallback(() => {
-    if (hideTimerRef.current !== null) {
-      window.clearTimeout(hideTimerRef.current);
-      hideTimerRef.current = null;
-    }
-  }, []);
-
-  const clearProgrammaticTimer = useCallback(() => {
-    if (programmaticTimerRef.current !== null) {
-      window.clearTimeout(programmaticTimerRef.current);
-      programmaticTimerRef.current = null;
-    }
-  }, []);
-
   const setButtonVisible = useCallback((visible: boolean) => {
     showScrollToBottomRef.current = visible;
     setShowScrollToBottom((current) => (current === visible ? current : visible));
   }, []);
 
   const hideScrollButton = useCallback(() => {
-    clearIdleHideTimer();
+    clearWindowTimer(hideTimerRef);
     scrollStateRef.current.downwardScrollDistance = 0;
     setButtonVisible(false);
-  }, [clearIdleHideTimer, setButtonVisible]);
+  }, [setButtonVisible]);
 
   const scheduleIdleHide = useCallback(() => {
-    clearIdleHideTimer();
+    clearWindowTimer(hideTimerRef);
     if (isInteractingWithButtonRef.current) return;
     hideTimerRef.current = window.setTimeout(() => {
       hideTimerRef.current = null;
       scrollStateRef.current.downwardScrollDistance = 0;
       setButtonVisible(false);
     }, SCROLL_IDLE_HIDE_DELAY_MS);
-  }, [clearIdleHideTimer, setButtonVisible]);
+  }, [setButtonVisible]);
+
+  const showScrollButtonAndScheduleHide = useCallback(() => {
+    setButtonVisible(true);
+    scheduleIdleHide();
+  }, [scheduleIdleHide, setButtonVisible]);
 
   useEffect(() => {
     return () => {
-      clearIdleHideTimer();
-      clearProgrammaticTimer();
+      clearWindowTimer(hideTimerRef);
+      clearWindowTimer(programmaticTimerRef);
     };
-  }, [clearIdleHideTimer, clearProgrammaticTimer]);
+  }, []);
 
   const handleWheel = useCallback(
     (event: React.WheelEvent<HTMLDivElement>) => {
-      const el = scrollContainerRef.current;
-      if (!el || el.scrollHeight <= el.clientHeight) return;
-      if (event.deltaY < 0) {
-        scrollStateRef.current.isPinnedToBottom = false;
-        scrollStateRef.current.isProgrammaticScrollToBottom = false;
-        clearProgrammaticTimer();
-        hideScrollButton();
-      }
+      handleWheelScrollIntent({
+        el: scrollContainerRef.current,
+        deltaY: event.deltaY,
+        scrollStateRef,
+        programmaticTimerRef,
+        hideScrollButton,
+      });
     },
-    [clearProgrammaticTimer, hideScrollButton],
+    [hideScrollButton],
   );
 
   const handleTouchStart = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
@@ -805,120 +947,73 @@ function useChatScrollTracking(messages: ChatMessageType[], autoScrollOnStream: 
 
   const handleTouchMove = useCallback(
     (event: React.TouchEvent<HTMLDivElement>) => {
-      const el = scrollContainerRef.current;
-      const startY = touchStartYRef.current;
-      const currentY = event.touches[0]?.clientY;
-      if (!el || el.scrollHeight <= el.clientHeight || startY === null || currentY === undefined) return;
-      // Finger moving downward scrolls the viewport upward toward earlier messages.
-      if (currentY > startY + 4) {
-        scrollStateRef.current.isPinnedToBottom = false;
-        scrollStateRef.current.isProgrammaticScrollToBottom = false;
-        clearProgrammaticTimer();
-        hideScrollButton();
-      }
-      touchStartYRef.current = currentY;
+      handleTouchMoveScrollIntent({
+        el: scrollContainerRef.current,
+        touchStartYRef,
+        currentY: event.touches[0]?.clientY,
+        scrollStateRef,
+        programmaticTimerRef,
+        hideScrollButton,
+      });
     },
-    [clearProgrammaticTimer, hideScrollButton],
+    [hideScrollButton],
   );
 
   const handleScroll = useCallback(() => {
-    const el = scrollContainerRef.current;
-    if (!el) return;
-    const { nextState, action } = evaluateScrollTransition(scrollStateRef.current, {
-      currentTop: el.scrollTop,
-      scrollHeight: el.scrollHeight,
-      clientHeight: el.clientHeight,
+    processScrollContainerEvent({
+      el: scrollContainerRef.current,
+      scrollStateRef,
+      programmaticTimerRef,
+      hideScrollButton,
+      showScrollButtonAndScheduleHide,
     });
-    scrollStateRef.current = nextState;
-
-    if (!nextState.isProgrammaticScrollToBottom) {
-      clearProgrammaticTimer();
-    }
-
-    if (action === "hide") {
-      hideScrollButton();
-    } else if (action === "show") {
-      setButtonVisible(true);
-      scheduleIdleHide();
-    }
-  }, [clearProgrammaticTimer, hideScrollButton, scheduleIdleHide, setButtonVisible]);
+  }, [hideScrollButton, showScrollButtonAndScheduleHide]);
 
   const scrollToBottom = useCallback(
     (behavior: ScrollBehavior = "smooth") => {
-      isInteractingWithButtonRef.current = false;
-      scrollStateRef.current = {
-        ...scrollStateRef.current,
-        isPinnedToBottom: true,
-        downwardScrollDistance: 0,
-        isProgrammaticScrollToBottom: behavior === "smooth",
-      };
-      hideScrollButton();
-      performScrollContainerToBottom(scrollContainerRef.current, bottomRef, behavior, scrollStateRef);
-
-      clearProgrammaticTimer();
-      if (behavior === "smooth") {
-        const el = scrollContainerRef.current;
-        const finishProgrammatic = () => {
-          scrollStateRef.current.isProgrammaticScrollToBottom = false;
-          clearProgrammaticTimer();
-        };
-        el?.addEventListener("scrollend", finishProgrammatic, { once: true });
-        programmaticTimerRef.current = window.setTimeout(() => {
-          el?.removeEventListener("scrollend", finishProgrammatic);
-          finishProgrammatic();
-        }, PROGRAMMATIC_SCROLL_GRACE_MS);
-      }
+      executeScrollToBottom({
+        el: scrollContainerRef.current,
+        bottomRef,
+        behavior,
+        isInteractingWithButtonRef,
+        scrollStateRef,
+        programmaticTimerRef,
+        hideScrollButton,
+      });
     },
-    [clearProgrammaticTimer, hideScrollButton],
+    [hideScrollButton],
   );
 
-  const handleScrollButtonInteractionChange = useCallback(
-    (interacting: boolean) => {
-      isInteractingWithButtonRef.current = interacting;
-      if (interacting) {
-        clearIdleHideTimer();
-      } else if (showScrollToBottomRef.current && !scrollStateRef.current.isProgrammaticScrollToBottom) {
-        scheduleIdleHide();
-      }
-    },
-    [clearIdleHideTimer, scheduleIdleHide],
-  );
+  const startScrollButtonInteraction = useCallback(() => {
+    isInteractingWithButtonRef.current = true;
+    clearWindowTimer(hideTimerRef);
+  }, []);
+
+  const endScrollButtonInteraction = useCallback(() => {
+    isInteractingWithButtonRef.current = false;
+    if (showScrollToBottomRef.current && !scrollStateRef.current.isProgrammaticScrollToBottom) {
+      scheduleIdleHide();
+    }
+  }, [scheduleIdleHide]);
 
   const pinToBottomForNewTurn = useCallback(() => {
     scrollStateRef.current.isPinnedToBottom = true;
     scrollStateRef.current.isProgrammaticScrollToBottom = false;
-    clearProgrammaticTimer();
+    clearWindowTimer(programmaticTimerRef);
     hideScrollButton();
-  }, [clearProgrammaticTimer, hideScrollButton]);
+  }, [hideScrollButton]);
 
   useEffect(() => {
-    const el = scrollContainerRef.current;
-    if (!messages.length) {
-      scrollStateRef.current = createInitialScrollState();
-      clearProgrammaticTimer();
-      hideScrollButton();
-      return;
-    }
-    if (!autoScrollOnStream || !scrollStateRef.current.isPinnedToBottom) {
-      if (el) {
-        const distanceFromBottom = getDistanceFromBottom({
-          currentTop: el.scrollTop,
-          scrollHeight: el.scrollHeight,
-          clientHeight: el.clientHeight,
-        });
-        if (distanceFromBottom <= SCROLL_TO_BOTTOM_MIN_DISTANCE_PX) {
-          hideScrollButton();
-        }
-      }
-      return;
-    }
-    if (el) {
-      scrollElementImmediatelyToBottom(el, scrollStateRef);
-    } else {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-    hideScrollButton();
-  }, [messages, autoScrollOnStream, clearProgrammaticTimer, hideScrollButton]);
+    syncScrollOnMessagesUpdate({
+      el: scrollContainerRef.current,
+      bottomRef,
+      messagesLength: messages.length,
+      autoScrollOnStream,
+      scrollStateRef,
+      programmaticTimerRef,
+      hideScrollButton,
+    });
+  }, [messages, autoScrollOnStream, hideScrollButton]);
 
   return {
     bottomRef,
@@ -929,7 +1024,8 @@ function useChatScrollTracking(messages: ChatMessageType[], autoScrollOnStream: 
     handleTouchMove,
     handleScroll,
     scrollToBottom,
-    handleScrollButtonInteractionChange,
+    startScrollButtonInteraction,
+    endScrollButtonInteraction,
     pinToBottomForNewTurn,
   };
 }
@@ -2085,11 +2181,13 @@ function DemoRemainingFooter({
 function ScrollToBottomControl({
   isVisible,
   onScroll,
-  onInteractionChange,
+  onInteractionStart,
+  onInteractionEnd,
 }: Readonly<{
   isVisible: boolean;
   onScroll: () => void;
-  onInteractionChange: (interacting: boolean) => void;
+  onInteractionStart: () => void;
+  onInteractionEnd: () => void;
 }>) {
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-full z-10 mb-3 flex justify-center">
@@ -2099,10 +2197,10 @@ function ScrollToBottomControl({
         aria-hidden={!isVisible}
         tabIndex={isVisible ? 0 : -1}
         onClick={onScroll}
-        onMouseEnter={() => onInteractionChange(true)}
-        onMouseLeave={() => onInteractionChange(false)}
-        onFocus={() => onInteractionChange(true)}
-        onBlur={() => onInteractionChange(false)}
+        onMouseEnter={onInteractionStart}
+        onMouseLeave={onInteractionEnd}
+        onFocus={onInteractionStart}
+        onBlur={onInteractionEnd}
         className="chat-scroll-btn flex h-9 w-9 items-center justify-center rounded-full border border-cyan-300/30 bg-slate-950/90 text-cyan-300 shadow-lg shadow-cyan-950/30 backdrop-blur-xl hover:border-cyan-300/60 hover:bg-slate-900 hover:text-cyan-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
         aria-label="Scroll to latest message"
         title="Scroll to latest message"
@@ -2146,7 +2244,8 @@ type ChatComposerSectionProps = {
   hasMessages: boolean;
   showScrollToBottom: boolean;
   scrollToBottom: (behavior?: ScrollBehavior) => void;
-  onScrollButtonInteractionChange: (interacting: boolean) => void;
+  onScrollButtonInteractionStart: () => void;
+  onScrollButtonInteractionEnd: () => void;
   hasReachedLimit: boolean;
   remaining: number;
   autocompleteSuggestions: AutocompleteSuggestion[];
@@ -2183,7 +2282,8 @@ function ChatComposerSection({
   hasMessages,
   showScrollToBottom,
   scrollToBottom,
-  onScrollButtonInteractionChange,
+  onScrollButtonInteractionStart,
+  onScrollButtonInteractionEnd,
   hasReachedLimit,
   remaining,
   autocompleteSuggestions,
@@ -2226,7 +2326,8 @@ function ChatComposerSection({
           <ScrollToBottomControl
             isVisible={showScrollToBottom}
             onScroll={() => scrollToBottom("smooth")}
-            onInteractionChange={onScrollButtonInteractionChange}
+            onInteractionStart={onScrollButtonInteractionStart}
+            onInteractionEnd={onScrollButtonInteractionEnd}
           />
         )}
         {isDemoMode && hasReachedLimit && <DemoLimitBanner onOpenSignup={onOpenSignupModal} />}
@@ -2324,7 +2425,8 @@ type ChatSurfaceViewProps = {
   includeKnowledgeBase: boolean;
   showScrollToBottom: boolean;
   scrollToBottom: (behavior?: ScrollBehavior) => void;
-  onScrollButtonInteractionChange: (interacting: boolean) => void;
+  onScrollButtonInteractionStart: () => void;
+  onScrollButtonInteractionEnd: () => void;
   hasReachedLimit: boolean;
   remaining: number;
   autocompleteSuggestions: AutocompleteSuggestion[];
@@ -2381,7 +2483,8 @@ function ChatSurfaceView({
   includeKnowledgeBase,
   showScrollToBottom,
   scrollToBottom,
-  onScrollButtonInteractionChange,
+  onScrollButtonInteractionStart,
+  onScrollButtonInteractionEnd,
   hasReachedLimit,
   remaining,
   autocompleteSuggestions,
@@ -2463,7 +2566,8 @@ function ChatSurfaceView({
                 hasMessages={messages.length > 0}
                 showScrollToBottom={showScrollToBottom}
                 scrollToBottom={scrollToBottom}
-                onScrollButtonInteractionChange={onScrollButtonInteractionChange}
+                onScrollButtonInteractionStart={onScrollButtonInteractionStart}
+                onScrollButtonInteractionEnd={onScrollButtonInteractionEnd}
                 hasReachedLimit={hasReachedLimit}
                 remaining={remaining}
                 autocompleteSuggestions={autocompleteSuggestions}
@@ -2647,11 +2751,11 @@ function ChatLayoutCore({ mode, embedded }: Readonly<ChatLayoutCoreProps>) {
     [activeSessionId, recentSessionRows],
   );
 
-  const retrievalMessage = getRetrievalStatusMessage(
+  const retrievalMessage = getRetrievalStatusMessage({
     isLoading,
-    hasAssistantStartedAnswer(messages),
+    hasStartedAnswer: hasAssistantStartedAnswer(messages),
     includeKnowledgeBase,
-  );
+  });
 
   const filteredServerAutocompleteSuggestions = useMemo(
     () =>
@@ -2786,7 +2890,8 @@ function ChatLayoutCore({ mode, embedded }: Readonly<ChatLayoutCoreProps>) {
       includeKnowledgeBase={includeKnowledgeBase}
       showScrollToBottom={scrollTracking.showScrollToBottom}
       scrollToBottom={scrollTracking.scrollToBottom}
-      onScrollButtonInteractionChange={scrollTracking.handleScrollButtonInteractionChange}
+      onScrollButtonInteractionStart={scrollTracking.startScrollButtonInteraction}
+      onScrollButtonInteractionEnd={scrollTracking.endScrollButtonInteraction}
       hasReachedLimit={hasReachedLimit}
       remaining={remaining}
       autocompleteSuggestions={autocompleteSuggestions}

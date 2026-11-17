@@ -8,7 +8,9 @@
 
 const DEFINITION_PATTERNS = [
   /(?:^|\.\s+)([A-Z][a-z]+(?:\s+[A-Za-z]+){0,4})\s+(?:is|are|was|were)\s/gm,
-  /(?:^|\.\s+)([A-Z][a-z]+(?:\s+[A-Za-z]+){0,4})\s+(?:refers?\s+to|means?|denotes?)\s/gm,
+  /(?:^|\.\s+)([A-Z][a-z]+(?:\s+[A-Za-z]+){0,4})\s+refers?\s+to\s/gm,
+  /(?:^|\.\s+)([A-Z][a-z]+(?:\s+[A-Za-z]+){0,4})\s+means?\s/gm,
+  /(?:^|\.\s+)([A-Z][a-z]+(?:\s+[A-Za-z]+){0,4})\s+denotes?\s/gm,
   /(?:^|\.\s+)(?:The\s+)?([A-Z][a-z]+(?:\s+[A-Za-z]+){0,3})\s*[:—–]\s/gm,
 ];
 

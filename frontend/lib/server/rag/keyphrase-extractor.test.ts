@@ -14,5 +14,20 @@ describe("keyphrase-extractor", () => {
 
     expect(phrases.some((p) => p.includes("binary search tree") || p.includes("acid"))).toBe(true);
   });
+
+  it("extracts refers-to, means, and denotes definition patterns cleanly", () => {
+    const chunks = [
+      "Hash Table refers to an associative data structure. Memoization means caching computed subproblem outputs. Asymptotic Bound denotes limiting runtime growth.",
+    ];
+
+    const keyphrases = extractKeyphrases(chunks);
+    const definitions = keyphrases
+      .filter((k) => k.source === "definition")
+      .map((k) => k.phrase.toLowerCase());
+
+    expect(definitions).toContain("hash table");
+    expect(definitions).toContain("memoization");
+    expect(definitions).toContain("asymptotic bound");
+  });
 });
 
